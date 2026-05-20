@@ -11,3 +11,4 @@ config.yaml
 research-output/
 pdf-demo/
 .env
+webui-test/

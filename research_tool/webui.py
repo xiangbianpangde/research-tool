@@ -253,6 +253,7 @@ def build_ui():
                 work_dir,
             ],
             outputs=[log_box, report_md, files, out_dir_box],
+            api_name="run",
         )
     return app
 
