@@ -25,6 +25,8 @@ crawl = ["crawl4ai>=0.4"]
 search = ["ddgs>=6.0", "arxiv>=2.1", "tavily-python>=0.5"]
 # PDF 摄取（pdf2zh / MinerU 集成）—— 重依赖（~7GB 含模型）
 pdf = ["mineru>=2.0"]
+# 可视化 Web 界面
+ui = ["gradio>=4.0"]
 # 全部
 all = [
     "crawl4ai>=0.4",

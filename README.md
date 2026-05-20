@@ -24,11 +24,21 @@ topic ─→ Collect ─→ Clean ─→ Extract ─→ Organize ─→ Report �
 `tavily_api_key`。之后是菜单：
 
 ```
-1. 网页调研   输入主题 → 自动搜索→清洗→知识树→报告
-2. PDF 调研   选本地 PDF 文件夹 → MinerU 解析（可选翻译）→报告
-3. 查看进度   某主题做到哪一步
-4. 高级命令行 手动敲 research ...
+1. 可视化界面  浏览器图形界面（推荐）
+2. 网页调研    输入主题 → 自动搜索→清洗→知识树→报告
+3. PDF 调研    选本地 PDF 文件夹 → MinerU 解析（可选翻译）→报告
+4. 查看进度    某主题做到哪一步
+5. 高级命令行  手动敲 research ...
 ```
+
+### 可视化界面（Gradio）
+
+```bash
+pip install -e ".[ui]"   # 或 pip install gradio
+research ui              # 浏览器打开 http://127.0.0.1:7861
+```
+
+左栏选「网页调研 / PDF 调研」、填主题与选项，右栏实时看进度、读报告、下载知识树文件。
 
 `.env` 示例（放在仓库上级或用户目录）：
 ```

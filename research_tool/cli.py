@@ -372,6 +372,21 @@ def status(path: Path = typer.Argument(..., help="主题目录")) -> None:
 # config
 # --------------------------------------------------------------------------- #
 @app.command()
+def ui(
+    port: int = typer.Option(7861, "--port", help="Web 界面端口"),
+    no_browser: bool = typer.Option(False, "--no-browser", help="不自动打开浏览器"),
+) -> None:
+    """启动可视化 Web 界面（Gradio）。"""
+    try:
+        from .webui import main as ui_main
+    except ImportError:
+        _fail("未安装 Web 界面依赖，请先：pip install \"research-tool[ui]\"（或 pip install gradio）")
+        return
+    _log(f"启动 Web 界面：http://127.0.0.1:{port}")
+    ui_main(server_port=port, inbrowser=not no_browser)
+
+
+@app.command()
 def config() -> None:
     """显示当前解析后的配置。"""
     try:

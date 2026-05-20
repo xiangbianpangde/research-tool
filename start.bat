@@ -24,8 +24,8 @@ if not exist ".venv\Scripts\research.exe" (
     if not exist ".venv\Scripts\python.exe" python -m venv .venv
     call ".venv\Scripts\activate.bat"
     python -m pip install -U pip >nul
-    echo   安装 research-tool + 搜索后端 + LLM 客户端...
-    pip install -e ".[search]" openai
+    echo   安装 research-tool + 搜索后端 + Web 界面 + LLM 客户端...
+    pip install -e ".[search,ui]" openai
     if errorlevel 1 ( echo [错误] 依赖安装失败 & pause & exit /b 1 )
     echo [完成] 安装成功。
     echo.
@@ -64,21 +64,30 @@ set "MINERU=C:\Users\yhn\pdf2zh\.venv\Scripts\mineru.exe"
 :menu
 echo.
 echo ------------------------------------------------------------
-echo   1. 网页调研   （输入主题，自动搜索→报告）
-echo   2. PDF 调研    （选本地 PDF 文件夹，MinerU 解析→报告）
-echo   3. 查看进度    （某主题做到哪一步了）
-echo   4. 高级命令行  （手动敲 research ...）
+echo   1. 可视化界面  （推荐，浏览器里点点就行）
+echo   2. 网页调研     （命令行：输入主题，自动搜索→报告）
+echo   3. PDF 调研     （命令行：本地 PDF 文件夹，MinerU 解析→报告）
+echo   4. 查看进度     （某主题做到哪一步了）
+echo   5. 高级命令行   （手动敲 research ...）
 echo   0. 退出
 echo ------------------------------------------------------------
 set "choice="
-set /p choice=请选择 [1/2/3/4/0]:
+set /p choice=请选择 [1/2/3/4/5/0]:
 
-if "%choice%"=="1" goto web
-if "%choice%"=="2" goto pdf
-if "%choice%"=="3" goto status
-if "%choice%"=="4" goto shell
+if "%choice%"=="1" goto webui
+if "%choice%"=="2" goto web
+if "%choice%"=="3" goto pdf
+if "%choice%"=="4" goto status
+if "%choice%"=="5" goto shell
 if "%choice%"=="0" goto end
 echo 无效选择。& goto menu
+
+:webui
+echo.
+echo 启动可视化界面，浏览器将自动打开 http://127.0.0.1:7861
+echo （回到菜单：在本窗口按 Ctrl+C 停止服务）
+research ui
+pause & goto menu
 
 :web
 echo.
