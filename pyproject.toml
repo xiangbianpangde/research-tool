@@ -1,0 +1,43 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "research-tool"
+version = "0.1.0"
+description = "一个 Python 核心引擎 + 多接口层的调研工具：给定主题 → 产出知识树/报告"
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+dependencies = [
+    "pydantic>=2.6",
+    "pyyaml>=6.0",
+    "httpx>=0.27",
+    "typer>=0.12",
+    "rich>=13.7",
+    "pypinyin>=0.51",
+]
+
+[project.optional-dependencies]
+# 重量级抓取：Crawl4AI（按架构设计 07）。安装后需执行 `crawl4ai-setup` 装浏览器。
+crawl = ["crawl4ai>=0.4"]
+# 搜索后端
+search = ["ddgs>=6.0", "arxiv>=2.1", "tavily-python>=0.5"]
+# 全部
+all = [
+    "crawl4ai>=0.4",
+    "ddgs>=6.0",
+    "arxiv>=2.1",
+    "tavily-python>=0.5",
+]
+dev = ["pytest>=8.0", "pytest-asyncio>=0.23"]
+
+[project.scripts]
+research = "research_tool.cli:app"
+
+[tool.hatch.build.targets.wheel]
+packages = ["research_tool"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]

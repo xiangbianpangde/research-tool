@@ -1,0 +1,66 @@
+# ============================================================
+# 调研工具配置文件（示例）—— 复制为 config.yaml 后修改
+# 依据：04-配置结构设计.md
+# ============================================================
+
+# LLM 配置（必填）。默认 DeepSeek（OpenAI 兼容）。
+llm:
+  provider: deepseek            # openai | deepseek | ollama | anthropic
+  model: deepseek-chat          # 模型名
+  api_key: ${DEEPSEEK_API_KEY}  # 支持 ${ENV_VAR} 环境变量引用
+  base_url: https://api.deepseek.com/v1  # DeepSeek endpoint；OpenAI 留 null
+  temperature: 0.3
+  max_tokens: 4096
+
+# Collector 配置
+collector:
+  search_engines:               # web(=duckduckgo) | arxiv | tavily
+    - web
+    - arxiv
+  max_results_per_engine: 8
+  depth: 2                       # 1=仅搜索 2=打开结果页 3=追踪二级链接
+  language: both                 # zh | en | both
+  concurrency: 4
+  timeout_sec: 30
+  tavily_api_key: ${TAVILY_API_KEY}  # 仅 search_engines 含 tavily 时需要
+
+# Cleaner 配置
+cleaner:
+  strip_html: true
+  strip_nav: true
+  strip_ads: true
+  find_content_start: true
+  min_content_length: 200
+
+# Extractor 配置
+extractor:
+  enabled: true                  # false=跳过抽取，Organizer 直接吃 clean 文本
+  tasks:
+    - ner
+    - triple
+  entity_types: null             # null=自动归纳 Schema
+  relation_types: null
+  chunk_size: 4000
+  overlap: 200
+
+# Organizer 配置
+organizer:
+  max_nodes: 7
+  min_nodes: 4
+
+# Reporter 配置
+reporter:
+  format: markdown               # markdown | html
+  style: report                  # report | feasibility | review | article
+  max_length: 20000
+
+# Pipeline 配置
+pipeline:
+  work_dir: ./research-output
+  stages:
+    - collect
+    - clean
+    - extract
+    - organize
+    - report
+  resume: true
