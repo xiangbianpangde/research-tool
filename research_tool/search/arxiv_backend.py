@@ -45,6 +45,9 @@ class ArxivBackend(SearchBackend):
     async def search(
         self, query: str, max_results: int, language: str = "both"
     ) -> list[SearchHit]:
+        from .cache import arxiv_throttle
+
+        await arxiv_throttle()  # 进程级最小请求间隔，缓解 429
         try:
             return await asyncio.to_thread(self._search_sync, query, max_results)
         except SearchError:
