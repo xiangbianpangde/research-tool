@@ -45,11 +45,14 @@ def domain_of(url: str) -> str:
     return host or "unknown"
 
 
-_SAFE = re.compile(r"[^a-z0-9.\-]+")
+# 仅替换文件系统非法字符与空白，保留中文/字母/数字/点/下划线/连字符，
+# 这样中文 PDF 落地为 01-离散数学.md 而非 01-file.md。
+_ILLEGAL_FS = re.compile(r'[\\/:*?"<>|\x00-\x1f\s]+')
 
 
 def safe_filename(name: str) -> str:
-    return _SAFE.sub("-", name.lower()).strip("-") or "file"
+    cleaned = _ILLEGAL_FS.sub("-", name).strip("-. ").lower()
+    return cleaned or "file"
 
 
 def has_output(directory: Path, patterns: list[str]) -> bool:
