@@ -120,6 +120,30 @@ def _apply_env_overrides(data: dict) -> dict:
     return data
 
 
+# provider → 默认读取的 API Key 环境变量（04 §2）
+_PROVIDER_KEY_ENV = {
+    "deepseek": "DEEPSEEK_API_KEY",
+    "openai": "OPENAI_API_KEY",
+    "ollama": "OPENAI_API_KEY",
+    "anthropic": "ANTHROPIC_API_KEY",
+}
+
+
+def _apply_secret_env(data: dict) -> dict:
+    """未显式配置 api_key 时，按 provider 从环境变量补齐，实现零 config.yaml 启动。"""
+    llm = data.setdefault("llm", {})
+    if not llm.get("api_key"):
+        provider = llm.get("provider", "deepseek")
+        env_name = _PROVIDER_KEY_ENV.get(provider)
+        if env_name and os.environ.get(env_name):
+            llm["api_key"] = os.environ[env_name]
+    if os.environ.get("TAVILY_API_KEY"):
+        col = data.setdefault("collector", {})
+        if not col.get("tavily_api_key"):
+            col["tavily_api_key"] = os.environ["TAVILY_API_KEY"]
+    return data
+
+
 def load_config(
     path: str | Path | None = None,
     *,
@@ -143,6 +167,7 @@ def load_config(
 
     data = _flatten_to_pipeline(raw)
     data = _apply_env_overrides(data)
+    data = _apply_secret_env(data)
     if overrides:
         data = _deep_merge(data, overrides)
 

@@ -17,7 +17,30 @@ topic ─→ Collect ─→ Clean ─→ Extract ─→ Organize ─→ Report �
 | Organize | LLM 构建 4–7 节点知识树（S1–S4） | `tree/00-主表.md` + `N*.md` |
 | Report | LLM 合成报告（report/feasibility/review/article） | `report.md` |
 
-## 安装
+## 一键启动（Windows，推荐）
+
+双击 **`start.bat`** 即可。首次运行自动建 `.venv`、装依赖（2-5 分钟），并从
+`.env`（脚本目录 / 上级目录 / 用户目录任一）读取 `deepseek_api_key`、
+`tavily_api_key`。之后是菜单：
+
+```
+1. 网页调研   输入主题 → 自动搜索→清洗→知识树→报告
+2. PDF 调研   选本地 PDF 文件夹 → MinerU 解析（可选翻译）→报告
+3. 查看进度   某主题做到哪一步
+4. 高级命令行 手动敲 research ...
+```
+
+`.env` 示例（放在仓库上级或用户目录）：
+```
+deepseek_api_key=sk-xxxx
+tavily_api_key=tvly-xxxx
+```
+没有 `.env` 时脚本会提示输入 DeepSeek Key 并保存。PDF 模式默认调用
+`C:\Users\<你>\pdf2zh\.venv\Scripts\mineru.exe`，找不到会让你输入路径。
+
+---
+
+## 安装（手动 / 非 Windows）
 
 ```bash
 cd research-tool

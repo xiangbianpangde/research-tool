@@ -36,6 +36,23 @@ def test_invalid_provider(tmp_path):
         load_config(p)
 
 
+def test_api_key_from_env_by_provider(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv("RESEARCH_CONFIG", raising=False)
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "sk-ds")
+    monkeypatch.setenv("TAVILY_API_KEY", "tvly-x")
+    cfg = load_config()  # 无 config.yaml，纯环境变量
+    assert cfg.llm.api_key == "sk-ds"
+    assert cfg.collector.tavily_api_key == "tvly-x"
+
+
+def test_explicit_key_beats_env(tmp_path, monkeypatch):
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "sk-env")
+    p = _write(tmp_path, "llm:\n  provider: deepseek\n  api_key: sk-explicit\n")
+    cfg = load_config(p)
+    assert cfg.llm.api_key == "sk-explicit"
+
+
 def test_defaults_when_no_file(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     monkeypatch.delenv("RESEARCH_CONFIG", raising=False)
