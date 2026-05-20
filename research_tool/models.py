@@ -53,6 +53,22 @@ class CollectorConfig(BaseModel):
     cache_ttl_sec: int = Field(default=86400, ge=0)  # 缓存有效期，0=永不过期
 
 
+class PdfIngestConfig(BaseModel):
+    """PDF 摄取配置（pdf2zh/MinerU 集成）。"""
+
+    mineru_backend: Literal[
+        "pipeline", "vlm-auto-engine", "hybrid-auto-engine",
+        "vlm-http-client", "hybrid-http-client",
+    ] = "pipeline"
+    ocr_lang: str = "en"            # MinerU OCR 语言提示
+    mineru_cmd: str | None = None   # 自定义 mineru 可执行路径（默认走 PATH）
+    start_page: int | None = None
+    end_page: int | None = None
+    translate: bool = False         # 是否把英文 MD 翻译成中文（可选）
+    translate_chunk_size: int = Field(default=3000, gt=0)
+    translate_concurrency: int = Field(default=8, gt=0)
+
+
 class CleanerConfig(BaseModel):
     """清洗配置。依据 01 §3.3 + 04 cleaner 段。"""
 
@@ -107,6 +123,8 @@ class PipelineConfig(BaseModel):
         default_factory=lambda: ["collect", "clean", "extract", "organize", "report"]
     )
     collector: CollectorConfig = Field(default_factory=CollectorConfig)
+    pdf_ingest: PdfIngestConfig = Field(default_factory=PdfIngestConfig)
+    pdf_dir: str | None = None  # 设置后 collect 阶段改为摄取该目录下的 PDF
     cleaner: CleanerConfig = Field(default_factory=CleanerConfig)
     extractor: ExtractorConfig = Field(default_factory=ExtractorConfig)
     organizer: OrganizerConfig = Field(default_factory=OrganizerConfig)

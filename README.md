@@ -63,6 +63,32 @@ research config                                       # 查看解析后的配置
 research run "X" --skip extract --no-resume           # 跳过抽取/不跳过已完成
 ```
 
+## 从 PDF 调研（pdf2zh / MinerU 集成）
+
+把一文件夹学术 PDF 直接综述成知识树 + 报告。PDF 经 MinerU 解析为 Markdown
+（保留公式/表格/图引用），可选用 LLM 翻成中文，再走 clean→extract→organize→report。
+
+```bash
+pip install -e ".[pdf]"   # 安装 MinerU（重依赖，~7GB 含模型），或复用 pdf2zh 的 .venv
+
+# 仅摄取：PDF 文件夹 → raw/（可选 --translate 译中文）
+research ingest-pdf ./papers -T "扩散模型综述" --translate
+
+# 一键：PDF 文件夹 → 中文知识树 + 报告（collect 阶段改为 PDF 摄取）
+research run "扩散模型综述" --pdf-dir ./papers --translate --skip extract
+```
+
+未把 mineru 装到全局时，用 `--mineru-cmd` 指向 pdf2zh 虚拟环境里的可执行：
+`--mineru-cmd "C:\path\to\pdf2zh\.venv\Scripts\mineru.exe"`。
+
+SDK：
+
+```python
+from research_tool import ingest_pdfs, PdfIngestConfig, translate_markdown
+result = await ingest_pdfs("./papers", "./out/topic",
+                           PdfIngestConfig(translate=True), llm)
+```
+
 ## Python SDK
 
 ```python

@@ -103,10 +103,24 @@ class ResearchPipeline:
         self, stage: str, topic: str, topic_dir: Path, result: PipelineResult
     ) -> None:
         if stage == "collect":
-            llm = self._get_llm() if self.config.collector.llm_query_expansion else None
-            result.collect_result = await Collector(self.config.collector, llm).run(
-                topic, topic_dir
-            )
+            if self.config.pdf_dir:
+                # PDF 数据源：摄取本地 PDF 文件夹替代 Web 采集
+                from .ingest import PdfIngestor
+
+                pcfg = self.config.pdf_ingest
+                llm = self._get_llm() if pcfg.translate else None
+                result.collect_result = await PdfIngestor(pcfg, llm).run(
+                    self.config.pdf_dir, topic_dir
+                )
+            else:
+                llm = (
+                    self._get_llm()
+                    if self.config.collector.llm_query_expansion
+                    else None
+                )
+                result.collect_result = await Collector(self.config.collector, llm).run(
+                    topic, topic_dir
+                )
         elif stage == "clean":
             result.clean_result = Cleaner(self.config.cleaner).process(
                 topic_dir / "raw", topic_dir

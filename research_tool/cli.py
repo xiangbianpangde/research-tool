@@ -24,6 +24,7 @@ from .models import (
     CollectorConfig,
     ExtractorConfig,
     OrganizerConfig,
+    PdfIngestConfig,
     ReporterConfig,
 )
 from .pipeline import ResearchPipeline
@@ -126,6 +127,38 @@ def collect(
             return
         res = await c.run(topic, topic_dir)
         _log(f"采集完成：{len(res.files)} 个文件 → {res.raw_dir}")
+
+    _run(_go())
+
+
+# --------------------------------------------------------------------------- #
+# ingest-pdf（pdf2zh / MinerU 集成：本地 PDF → raw/）
+# --------------------------------------------------------------------------- #
+@app.command(name="ingest-pdf")
+def ingest_pdf(
+    pdf_path: Path = typer.Argument(..., help="PDF 文件或文件夹"),
+    topic: str = typer.Option(..., "-T", "--topic", help="调研主题（决定输出子目录）"),
+    output: Path = typer.Option(Path("./research-output"), "-o", "--output"),
+    backend: str = typer.Option("pipeline", "-b", "--backend", help="MinerU 后端"),
+    lang: str = typer.Option("en", "-l", "--lang", help="OCR 语言提示"),
+    translate: bool = typer.Option(False, "--translate", help="把英文 MD 译成中文"),
+    mineru_cmd: Optional[str] = typer.Option(None, "--mineru-cmd", help="mineru 可执行路径"),
+    model: Optional[str] = typer.Option(None, "--model", help="翻译用 LLM 模型"),
+) -> None:
+    """用 MinerU 把本地 PDF 转为 raw/ Markdown（可选翻译），供后续阶段接力。"""
+    from .ingest import PdfIngestor
+
+    cfg = PdfIngestConfig(
+        mineru_backend=backend, ocr_lang=lang, translate=translate, mineru_cmd=mineru_cmd
+    )
+    topic_dir = output / slugify(topic)
+
+    async def _go():
+        llm = _make_llm(model) if translate else None
+        res = await PdfIngestor(cfg, llm).run(pdf_path, topic_dir)
+        _log(f"PDF 摄取完成：{len(res.files)} 个文件 → {res.raw_dir}")
+        if translate:
+            _log("（已翻译为中文）")
 
     _run(_go())
 
@@ -249,13 +282,17 @@ def run(
     max_results: int = typer.Option(8, "-n", "--max-results"),
     rounds: int = typer.Option(1, "-r", "--rounds", help="搜索轮次 1-3"),
     llm_expand: bool = typer.Option(False, "--llm-expand", help="用 LLM 生成多轮查询"),
+    pdf_dir: Optional[Path] = typer.Option(
+        None, "--pdf-dir", help="改用本地 PDF 文件夹作为数据源（MinerU 解析）"
+    ),
+    translate: bool = typer.Option(False, "--translate", help="PDF 英文 MD 译成中文"),
     output: Path = typer.Option(Path("./research-output"), "-o", "--output"),
     skip: list[str] = typer.Option([], "--skip", help="跳过的阶段"),
     resume: bool = typer.Option(True, "--resume/--no-resume"),
     model: Optional[str] = typer.Option(None, "--model"),
     dry_run: bool = typer.Option(False, "--dry-run", help="仅打印将执行的步骤"),
 ) -> None:
-    """一键全流程：collect → clean → extract → organize → report。"""
+    """一键全流程：collect/PDF摄取 → clean → extract → organize → report。"""
     all_stages = ["collect", "clean", "extract", "organize", "report"]
     stages = [s for s in all_stages if s not in skip]
 
@@ -275,6 +312,9 @@ def run(
             "llm_query_expansion": llm_expand,
         },
     }
+    if pdf_dir:
+        overrides["pdf_dir"] = str(pdf_dir)
+        overrides["pdf_ingest"] = {"translate": translate}
     if model:
         overrides["llm"] = {"model": model}
 

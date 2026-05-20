@@ -25,14 +25,17 @@ from .models import (
     ExtractResult,
     OrganizerConfig,
     OrganizeResult,
+    PdfIngestConfig,
     PipelineConfig,
     PipelineResult,
     ReporterConfig,
     ReportResult,
     StageEvent,
 )
+from .ingest import PdfIngestor, ingest_pdfs
 from .pipeline import ResearchPipeline, create_pipeline
 from .stages import Cleaner, Collector, Extractor, Organizer, Reporter
+from .translate import translate_markdown
 
 __version__ = "0.1.0"
 
@@ -47,6 +50,10 @@ __all__ = [
     "Extractor",
     "Organizer",
     "Reporter",
+    "PdfIngestor",
+    "ingest_pdfs",
+    "translate_markdown",
+    "PdfIngestConfig",
     "CollectorConfig",
     "CleanerConfig",
     "ExtractorConfig",
