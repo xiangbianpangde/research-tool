@@ -382,7 +382,6 @@ def ui(
     except ImportError:
         _fail("未安装 Web 界面依赖，请先：pip install \"research-tool[ui]\"（或 pip install gradio）")
         return
-    _log(f"启动 Web 界面：http://127.0.0.1:{port}")
     ui_main(server_port=port, inbrowser=not no_browser)
 
 

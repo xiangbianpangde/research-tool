@@ -258,11 +258,31 @@ def build_ui():
     return app
 
 
+def _resolve_port(preferred: int) -> int:
+    """返回一个可用端口。优先用指定端口；不可用时让操作系统分配一个
+    保证空闲、且不在 Windows 保留段内的端口（bind 到 0）。"""
+    import socket
+
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        try:
+            s.bind(("127.0.0.1", preferred))
+            return preferred
+        except OSError:
+            pass
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        s.bind(("127.0.0.1", 0))  # 0 = 由 OS 选一个空闲端口
+        return s.getsockname()[1]
+
+
 def main(server_port: int = 7861, inbrowser: bool = True) -> None:
     _load_env()
     app = build_ui()
+    port = _resolve_port(server_port)
+    if port != server_port:
+        print(f"端口 {server_port} 不可用（可能被系统保留），改用 {port}")
+    print(f"Web 界面: http://127.0.0.1:{port}")
     # 默认只绑本机，避免把 API Key 暴露到公网
-    app.launch(server_name="127.0.0.1", server_port=server_port, inbrowser=inbrowser)
+    app.launch(server_name="127.0.0.1", server_port=port, inbrowser=inbrowser)
 
 
 if __name__ == "__main__":

@@ -88,7 +88,8 @@ echo Invalid choice.& goto menu
 
 :webui
 echo.
-echo Starting Web UI, browser opens http://127.0.0.1:7861
+echo Starting Web UI. The browser opens automatically; the actual
+echo address (http://127.0.0.1:PORT) is printed below.
 echo (back to menu: press Ctrl+C in this window to stop the server)
 research ui
 pause & goto menu
