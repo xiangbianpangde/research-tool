@@ -76,14 +76,21 @@ class Reporter:
             nodes.append(md.read_text(encoding="utf-8"))
         return main, "\n\n---\n\n".join(nodes)
 
-    def _source_count(self, tree_dir: Path) -> int:
+    def _load_sources(self, tree_dir: Path) -> list[dict]:
+        """读 raw/sources.json，返回 [{sid, title, url}]，sid 与采集文件序号一致。"""
         sources = tree_dir.parent / "raw" / "sources.json"
-        if sources.exists():
-            try:
-                return len(read_json(sources))
-            except Exception:  # noqa: BLE001
-                return 0
-        return 0
+        if not sources.exists():
+            return []
+        try:
+            data = read_json(sources)
+        except Exception:  # noqa: BLE001
+            return []
+        out = []
+        for i, s in enumerate(data, 1):
+            out.append(
+                {"sid": f"{i:02d}", "title": s.get("title", ""), "url": s.get("url", "")}
+            )
+        return out
 
     async def run(
         self,
@@ -95,26 +102,39 @@ class Reporter:
         tree_dir = Path(tree_dir)
         main, nodes_text = self._read_tree(tree_dir)
         node_count = len(list(tree_dir.glob("N*.md")))
-        source_count = self._source_count(tree_dir)
+        refs = self._load_sources(tree_dir)
+        source_count = len(refs)
         struct = _STYLE_STRUCT.get(self.config.style, _STYLE_STRUCT["report"])
+        ref_block = "\n".join(
+            f"- 来源{r['sid']}：{r['title'] or '(无标题)'} — {r['url']}" for r in refs
+        )
 
         prompt = (
-            f"基于以下知识树，撰写一篇「{self.config.style}」风格的调研报告。\n"
+            f"基于以下知识树，撰写一篇**详实**的「{self.config.style}」风格调研报告。\n"
             f"主题：{topic or '（见内容）'}\n"
             f"章节结构参考：{struct}\n"
-            f"要求：含摘要(3-5句)、正文按节点展开、交叉分析、结论与建议、参考资料提示；"
-            f"总长度不超过约 {self.config.max_length} 字符；输出 Markdown。\n\n"
-            f"=== 主表 ===\n{main}\n\n=== 分表 ===\n{nodes_text}"
+            "硬性要求：\n"
+            "1. 含摘要；正文按知识树节点逐一展开，每节点至少一节，充分展开论据与细节，"
+            "不要只写一两句结论；\n"
+            "2. 涉及具体论文/资料时，**说明该来源讲了什么**（研究问题、方法/模型名、"
+            "关键发现与数据），并在句末用 (来源NN) 标注，让读者知道结论出自哪篇；\n"
+            "3. 末尾必须有「## 参考资料」一节，逐条列出来源编号、标题与链接；\n"
+            f"4. 总长度尽量充分，但不超过约 {self.config.max_length} 字符；输出 Markdown。\n\n"
+            f"=== 来源清单（编号→标题→链接）===\n{ref_block}\n\n"
+            f"=== 知识树主表 ===\n{main}\n\n=== 知识树分表（含各 S1 来源依据）===\n{nodes_text}"
         )
         body = await llm.chat(prompt, system=_SYSTEM)
 
         header = (
             f"# {topic or '调研'} — 调研报告\n\n"
             f"> 生成日期: {date.today().isoformat()}\n"
-            f"> 数据来源: {source_count} 个网页\n"
+            f"> 数据来源: {source_count} 篇/个\n"
             f"> 知识节点: {node_count} 个\n\n"
         )
         markdown = header + body
+        # 兜底：若模型漏写参考资料，自动补上
+        if ref_block and "参考资料" not in body:
+            markdown += "\n\n## 参考资料\n" + ref_block + "\n"
         if len(markdown) > self.config.max_length:
             markdown = markdown[: self.config.max_length].rstrip() + "\n\n…（已截断）"
 

@@ -116,7 +116,7 @@ class ReporterConfig(BaseModel):
 
     format: Literal["markdown", "html"] = "markdown"
     style: Literal["report", "feasibility", "review", "article"] = "report"
-    max_length: int = Field(default=20000, gt=0)
+    max_length: int = Field(default=30000, gt=0)
 
 
 class PipelineConfig(BaseModel):
