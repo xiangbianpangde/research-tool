@@ -62,8 +62,16 @@ if not defined DEEPSEEK_API_KEY (
 REM search source: tavily if key present, else free web
 if defined TAVILY_API_KEY ( set "SRC=-s tavily" ) else ( set "SRC=-s web" )
 
-REM mineru for PDF mode (points at pdf2zh venv by default)
+REM mineru (points at pdf2zh venv by default); used by BOTH web and pdf modes
 set "MINERU=C:\Users\yhn\pdf2zh\.venv\Scripts\mineru.exe"
+set "MCMD="
+if exist "!MINERU!" (
+    set "MCMD=--mineru-cmd "!MINERU!""
+    echo [config] mineru found: web-collected PDFs will be parsed too
+) else (
+    echo [warn] mineru not found at default path; web PDFs will be skipped.
+    echo        Edit MINERU in this script or use PDF mode to set the path.
+)
 
 :menu
 echo.
@@ -97,14 +105,23 @@ pause & goto menu
 :web
 echo.
 set "topic="
-set /p topic=Research topic (e.g. diffusion models survey):
+set /p topic=Research topic:
 if "!topic!"=="" ( echo Topic cannot be empty.& goto menu )
 set "rounds="
 set /p rounds=Search rounds 1-3 (Enter = 2):
 if "!rounds!"=="" set "rounds=2"
 echo.
-echo Researching: !topic!   source !SRC!   rounds !rounds!
-research run "!topic!" !SRC! -r !rounds! --skip extract
+echo You can pin specific papers/methods to find (optional).
+echo Separate multiple with a semicolon ;  e.g.  GraphIC; PRODIGY; AskGNN
+set "kw="
+set /p kw=Extra keywords (optional):
+set "QFLAGS="
+if not "!kw!"=="" (
+    for %%q in ("!kw:;=" "!") do set "QFLAGS=!QFLAGS! -q %%q"
+)
+echo.
+echo Researching: !topic!   source !SRC!   rounds !rounds!  (LLM query expansion on)
+research run "!topic!" !SRC! -r !rounds! --llm-expand !MCMD! !QFLAGS! --skip extract
 echo.
 echo Done. See research-output\<topic>\report.md
 pause & goto menu
