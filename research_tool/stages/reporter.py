@@ -118,7 +118,8 @@ class Reporter:
             "不要只写一两句结论；\n"
             "2. 涉及具体论文/资料时，**说明该来源讲了什么**（研究问题、方法/模型名、"
             "关键发现与数据），并在句末用 (来源NN) 标注，让读者知道结论出自哪篇；\n"
-            "3. 末尾必须有「## 参考资料」一节，逐条列出来源编号、标题与链接；\n"
+            "3. 正文用 (来源NN) 标注每条结论出处；**不要自己编写参考资料列表**"
+            "（系统会自动附上完整的来源清单）；\n"
             f"4. 总长度尽量充分，但不超过约 {self.config.max_length} 字符；输出 Markdown。\n\n"
             f"=== 来源清单（编号→标题→链接）===\n{ref_block}\n\n"
             f"=== 知识树主表 ===\n{main}\n\n=== 知识树分表（含各 S1 来源依据）===\n{nodes_text}"
@@ -131,9 +132,10 @@ class Reporter:
             f"> 数据来源: {source_count} 篇/个\n"
             f"> 知识节点: {node_count} 个\n\n"
         )
+        # 去掉模型可能自行写的(常不全的)参考资料，统一用程序生成的权威完整列表
+        body = re.split(r"\n#{1,6}\s*参考资料", body)[0].rstrip()
         markdown = header + body
-        # 兜底：若模型漏写参考资料，自动补上
-        if ref_block and "参考资料" not in body:
+        if ref_block:
             markdown += "\n\n## 参考资料\n" + ref_block + "\n"
         if len(markdown) > self.config.max_length:
             markdown = markdown[: self.config.max_length].rstrip() + "\n\n…（已截断）"
