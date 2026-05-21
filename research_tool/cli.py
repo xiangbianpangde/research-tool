@@ -109,6 +109,9 @@ def collect(
     llm_expand: bool = typer.Option(
         False, "--llm-expand", help="用 LLM 动态生成多轮查询（需配置 LLM）"
     ),
+    query: list[str] = typer.Option(
+        [], "-q", "--query", help="额外查询（可多次，点名要找的论文/方法，最高优先级）"
+    ),
     output: Path = typer.Option(Path("./research-output"), "-o", "--output"),
     dry_run: bool = typer.Option(False, "--dry-run", help="仅搜索不抓取"),
 ) -> None:
@@ -122,6 +125,7 @@ def collect(
         timeout_sec=timeout,
         search_rounds=rounds,
         llm_query_expansion=llm_expand,
+        extra_queries=list(query),
     )
     topic_dir = output / slugify(topic)
 
@@ -290,6 +294,9 @@ def run(
     max_results: int = typer.Option(8, "-n", "--max-results"),
     rounds: int = typer.Option(1, "-r", "--rounds", help="搜索轮次 1-3"),
     llm_expand: bool = typer.Option(False, "--llm-expand", help="用 LLM 生成多轮查询"),
+    query: list[str] = typer.Option(
+        [], "-q", "--query", help="额外查询（可多次，点名要找的论文/方法）"
+    ),
     pdf_dir: Optional[Path] = typer.Option(
         None, "--pdf-dir", help="改用本地 PDF 文件夹作为数据源（MinerU 解析）"
     ),
@@ -321,6 +328,7 @@ def run(
             "max_results_per_engine": max_results,
             "search_rounds": rounds,
             "llm_query_expansion": llm_expand,
+            "extra_queries": list(query),
         },
     }
     if mineru_cmd:

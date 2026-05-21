@@ -47,6 +47,8 @@ class CollectorConfig(BaseModel):
     max_total_results: int = Field(default=40, gt=0)  # 多轮去重后的总量上限
     # 用 LLM 动态生成贴主题的多轮查询（替代模板扩展，需提供 llm）
     llm_query_expansion: bool = False
+    # 用户显式提供的额外查询（最高优先级，直接并入搜索；适合点名要找的论文/方法）
+    extra_queries: list[str] = Field(default_factory=list)
     # 搜索结果磁盘缓存（缓解 arxiv 等限流；按 engine+query 哈希）
     search_cache: bool = True
     cache_dir: str | None = None  # None=~/.research/cache/search

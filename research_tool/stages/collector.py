@@ -116,6 +116,9 @@ class Collector:
             queries = _build_queries(
                 topic, self.config.search_rounds, self.config.language
             )
+        # 用户显式查询置顶（点名要找的论文/方法），保序去重
+        if self.config.extra_queries:
+            queries = list(dict.fromkeys(self.config.extra_queries + queries))
         tasks = []
         for engine in self.config.search_engines:
             backend = get_backend(engine, self.config)
