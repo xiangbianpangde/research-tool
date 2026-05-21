@@ -51,6 +51,11 @@ class CollectorConfig(BaseModel):
     search_cache: bool = True
     cache_dir: str | None = None  # None=~/.research/cache/search
     cache_ttl_sec: int = Field(default=86400, ge=0)  # 缓存有效期，0=永不过期
+    # 抓到 PDF 时用 MinerU 解析为正文（否则跳过，绝不把二进制塞进 raw）
+    parse_pdf: bool = True
+    mineru_cmd: str | None = None  # mineru 可执行路径，None=走 PATH
+    # 垃圾过滤：抓取正文短于此字符数的结果直接丢弃（登录页/导航页等）
+    min_doc_chars: int = Field(default=200, ge=0)
 
 
 class PdfIngestConfig(BaseModel):

@@ -41,6 +41,20 @@ _NAV_SHORT_RATIO = 0.7    # 70% 为短行
 _CONTENT_START_MIN = 120  # 正文起点：首个达此长度的实质段落
 
 
+def _looks_binary(text: str, sample: int = 4000) -> bool:
+    """检测 PDF 二进制残留等乱码：替换符/控制字符占比过高即判为非文本。"""
+    s = text[:sample]
+    if not s:
+        return False
+    if "%PDF" in s[:200] or "FlateDecode" in s or "/Filter" in s:
+        return True
+    bad = sum(
+        1 for ch in s
+        if ch == "�" or (ord(ch) < 32 and ch not in "\n\r\t")
+    )
+    return bad / len(s) > 0.15
+
+
 def _split_meta(text: str) -> tuple[str, str]:
     lines = text.splitlines()
     i = 0
@@ -114,6 +128,12 @@ class Cleaner:
         header, body = _split_meta(text)
         cfg = self.config
 
+        # 兜底：二进制/乱码（如未解析的 PDF）直接丢弃正文，只留来源头
+        if _looks_binary(body):
+            return header
+
+
+
         if cfg.strip_html:
             body = _strip_html(body)
 
@@ -161,6 +181,8 @@ class Cleaner:
             files.append(out)
 
             issues: list[str] = []
+            if _looks_binary(_split_meta(original)[1]):
+                issues.append("binary_or_unparsed_pdf")
             body_len = len(_split_meta(cleaned)[1])
             if body_len < self.config.min_content_length:
                 issues.append("too_short")

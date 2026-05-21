@@ -47,6 +47,45 @@ def _resolve_mineru(cmd: str | None) -> str:
     )
 
 
+def find_mineru(cmd: str | None = None) -> str | None:
+    """返回可用的 mineru 路径，找不到返回 None（不抛错，供采集路径探测）。"""
+    candidate = cmd or "mineru"
+    if Path(candidate).exists() or shutil.which(candidate):
+        return candidate
+    return None
+
+
+def mineru_to_markdown(
+    pdf: Path,
+    mineru: str,
+    parse_root: Path,
+    *,
+    backend: str = "pipeline",
+    lang: str = "ch",
+    start: int | None = None,
+    end: int | None = None,
+) -> str:
+    """调用 mineru 解析单个 PDF，返回其 Markdown 文本（找不到产物则抛 StageError）。"""
+    cmd = [mineru, "-p", str(pdf), "-o", str(parse_root), "-b", backend, "-l", lang]
+    if start is not None:
+        cmd += ["-s", str(start)]
+    if end is not None:
+        cmd += ["-e", str(end)]
+    result = subprocess.run(cmd, capture_output=True, text=True)
+    if result.returncode != 0:
+        raise StageError(
+            "ingest-pdf",
+            f"mineru 解析失败（{pdf.name}, code={result.returncode}）：\n"
+            f"{(result.stderr or '')[-800:]}",
+        )
+    md_files = list((parse_root / pdf.stem).rglob(f"{pdf.stem}.md"))
+    if not md_files:
+        md_files = list((parse_root / pdf.stem).rglob("*.md"))
+    if not md_files:
+        raise StageError("ingest-pdf", f"mineru 未产出 Markdown：{pdf.name}")
+    return md_files[0].read_text(encoding="utf-8")
+
+
 def _collect_pdfs(path: Path) -> list[Path]:
     path = Path(path)
     if path.is_file() and path.suffix.lower() == ".pdf":
@@ -65,30 +104,13 @@ class PdfIngestor:
         if self.config.translate and self.llm is None:
             raise StageError("ingest-pdf", "translate=True 需要提供 llm")
 
-    def _run_mineru(self, pdf: Path, mineru: str, parse_root: Path) -> Path:
-        """调用 mineru 解析单个 PDF，返回生成的英文 .md 路径。"""
-        cmd = [
-            mineru, "-p", str(pdf), "-o", str(parse_root),
-            "-b", self.config.mineru_backend, "-l", self.config.ocr_lang,
-        ]
-        if self.config.start_page is not None:
-            cmd += ["-s", str(self.config.start_page)]
-        if self.config.end_page is not None:
-            cmd += ["-e", str(self.config.end_page)]
-        result = subprocess.run(cmd, capture_output=True, text=True)
-        if result.returncode != 0:
-            raise StageError(
-                "ingest-pdf",
-                f"mineru 解析失败（{pdf.name}, code={result.returncode}）：\n"
-                f"{result.stderr[-800:]}",
-            )
-        # MinerU 输出 {parse_root}/{stem}/.../{stem}.md
-        md_files = list((parse_root / pdf.stem).rglob(f"{pdf.stem}.md"))
-        if not md_files:
-            md_files = list((parse_root / pdf.stem).rglob("*.md"))
-        if not md_files:
-            raise StageError("ingest-pdf", f"mineru 未产出 Markdown：{pdf.name}")
-        return md_files[0]
+    def _run_mineru(self, pdf: Path, mineru: str, parse_root: Path) -> str:
+        """调用 mineru 解析单个 PDF，返回其 Markdown 文本。"""
+        return mineru_to_markdown(
+            pdf, mineru, parse_root,
+            backend=self.config.mineru_backend, lang=self.config.ocr_lang,
+            start=self.config.start_page, end=self.config.end_page,
+        )
 
     async def run(self, pdf_path: Path, work_dir: Path) -> CollectResult:
         pdfs = _collect_pdfs(Path(pdf_path))
@@ -104,10 +126,9 @@ class PdfIngestor:
         sources: list[Source] = []
         for idx, pdf in enumerate(pdfs, 1):
             # MinerU 是 CPU/GPU 密集子进程，逐个跑（避免显存竞争）
-            md_path = await asyncio.to_thread(
+            content = await asyncio.to_thread(
                 self._run_mineru, pdf, mineru, parse_root
             )
-            content = md_path.read_text(encoding="utf-8")
             translated = False
             if self.config.translate and self.llm is not None:
                 content = await translate_markdown(

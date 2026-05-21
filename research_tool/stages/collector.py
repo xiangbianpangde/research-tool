@@ -145,7 +145,12 @@ class Collector:
         if dry_run:
             return CollectResult(files=[], sources=[], raw_dir=raw_dir)
 
-        fetcher = Fetcher(timeout_sec=self.config.timeout_sec)
+        fetcher = Fetcher(
+            timeout_sec=self.config.timeout_sec,
+            parse_pdf=self.config.parse_pdf,
+            mineru_cmd=self.config.mineru_cmd,
+            pdf_dir=raw_dir / "_pdfs",
+        )
         sem = asyncio.Semaphore(self.config.concurrency)
 
         async def _fetch(hit: SearchHit) -> tuple[SearchHit, FetchResult]:
@@ -169,6 +174,9 @@ class Collector:
         idx = 0
         for hit, fr in fetched:
             if not fr.ok or not fr.markdown.strip():
+                continue
+            # 垃圾过滤：正文过短(登录页/导航页/JS空壳)直接丢弃
+            if len(fr.markdown.strip()) < self.config.min_doc_chars:
                 continue
             idx += 1
             domain = domain_of(hit.url)
