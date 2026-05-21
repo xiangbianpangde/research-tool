@@ -285,6 +285,9 @@ def run(
     pdf_dir: Optional[Path] = typer.Option(
         None, "--pdf-dir", help="改用本地 PDF 文件夹作为数据源（MinerU 解析）"
     ),
+    mineru_cmd: Optional[str] = typer.Option(
+        None, "--mineru-cmd", help="mineru 路径；设了之后 Web 采集抓到的 PDF 也会用它解析"
+    ),
     translate: bool = typer.Option(False, "--translate", help="PDF 英文 MD 译成中文"),
     output: Path = typer.Option(Path("./research-output"), "-o", "--output"),
     skip: list[str] = typer.Option([], "--skip", help="跳过的阶段"),
@@ -312,9 +315,13 @@ def run(
             "llm_query_expansion": llm_expand,
         },
     }
+    if mineru_cmd:
+        overrides["collector"]["mineru_cmd"] = mineru_cmd
     if pdf_dir:
         overrides["pdf_dir"] = str(pdf_dir)
         overrides["pdf_ingest"] = {"translate": translate}
+        if mineru_cmd:
+            overrides["pdf_ingest"]["mineru_cmd"] = mineru_cmd
     if model:
         overrides["llm"] = {"model": model}
 
