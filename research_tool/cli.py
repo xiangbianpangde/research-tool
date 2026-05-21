@@ -8,12 +8,20 @@ from __future__ import annotations
 
 import asyncio
 import json
+import sys
 from pathlib import Path
 from typing import Optional
 
 import typer
 from rich.console import Console
 from rich.table import Table
+
+# 把输出流设为 UTF-8 且编码失败时替换，避免在 GBK 控制台上打印 ✓/→ 等字符崩溃
+for _stream in (sys.stdout, sys.stderr):
+    try:
+        _stream.reconfigure(encoding="utf-8", errors="replace")  # type: ignore[union-attr]
+    except (AttributeError, ValueError):
+        pass
 
 from . import __version__
 from .config import load_config
