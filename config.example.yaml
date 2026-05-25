@@ -16,8 +16,10 @@ llm:
 collector:
   search_engines:               # 可多选，全部可用源见下
     - web                        # web(=duckduckgo) | arxiv | tavily
-    - arxiv                      # semantic_scholar(全学术) | wikipedia(百科/人物) | github(代码)
-    # 其它可选： pubmed(生物医学) | google_news(最新新闻)
+    - openalex                   # openalex(2.5亿+全学术,含最新) | crossref(1.5亿DOI)
+    # 其它可选： semantic_scholar | wikipedia(百科/人物) | github(代码)
+    #            pubmed(生物医学) | google_news(最新新闻)
+    # 论文优先推荐 openalex：覆盖最全、限流最宽、自动混合"经典+最新"
   max_results_per_engine: 8
   depth: 2                       # 1=仅搜索 2=打开结果页 3=追踪二级链接
   language: both                 # zh | en | both
@@ -27,6 +29,7 @@ collector:
   tavily_api_key: ${TAVILY_API_KEY}            # 仅含 tavily 时需要
   semantic_scholar_api_key: ${S2_API_KEY}      # 可选，提升 S2 配额（无 key 也能用）
   github_token: ${GITHUB_TOKEN}                # 可选，GitHub 搜索 10→30 次/分钟
+  openalex_mailto: ${OPENALEX_MAILTO}          # 可选邮箱，OpenAlex/Crossref polite pool 更稳
 
 # Deepen 反偏差深挖配置（Phase 2，可选阶段，默认启用）
 # 关闭：设 enabled: false，或 `research run ... --skip deepen`

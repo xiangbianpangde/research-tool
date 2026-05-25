@@ -103,13 +103,20 @@ research run "X" --skip deepen                        # 关闭反偏差深挖（
 | 源 | 名称 | Key | 适用 |
 |----|------|:---:|------|
 | `web` | DuckDuckGo | 免 | 通用网页 |
-| `arxiv` | arXiv | 免 | 预印本论文 |
-| `tavily` | Tavily | 需 | LLM 优化的网页搜索 |
-| `semantic_scholar` | Semantic Scholar | 可选 | 全出版商学术论文 + 引用数 |
+| `openalex` | OpenAlex | 免 | **论文首选**：2.5亿+ 全学术，自动混合"经典+最新" |
+| `crossref` | Crossref | 免 | 1.5亿+ DOI，跨出版商元数据 |
+| `arxiv` | arXiv | 免 | 预印本论文（按相关性，偏经典） |
+| `semantic_scholar` | Semantic Scholar | 可选 | 全出版商论文 + 引用数（无 key 易限流） |
+| `pubmed` | PubMed | 免 | 生物医学 3700万+ 文献 |
 | `wikipedia` | Wikipedia | 免 | 百科背景、人物生平（中英双站点） |
 | `github` | GitHub | 可选 | 开源实现、代码、社区活跃度 |
+| `google_news` | Google News | 免 | 最新进展 / 新闻 |
+| `tavily` | Tavily | 需 | LLM 优化的网页搜索 |
 
-可选 Key 在 `config.yaml` 配 `semantic_scholar_api_key` / `github_token` 提升配额（不配也能用）。
+**论文调研推荐 `openalex`**：覆盖最全、限流最宽、且自动一半按相关性 + 一半按发表日期检索，
+解决 arxiv/semantic_scholar 默认按相关性排序「搜不到近期论文」的问题。
+可选 Key/邮箱在 `config.yaml` 配 `semantic_scholar_api_key` / `github_token` /
+`openalex_mailto`（OpenAlex·Crossref 的 polite pool，更稳）提升配额——均不配也能用。
 
 ### Deepen 反偏差深挖
 

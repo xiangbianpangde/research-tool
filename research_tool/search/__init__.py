@@ -39,6 +39,14 @@ def _build_inner(name: str, config: CollectorConfig) -> SearchBackend:
         from .google_news import GoogleNewsBackend
 
         return GoogleNewsBackend()
+    if name == "openalex":
+        from .openalex_backend import OpenAlexBackend
+
+        return OpenAlexBackend(config.openalex_mailto)
+    if name == "crossref":
+        from .crossref_backend import CrossrefBackend
+
+        return CrossrefBackend(config.openalex_mailto)
     raise ValueError(f"未知搜索引擎: {name}")
 
 

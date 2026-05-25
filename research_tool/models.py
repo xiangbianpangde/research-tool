@@ -19,6 +19,7 @@ Provider = Literal["openai", "deepseek", "ollama", "anthropic"]
 SearchEngine = Literal[
     "web", "arxiv", "tavily", "scholar",
     "semantic_scholar", "wikipedia", "github", "pubmed", "google_news",
+    "openalex", "crossref",
     # 预留 P3（BiliNote 多模态）："bilibili"
 ]
 ExtractTask = Literal["ner", "re", "triple"]
@@ -51,6 +52,8 @@ class CollectorConfig(BaseModel):
     # 可选 Key：提升对应后端配额（无 Key 也能用，仅限流更严）
     semantic_scholar_api_key: str | None = None
     github_token: str | None = None
+    # 邮箱（可选）：OpenAlex/Crossref 的 polite pool，填了限流更宽更稳
+    openalex_mailto: str | None = None
     # 多轮搜索（方法论 1.1）：1=仅核心词 2=+交叉/相关概念 3=+补充细化
     search_rounds: int = Field(default=1, ge=1, le=3)
     max_total_results: int = Field(default=40, gt=0)  # 多轮去重后的总量上限

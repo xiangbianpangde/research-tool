@@ -187,9 +187,10 @@ def build_ui():
 
                 with gr.Group(visible=True) as web_group:
                     engines = gr.CheckboxGroup(
-                        ["web", "arxiv", "tavily",
-                         "semantic_scholar", "wikipedia", "github"],
-                        value=["web", "arxiv"], label="搜索来源（可多选）",
+                        ["web", "arxiv", "openalex", "crossref", "tavily",
+                         "semantic_scholar", "wikipedia", "github",
+                         "pubmed", "google_news"],
+                        value=["web", "openalex"], label="搜索来源（可多选）",
                     )
                     rounds = gr.Slider(1, 3, value=2, step=1, label="搜索轮次（多轮关键词）")
                     do_deepen = gr.Checkbox(
