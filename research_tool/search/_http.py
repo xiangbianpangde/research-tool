@@ -16,21 +16,22 @@ _RETRY_STATUS = {429, 502, 503, 504}
 _DEFAULT_UA = "Mozilla/5.0 (research-tool; +https://github.com/xiangbianpangde/research-tool)"
 
 
-async def get_json(
+async def _get(
     url: str,
     *,
     params: dict | None = None,
     headers: dict | None = None,
+    accept: str = "application/json",
     timeout: float = 20.0,
     retries: int = 3,
     backoff_base: float = 1.5,
-) -> dict | list:
-    """GET 并解析 JSON。429/5xx 与网络错误指数退避重试 retries 次。
+) -> httpx.Response:
+    """GET，对 429/5xx 与网络错误做指数退避重试，返回 Response（content 已加载）。
 
     最终仍失败时抛出最后一次异常，交由调用方（后端的 search）包装为
     SearchError，再由 Collector 收集进 warnings。
     """
-    merged_headers = {"User-Agent": _DEFAULT_UA, "Accept": "application/json"}
+    merged_headers = {"User-Agent": _DEFAULT_UA, "Accept": accept}
     if headers:
         merged_headers.update(headers)
 
@@ -47,7 +48,7 @@ async def get_json(
                     await asyncio.sleep(wait)
                     continue
                 resp.raise_for_status()
-                return resp.json()
+                return resp
             except (httpx.TransportError, httpx.HTTPStatusError) as e:
                 last_exc = e
                 status = getattr(getattr(e, "response", None), "status_code", None)
@@ -61,6 +62,26 @@ async def get_json(
     # 理论不可达（循环要么 return 要么 raise）
     assert last_exc is not None
     raise last_exc
+
+
+def describe(e: Exception) -> str:
+    """生成非空的异常描述。网络错误（如 httpx.ConnectError）str() 常为空，
+    只给类名才能让 warnings 有意义（修复 1 的可观测性）。"""
+    msg = str(e).strip()
+    return f"{type(e).__name__}: {msg}" if msg else type(e).__name__
+
+
+async def get_json(url: str, **kw) -> dict | list:
+    """GET 并解析 JSON（带退避重试）。"""
+    resp = await _get(url, accept="application/json", **kw)
+    return resp.json()
+
+
+async def get_text(url: str, **kw) -> str:
+    """GET 并返回文本（带退避重试）。用于 RSS/XML 等非 JSON 接口。"""
+    kw.setdefault("accept", "application/xml, text/xml, */*")
+    resp = await _get(url, **kw)
+    return resp.text
 
 
 def _retry_after(resp: httpx.Response) -> float | None:

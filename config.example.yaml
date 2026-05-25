@@ -14,9 +14,10 @@ llm:
 
 # Collector 配置
 collector:
-  search_engines:               # 可多选，见下方全部可用源
+  search_engines:               # 可多选，全部可用源见下
     - web                        # web(=duckduckgo) | arxiv | tavily
     - arxiv                      # semantic_scholar(全学术) | wikipedia(百科/人物) | github(代码)
+    # 其它可选： pubmed(生物医学) | google_news(最新新闻)
   max_results_per_engine: 8
   depth: 2                       # 1=仅搜索 2=打开结果页 3=追踪二级链接
   language: both                 # zh | en | both

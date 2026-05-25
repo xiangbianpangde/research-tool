@@ -85,6 +85,58 @@ async def test_github_repo_metadata(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_pubmed_two_step(monkeypatch):
+    from research_tool.search.pubmed_backend import PubMedBackend
+
+    async def fake(url, **kw):
+        if "esearch" in url:
+            return {"esearchresult": {"idlist": ["111", "222"]}}
+        return {
+            "result": {
+                "uids": ["111", "222"],
+                "111": {
+                    "title": "CRISPR review",
+                    "authors": [{"name": "Doudna J"}],
+                    "fulljournalname": "Nature",
+                    "pubdate": "2020",
+                },
+                "222": {"title": "Gene therapy", "source": "Cell", "pubdate": "2021"},
+            }
+        }
+
+    monkeypatch.setattr("research_tool.search.pubmed_backend.get_json", fake)
+    hits = await PubMedBackend().search("crispr", 10)
+    assert [h.url for h in hits] == [
+        "https://pubmed.ncbi.nlm.nih.gov/111/",
+        "https://pubmed.ncbi.nlm.nih.gov/222/",
+    ]
+    assert "Nature" in hits[0].snippet and "Doudna J" in hits[0].snippet
+
+
+@pytest.mark.asyncio
+async def test_google_news_parses_rss(monkeypatch):
+    from research_tool.search.google_news import GoogleNewsBackend
+
+    rss = """<?xml version="1.0"?><rss version="2.0"><channel>
+      <item>
+        <title>AI breakthrough</title>
+        <link>https://news.google.com/rss/articles/abc</link>
+        <description>&lt;a href="x"&gt;Some outlet&lt;/a&gt; reports progress</description>
+        <pubDate>Mon, 01 Jan 2024 00:00:00 GMT</pubDate>
+      </item>
+    </channel></rss>"""
+
+    async def fake(url, **kw):
+        return rss
+
+    monkeypatch.setattr("research_tool.search.google_news.get_text", fake)
+    hits = await GoogleNewsBackend().search("ai", 10)
+    assert hits[0].title == "AI breakthrough"
+    assert hits[0].url.endswith("/abc")
+    assert "<a" not in hits[0].snippet and "Some outlet reports progress" in hits[0].snippet
+
+
+@pytest.mark.asyncio
 async def test_backend_failure_raises_searcherror(monkeypatch):
     from research_tool.errors import SearchError
 

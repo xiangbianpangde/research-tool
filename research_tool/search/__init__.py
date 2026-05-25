@@ -31,6 +31,14 @@ def _build_inner(name: str, config: CollectorConfig) -> SearchBackend:
         from .github_backend import GitHubBackend
 
         return GitHubBackend(config.github_token)
+    if name == "pubmed":
+        from .pubmed_backend import PubMedBackend
+
+        return PubMedBackend()
+    if name == "google_news":
+        from .google_news import GoogleNewsBackend
+
+        return GoogleNewsBackend()
     raise ValueError(f"未知搜索引擎: {name}")
 
 

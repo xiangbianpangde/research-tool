@@ -10,7 +10,7 @@ API: https://api.github.com/search/repositories
 from __future__ import annotations
 
 from ..errors import SearchError
-from ._http import get_json
+from ._http import describe, get_json
 from .base import SearchBackend, SearchHit
 
 _ENDPOINT = "https://api.github.com/search/repositories"
@@ -37,7 +37,7 @@ class GitHubBackend(SearchBackend):
         try:
             data = await get_json(_ENDPOINT, params=params, headers=headers)
         except Exception as e:  # noqa: BLE001
-            raise SearchError(f"github 搜索失败: {e}") from e
+            raise SearchError(f"github 搜索失败: {describe(e)}") from e
 
         items = (data.get("items") or []) if isinstance(data, dict) else []
         hits: list[SearchHit] = []

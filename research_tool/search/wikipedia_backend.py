@@ -12,7 +12,7 @@ from __future__ import annotations
 import re
 
 from ..errors import SearchError
-from ._http import get_json
+from ._http import describe, get_json
 from .base import SearchBackend, SearchHit
 
 # rest.php 搜索摘要里高亮命中词用 <span class="searchmatch">，需去掉
@@ -71,5 +71,5 @@ class WikipediaBackend(SearchBackend):
                     seen.add(hit.url)
                     hits.append(hit)
         except Exception as e:  # noqa: BLE001
-            raise SearchError(f"wikipedia 搜索失败: {e}") from e
+            raise SearchError(f"wikipedia 搜索失败: {describe(e)}") from e
         return hits[:max_results]

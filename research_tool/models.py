@@ -18,7 +18,7 @@ from pydantic import BaseModel, Field, model_validator
 Provider = Literal["openai", "deepseek", "ollama", "anthropic"]
 SearchEngine = Literal[
     "web", "arxiv", "tavily", "scholar",
-    "semantic_scholar", "wikipedia", "github",
+    "semantic_scholar", "wikipedia", "github", "pubmed", "google_news",
     # 预留 P3（BiliNote 多模态）："bilibili"
 ]
 ExtractTask = Literal["ner", "re", "triple"]

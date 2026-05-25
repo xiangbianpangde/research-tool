@@ -51,6 +51,9 @@ err = Console(stderr=True)
 # 全局状态（由回调填充）
 _state: dict = {"config_path": None, "verbose": False, "quiet": False}
 
+# run 命令的高级选项分组标题（问题 5：--help 主面板只显常用项，调优项折叠）
+_ADVANCED = "高级选项（低频；等价项可写入 config.yaml）"
+
 
 def _version_cb(value: bool) -> None:
     if value:
@@ -298,25 +301,37 @@ def report(
 @app.command()
 def run(
     topic: str = typer.Argument(..., help="调研主题"),
-    source: list[str] = typer.Option(["web"], "-s", "--source"),
-    max_results: int = typer.Option(8, "-n", "--max-results"),
-    rounds: int = typer.Option(1, "-r", "--rounds", help="搜索轮次 1-3"),
-    llm_expand: bool = typer.Option(False, "--llm-expand", help="用 LLM 生成多轮查询"),
+    # --- 常用 5 项（问题 5：run 主面板只留最常用，调优归 config.yaml）--- #
+    source: list[str] = typer.Option(["web"], "-s", "--source", help="搜索来源（可多次）"),
+    output: Path = typer.Option(Path("./research-output"), "-o", "--output", help="输出目录"),
+    skip: list[str] = typer.Option([], "--skip", help="跳过阶段，如 --skip deepen"),
+    resume: bool = typer.Option(True, "--resume/--no-resume", help="跳过已完成阶段"),
+    dry_run: bool = typer.Option(False, "--dry-run", help="仅打印将执行的步骤"),
+    # --- 高级项：低频，等价配置项见 config.yaml ---------------------- #
+    max_results: int = typer.Option(
+        8, "-n", "--max-results", rich_help_panel=_ADVANCED, help="每源最多结果（=collector.max_results_per_engine）"
+    ),
+    rounds: int = typer.Option(
+        1, "-r", "--rounds", rich_help_panel=_ADVANCED, help="搜索轮次 1-3（=collector.search_rounds）"
+    ),
+    llm_expand: bool = typer.Option(
+        False, "--llm-expand", rich_help_panel=_ADVANCED, help="用 LLM 生成多轮查询（=collector.llm_query_expansion）"
+    ),
     query: list[str] = typer.Option(
-        [], "-q", "--query", help="额外查询（可多次，点名要找的论文/方法）"
+        [], "-q", "--query", rich_help_panel=_ADVANCED, help="额外查询（点名要找的论文/方法）"
     ),
     pdf_dir: Optional[Path] = typer.Option(
-        None, "--pdf-dir", help="改用本地 PDF 文件夹作为数据源（MinerU 解析）"
+        None, "--pdf-dir", rich_help_panel=_ADVANCED, help="改用本地 PDF 文件夹作为数据源"
     ),
     mineru_cmd: Optional[str] = typer.Option(
-        None, "--mineru-cmd", help="mineru 路径；设了之后 Web 采集抓到的 PDF 也会用它解析"
+        None, "--mineru-cmd", rich_help_panel=_ADVANCED, help="mineru 路径（Web 抓到的 PDF 也用它解析）"
     ),
-    translate: bool = typer.Option(False, "--translate", help="PDF 英文 MD 译成中文"),
-    output: Path = typer.Option(Path("./research-output"), "-o", "--output"),
-    skip: list[str] = typer.Option([], "--skip", help="跳过的阶段"),
-    resume: bool = typer.Option(True, "--resume/--no-resume"),
-    model: Optional[str] = typer.Option(None, "--model"),
-    dry_run: bool = typer.Option(False, "--dry-run", help="仅打印将执行的步骤"),
+    translate: bool = typer.Option(
+        False, "--translate", rich_help_panel=_ADVANCED, help="PDF 英文 MD 译成中文"
+    ),
+    model: Optional[str] = typer.Option(
+        None, "--model", rich_help_panel=_ADVANCED, help="覆盖 LLM 模型（=llm.model）"
+    ),
 ) -> None:
     """一键全流程：collect/PDF摄取 → clean → extract → organize → report。"""
     all_stages = ["collect", "deepen", "clean", "extract", "organize", "report"]
