@@ -80,6 +80,12 @@ def _fail(msg: str) -> None:
     raise typer.Exit(code=1)
 
 
+def _print_warnings(warnings: list[str]) -> None:
+    """搜索/深挖告警输出到 stderr（修复 1：可观测）。"""
+    for w in warnings or []:
+        err.print(f"[yellow]警告[/yellow] {w}")
+
+
 def input_topic_from_dir(path: Path) -> str:
     """从 raw/clean/extracted/tree 的父目录名推断主题（slug 形式）。"""
     p = Path(path)
@@ -132,13 +138,15 @@ def collect(
     async def _go():
         c = Collector(cfg, _make_llm() if llm_expand else None)
         if dry_run:
-            hits = await c.search_only(topic)
-            for h in hits:
+            sr = await c.search_only(topic)
+            for h in sr.hits:
                 out.print(f"[cyan]{h.source_engine}[/cyan] {h.title}\n  {h.url}")
-            _log(f"\n共 {len(hits)} 条结果（dry-run，未抓取）")
+            _log(f"\n共 {len(sr.hits)} 条结果（dry-run，未抓取）")
+            _print_warnings(sr.warnings)
             return
         res = await c.run(topic, topic_dir)
         _log(f"采集完成：{len(res.files)} 个文件 → {res.raw_dir}")
+        _print_warnings(res.warnings)
 
     _run(_go())
 
@@ -311,7 +319,7 @@ def run(
     dry_run: bool = typer.Option(False, "--dry-run", help="仅打印将执行的步骤"),
 ) -> None:
     """一键全流程：collect/PDF摄取 → clean → extract → organize → report。"""
-    all_stages = ["collect", "clean", "extract", "organize", "report"]
+    all_stages = ["collect", "deepen", "clean", "extract", "organize", "report"]
     stages = [s for s in all_stages if s not in skip]
 
     if dry_run:
@@ -350,6 +358,10 @@ def run(
             )
             _log(f"[{color}]{ev.status:9}[/{color}] {ev.stage:9} {ev.message}")
         res = pipeline._result
+        if res and res.collect_result:
+            _print_warnings(res.collect_result.warnings)
+        if res and res.deepen_result:
+            _print_warnings(res.deepen_result.warnings)
         if res and res.failed_stage:
             _fail(f"在 {res.failed_stage} 阶段失败")
         if res and res.report_result:

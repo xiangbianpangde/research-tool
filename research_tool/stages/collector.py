@@ -17,8 +17,15 @@ from pydantic import BaseModel, Field
 from ..llm.base import LLMClient
 from ..models import CollectorConfig, CollectResult, Source
 from ..search import get_backend
-from ..search.base import SearchHit
-from .base import domain_of, ensure_dir, safe_filename, write_json, write_text
+from ..search.base import SearchHit, SearchResult
+from .base import (
+    domain_of,
+    ensure_dir,
+    read_json,
+    safe_filename,
+    write_json,
+    write_text,
+)
 from .fetcher import FetchResult, Fetcher
 
 
@@ -99,6 +106,11 @@ def _sha256(text: str) -> str:
     return "sha256:" + hashlib.sha256(text.encode("utf-8")).hexdigest()
 
 
+def _url_hash(url: str) -> str:
+    """URL 短哈希，用于文件名去重后缀（防覆盖：修复 3 / 风险 9）。"""
+    return hashlib.sha256(url.encode("utf-8")).hexdigest()[:6]
+
+
 class Collector:
     def __init__(
         self, config: CollectorConfig | None = None, llm: LLMClient | None = None
@@ -106,8 +118,11 @@ class Collector:
         self.config = config or CollectorConfig()
         self.llm = llm
 
-    async def search_only(self, topic: str) -> list[SearchHit]:
-        """多轮 × 多引擎搜索，按 URL 去重（方法论 1.1）。供 --dry-run 与 depth=1 用。"""
+    async def search_only(self, topic: str) -> SearchResult:
+        """多轮 × 多引擎搜索，按 URL 去重（方法论 1.1）。供 --dry-run 与 depth=1 用。
+
+        返回 SearchResult（hits + warnings）：搜索后端失败不再静默丢弃（修复 1）。
+        """
         if self.config.llm_query_expansion and self.llm is not None:
             queries = await _llm_build_queries(
                 topic, self.config.search_rounds, self.config.language, self.llm
@@ -119,23 +134,34 @@ class Collector:
         # 用户显式查询置顶（点名要找的论文/方法），保序去重
         if self.config.extra_queries:
             queries = list(dict.fromkeys(self.config.extra_queries + queries))
+        return await self.search_queries(queries)
+
+    async def search_queries(self, queries: list[str]) -> SearchResult:
+        """对给定查询列表跑全部引擎，受 max_concurrent_searches 限流（修复 2），
+        失败收集为 warnings（修复 1），按 URL 去重。Deepen 阶段也复用本方法。"""
+        sem = asyncio.Semaphore(self.config.max_concurrent_searches)
+
+        async def _one(backend, query: str) -> list[SearchHit]:
+            async with sem:
+                return await backend.search(
+                    query, self.config.max_results_per_engine, self.config.language
+                )
+
         tasks = []
+        meta: list[tuple[str, str]] = []  # (engine, query)，用于失败时定位
         for engine in self.config.search_engines:
             backend = get_backend(engine, self.config)
             for query in queries:
-                tasks.append(
-                    backend.search(
-                        query,
-                        self.config.max_results_per_engine,
-                        self.config.language,
-                    )
-                )
+                meta.append((engine, query))
+                tasks.append(_one(backend, query))
         results = await asyncio.gather(*tasks, return_exceptions=True)
 
         hits: list[SearchHit] = []
+        warnings: list[str] = []
         seen: set[str] = set()
-        for res in results:
+        for (engine, query), res in zip(meta, results):
             if isinstance(res, Exception):
+                warnings.append(f"{engine} 搜索失败 query={query!r}: {res}")
                 continue
             for hit in res:
                 if hit.url in seen:
@@ -143,17 +169,37 @@ class Collector:
                 seen.add(hit.url)
                 hits.append(hit)
                 if len(hits) >= self.config.max_total_results:
-                    return hits
-        return hits
+                    return SearchResult(hits=hits, warnings=warnings)
+        return SearchResult(hits=hits, warnings=warnings)
 
     async def run(
         self, topic: str, work_dir: Path, *, dry_run: bool = False
     ) -> CollectResult:
         raw_dir = ensure_dir(Path(work_dir) / "raw")
-        hits = await self.search_only(topic)
+        sr = await self.search_only(topic)
 
         if dry_run:
-            return CollectResult(files=[], sources=[], raw_dir=raw_dir)
+            return CollectResult(
+                files=[], sources=[], raw_dir=raw_dir, warnings=sr.warnings
+            )
+
+        result = await self.fetch_and_store(topic, sr.hits, raw_dir)
+        result.warnings = sr.warnings + result.warnings
+        return result
+
+    async def fetch_and_store(
+        self, topic: str, hits: list[SearchHit], raw_dir: Path
+    ) -> CollectResult:
+        """抓取 hits 并写入 raw/，幂等且防覆盖。
+
+        - 按 sources.json 已记录的 URL 去重（同一 URL 不重复抓取/写入）
+        - 文件名 idx 从现有文件数续编、并加 URL 短哈希后缀，避免多次调用
+          （含 Deepen 复用本方法）相互覆盖（修复 3 / 风险 9）
+        - 写完后合并 sources.json（风险 8：来源不断裂）
+        """
+        ensure_dir(raw_dir)
+        existing_urls = {s.get("url") for s in self._load_sources(raw_dir)}
+        todo = [h for h in hits if h.url not in existing_urls]
 
         fetcher = Fetcher(
             timeout_sec=self.config.timeout_sec,
@@ -172,25 +218,29 @@ class Collector:
                     fr = FetchResult(hit.url, hit.snippet, ok=bool(hit.snippet))
                 return hit, fr
 
-        fetched = await asyncio.gather(*[_fetch(h) for h in hits])
+        fetched = await asyncio.gather(*[_fetch(h) for h in todo]) if todo else []
 
         # depth==3：对成功页追踪少量二级内部链接
-        if self.config.depth >= 3:
-            extra = await self._follow_links(fetched, fetcher, sem, topic)
-            fetched.extend(extra)
+        if self.config.depth >= 3 and fetched:
+            extra = await self._follow_links(list(fetched), fetcher, sem, topic)
+            fetched = list(fetched) + extra
 
         files: list[Path] = []
         sources: list[Source] = []
-        idx = 0
+        idx = self._next_idx(raw_dir)
+        written_urls: set[str] = set(existing_urls)
         for hit, fr in fetched:
             if not fr.ok or not fr.markdown.strip():
                 continue
             # 垃圾过滤：正文过短(登录页/导航页/JS空壳)直接丢弃
             if len(fr.markdown.strip()) < self.config.min_doc_chars:
                 continue
+            if hit.url in written_urls:  # 二级链接也可能撞已有 URL
+                continue
+            written_urls.add(hit.url)
             idx += 1
             domain = domain_of(hit.url)
-            fname = f"{idx:02d}-{safe_filename(domain)}.md"
+            fname = f"{idx:02d}-{safe_filename(domain)}-{_url_hash(hit.url)}.md"
             fpath = raw_dir / fname
             via = f'{hit.source_engine}_search("{topic}")'
             header = (
@@ -211,8 +261,34 @@ class Collector:
                 )
             )
 
-        write_json(raw_dir / "sources.json", [s.model_dump() for s in sources])
+        self._append_sources(raw_dir, sources)
         return CollectResult(files=files, sources=sources, raw_dir=raw_dir)
+
+    # -- sources.json / 文件名 辅助 ------------------------------------- #
+
+    @staticmethod
+    def _load_sources(raw_dir: Path) -> list[dict]:
+        path = raw_dir / "sources.json"
+        if not path.exists():
+            return []
+        try:
+            data = read_json(path)
+        except (OSError, ValueError):
+            return []
+        return data if isinstance(data, list) else []
+
+    def _append_sources(self, raw_dir: Path, new_sources: list[Source]) -> None:
+        """把新来源合并进 sources.json（按 URL 去重），保证溯源完整（风险 8）。"""
+        existing = self._load_sources(raw_dir)
+        by_url = {s.get("url"): s for s in existing}
+        for s in new_sources:
+            by_url[s.url] = s.model_dump()
+        write_json(raw_dir / "sources.json", list(by_url.values()))
+
+    @staticmethod
+    def _next_idx(raw_dir: Path) -> int:
+        """续编文件序号：现有 *.md 数量，避免重置为 0 覆盖既有文件（修复 3）。"""
+        return len([p for p in raw_dir.glob("*.md")])
 
     async def _follow_links(
         self,

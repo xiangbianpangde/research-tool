@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from ..models import CollectorConfig
-from .base import SearchBackend, SearchHit
+from .base import SearchBackend, SearchHit, SearchResult
 
 
 def _build_inner(name: str, config: CollectorConfig) -> SearchBackend:
@@ -19,6 +19,18 @@ def _build_inner(name: str, config: CollectorConfig) -> SearchBackend:
         from .tavily import TavilyBackend
 
         return TavilyBackend(config.tavily_api_key)
+    if name == "semantic_scholar":
+        from .semantic_scholar import SemanticScholarBackend
+
+        return SemanticScholarBackend(config.semantic_scholar_api_key)
+    if name == "wikipedia":
+        from .wikipedia_backend import WikipediaBackend
+
+        return WikipediaBackend()
+    if name == "github":
+        from .github_backend import GitHubBackend
+
+        return GitHubBackend(config.github_token)
     raise ValueError(f"未知搜索引擎: {name}")
 
 
@@ -33,4 +45,4 @@ def get_backend(name: str, config: CollectorConfig) -> SearchBackend:
     return inner
 
 
-__all__ = ["SearchBackend", "SearchHit", "get_backend"]
+__all__ = ["SearchBackend", "SearchHit", "SearchResult", "get_backend"]

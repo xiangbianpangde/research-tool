@@ -42,13 +42,15 @@ async def test_collector_filters_short_docs(monkeypatch, tmp_path):
     cfg = CollectorConfig(min_doc_chars=200, depth=2)
     c = Collector(cfg)
 
-    from research_tool.search.base import SearchHit
+    from research_tool.search.base import SearchHit, SearchResult
 
     async def fake_search_only(topic):
-        return [
-            SearchHit(url="https://good.com/a", title="good"),
-            SearchHit(url="https://junk.com/login", title="login"),
-        ]
+        return SearchResult(
+            hits=[
+                SearchHit(url="https://good.com/a", title="good"),
+                SearchHit(url="https://junk.com/login", title="login"),
+            ]
+        )
 
     async def fake_fetch(url):
         if "junk" in url:

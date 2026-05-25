@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import abc
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class SearchHit(BaseModel):
@@ -19,6 +19,16 @@ class SearchHit(BaseModel):
     title: str = ""
     snippet: str = ""
     source_engine: str = ""
+
+
+class SearchResult(BaseModel):
+    """一次多引擎×多查询搜索的聚合结果。
+
+    携带 warnings 让搜索后端的失败可观测（修复 1），不再静默丢弃。
+    """
+
+    hits: list[SearchHit] = Field(default_factory=list)
+    warnings: list[str] = Field(default_factory=list)
 
 
 class SearchBackend(abc.ABC):

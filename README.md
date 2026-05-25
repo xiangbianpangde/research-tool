@@ -5,13 +5,14 @@
 实现依据 `../架构设计/` 下 8 份设计文档。五阶段管道，Stage 之间仅通过文件系统通信，可中断、可恢复、可独立调试。
 
 ```
-topic ─→ Collect ─→ Clean ─→ Extract ─→ Organize ─→ Report ─→ report.md
-         raw/       clean/    extracted/  tree/
+topic ─→ Collect ─→ Deepen ─→ Clean ─→ Extract ─→ Organize ─→ Report ─→ report.md
+         raw/       raw/++     clean/    extracted/  tree/
 ```
 
 | 阶段 | 职责 | 输出 |
 |------|------|------|
-| Collect | 搜索（DuckDuckGo / arxiv / Tavily）+ 抓取（Crawl4AI，回退 httpx） | `raw/*.md` + `sources.json` |
+| Collect | 搜索（见下方 7 个源）+ 抓取（Crawl4AI，回退 httpx） | `raw/*.md` + `sources.json` |
+| Deepen | 反偏差深挖：实体拆分→多视角搜索 + 缺口/矛盾补搜（可选，默认开） | 追加 `raw/*.md` + `.deepen_done` |
 | Clean | 去 HTML/导航/广告噪音，定位正文 | `clean/*.md` + `quality.json` |
 | Extract | LLM 抽取实体/关系/三元组（可选） | `extracted/*.json` |
 | Organize | LLM 构建 4–7 节点知识树（S1–S4） | `tree/00-主表.md` + `N*.md` |
@@ -83,9 +84,9 @@ export TAVILY_API_KEY=tvly-...   # 仅用 tavily 搜索时
 ## CLI
 
 ```bash
-research run "Transformer 架构" -s web -s arxiv      # 一键全流程
+research run "Transformer 架构" -s web -s arxiv      # 一键全流程（默认含 Deepen 深挖）
 research run "Transformer 架构" -s tavily -r 3       # 3 轮多关键词搜索（方法论 1.1）
-research collect "Transformer" --dry-run             # 仅看搜索结果
+research collect "Transformer" --dry-run             # 仅看搜索结果（失败源会打印警告）
 research collect "Transformer" -n 8 -d 2 -r 2        # 阶段1，2 轮搜索
 research clean   ./research-output/transformer/raw    # 阶段2
 research extract ./research-output/transformer/clean  # 阶段3
@@ -94,7 +95,25 @@ research report  ./research-output/transformer/tree   # 阶段5
 research status  ./research-output/transformer        # 查看进度
 research config                                       # 查看解析后的配置
 research run "X" --skip extract --no-resume           # 跳过抽取/不跳过已完成
+research run "X" --skip deepen                        # 关闭反偏差深挖（更快/更省）
 ```
+
+### 搜索源（`-s`，可多选）
+
+| 源 | 名称 | Key | 适用 |
+|----|------|:---:|------|
+| `web` | DuckDuckGo | 免 | 通用网页 |
+| `arxiv` | arXiv | 免 | 预印本论文 |
+| `tavily` | Tavily | 需 | LLM 优化的网页搜索 |
+| `semantic_scholar` | Semantic Scholar | 可选 | 全出版商学术论文 + 引用数 |
+| `wikipedia` | Wikipedia | 免 | 百科背景、人物生平（中英双站点） |
+| `github` | GitHub | 可选 | 开源实现、代码、社区活跃度 |
+
+可选 Key 在 `config.yaml` 配 `semantic_scholar_api_key` / `github_token` 提升配额（不配也能用）。
+
+### Deepen 反偏差深挖
+
+`run` 默认在 Collect 后插入 Deepen：先把话题**拆成独立实体**做多视角搜索（消除"单一锚点绑架"偏差，如 `"康怡琳 中南民族大学"` 会独立搜 `"Yilin Kang"`、`"康怡琳 博士"`），再扫描已采内容**补搜缺失维度**、对**矛盾信息**反向验证。调优参数全部在 `config.yaml` 的 `deepen:` 段（depth/breadth/max_entities 等），`--skip deepen` 一键关闭。
 
 ## 从 PDF 调研（pdf2zh / MinerU 集成）
 

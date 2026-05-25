@@ -56,7 +56,7 @@ def _run_threaded(cfg, topic: str, q: "queue.Queue") -> None:
 
 
 _STAGE_CN = {
-    "collect": "采集", "clean": "清洗", "extract": "抽取",
+    "collect": "采集", "deepen": "反偏差深挖", "clean": "清洗", "extract": "抽取",
     "organize": "构建知识树", "report": "生成报告",
 }
 _STATUS_ICON = {
@@ -67,6 +67,7 @@ _STATUS_ICON = {
 def run_web(
     mode, topic, engines, rounds, style, max_nodes, min_nodes, do_extract,
     pdf_path, mineru_cmd, translate, provider, model, base_url, api_key, work_dir,
+    do_deepen=True,
 ):
     """Gradio 事件处理：流式产出 (日志, 报告markdown, 文件列表, 输出目录)。"""
     topic = (topic or "").strip()
@@ -74,7 +75,11 @@ def run_web(
         yield "⚠ 请先填写调研主题。", "", None, ""
         return
 
-    stages = ["collect", "clean"]
+    stages = ["collect"]
+    # 反偏差深挖（仅网页调研有意义；PDF 摄取无需深挖）
+    if do_deepen and mode != "PDF 调研":
+        stages.append("deepen")
+    stages.append("clean")
     if do_extract:
         stages.append("extract")
     stages += ["organize", "report"]
@@ -182,9 +187,14 @@ def build_ui():
 
                 with gr.Group(visible=True) as web_group:
                     engines = gr.CheckboxGroup(
-                        ["web", "arxiv", "tavily"], value=["web"], label="搜索来源"
+                        ["web", "arxiv", "tavily",
+                         "semantic_scholar", "wikipedia", "github"],
+                        value=["web", "arxiv"], label="搜索来源（可多选）",
                     )
                     rounds = gr.Slider(1, 3, value=2, step=1, label="搜索轮次（多轮关键词）")
+                    do_deepen = gr.Checkbox(
+                        label="反偏差深挖（实体拆分 + 缺口补搜，更慢更全）", value=True
+                    )
 
                 with gr.Group(visible=False) as pdf_group:
                     pdf_path = gr.Textbox(
@@ -250,7 +260,7 @@ def build_ui():
             inputs=[
                 mode, topic, engines, rounds, style, max_nodes, min_nodes, do_extract,
                 pdf_path, mineru_cmd, translate, provider, model, base_url, api_key,
-                work_dir,
+                work_dir, do_deepen,
             ],
             outputs=[log_box, report_md, files, out_dir_box],
             api_name="run",

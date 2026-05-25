@@ -16,9 +16,13 @@ from pydantic import BaseModel, Field, model_validator
 # --------------------------------------------------------------------------- #
 
 Provider = Literal["openai", "deepseek", "ollama", "anthropic"]
-SearchEngine = Literal["web", "arxiv", "tavily", "scholar"]
+SearchEngine = Literal[
+    "web", "arxiv", "tavily", "scholar",
+    "semantic_scholar", "wikipedia", "github",
+    # 预留 P3（BiliNote 多模态）："bilibili"
+]
 ExtractTask = Literal["ner", "re", "triple"]
-StageName = Literal["collect", "clean", "extract", "organize", "report"]
+StageName = Literal["collect", "deepen", "clean", "extract", "organize", "report"]
 
 
 class LLMConfig(BaseModel):
@@ -39,9 +43,14 @@ class CollectorConfig(BaseModel):
     max_results_per_engine: int = Field(default=8, gt=0)
     depth: int = Field(default=2, ge=1, le=3)
     language: Literal["zh", "en", "both"] = "both"
-    concurrency: int = Field(default=4, gt=0)
+    concurrency: int = Field(default=4, gt=0)  # 抓取层并发
+    # 搜索层并发上限：限制 engine×query 同时发出的请求数，缓解 DDG/Tavily 限流
+    max_concurrent_searches: int = Field(default=3, gt=0)
     timeout_sec: int = Field(default=30, gt=0)
     tavily_api_key: str | None = None
+    # 可选 Key：提升对应后端配额（无 Key 也能用，仅限流更严）
+    semantic_scholar_api_key: str | None = None
+    github_token: str | None = None
     # 多轮搜索（方法论 1.1）：1=仅核心词 2=+交叉/相关概念 3=+补充细化
     search_rounds: int = Field(default=1, ge=1, le=3)
     max_total_results: int = Field(default=40, gt=0)  # 多轮去重后的总量上限
@@ -121,15 +130,33 @@ class ReporterConfig(BaseModel):
     max_length: int = Field(default=30000, gt=0)
 
 
+class DeepenConfig(BaseModel):
+    """反偏差深挖配置（Phase 2）。依据升级计划 §4。"""
+
+    enabled: bool = True               # false 或 --skip deepen 跳过深挖
+    depth: int = Field(default=2, ge=1, le=3)    # 深挖轮次
+    breadth: int = Field(default=4, ge=2, le=8)  # 每轮补充查询数上限
+    entity_split: bool = True          # 拆分多实体话题（人物/组织等）
+    max_entities: int = Field(default=5, ge=1, le=8)  # 实体拆分上限（风险 7）
+    gap_detection: bool = True         # 扫描已采内容识别缺失维度
+    contradiction_check: bool = True   # 检测矛盾并反向验证
+    # 喂给 LLM 做缺口分析时的上下文截断（风险 4：每文件取标题+摘要，总量封顶）
+    max_input_chars: int = Field(default=20000, gt=0)
+    per_file_chars: int = Field(default=300, gt=0)
+
+
 class PipelineConfig(BaseModel):
     """管道总配置。依据 01 §7.3 + 03 §2。"""
 
     topic: str = ""
     work_dir: Path = Path("./research-output")
     stages: list[StageName] = Field(
-        default_factory=lambda: ["collect", "clean", "extract", "organize", "report"]
+        default_factory=lambda: [
+            "collect", "deepen", "clean", "extract", "organize", "report"
+        ]
     )
     collector: CollectorConfig = Field(default_factory=CollectorConfig)
+    deepen: DeepenConfig = Field(default_factory=DeepenConfig)
     pdf_ingest: PdfIngestConfig = Field(default_factory=PdfIngestConfig)
     pdf_dir: str | None = None  # 设置后 collect 阶段改为摄取该目录下的 PDF
     cleaner: CleanerConfig = Field(default_factory=CleanerConfig)
@@ -159,6 +186,17 @@ class CollectResult(BaseModel):
     files: list[Path] = Field(default_factory=list)
     sources: list[Source] = Field(default_factory=list)
     raw_dir: Path
+    # 搜索后端失败/被丢弃的提示（修复 1：可观测，不再静默）
+    warnings: list[str] = Field(default_factory=list)
+
+
+class DeepenResult(BaseModel):
+    """深挖阶段产出统计。"""
+
+    entities: list[str] = Field(default_factory=list)   # 拆出的实体
+    queries: list[str] = Field(default_factory=list)    # 实际执行的补充查询
+    new_files: list[Path] = Field(default_factory=list)  # 新增 raw 文件
+    warnings: list[str] = Field(default_factory=list)
 
 
 class FileQuality(BaseModel):
@@ -237,6 +275,7 @@ class PipelineResult(BaseModel):
     failed_stage: str | None = None
     elapsed_sec: float = 0.0
     collect_result: CollectResult | None = None
+    deepen_result: DeepenResult | None = None
     clean_result: CleanResult | None = None
     extract_result: ExtractResult | None = None
     organize_result: OrganizeResult | None = None

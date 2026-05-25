@@ -90,10 +90,12 @@ def _flatten_to_pipeline(raw: dict) -> dict:
     for src, dst in [
         ("llm", "llm"),
         ("collector", "collector"),
+        ("deepen", "deepen"),
         ("cleaner", "cleaner"),
         ("extractor", "extractor"),
         ("organizer", "organizer"),
         ("reporter", "reporter"),
+        # P3 预留：("bilinote", "bilinote") —— 待 BiliNoteConfig 落地后启用
     ]:
         if src in raw and raw[src] is not None:
             data[dst] = raw[src]

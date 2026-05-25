@@ -17,6 +17,7 @@ from .slug import slugify
 from .stages.base import ensure_dir, has_output
 from .stages.cleaner import Cleaner
 from .stages.collector import Collector
+from .stages.deepen import DeepenStage
 from .stages.extractor import Extractor
 from .stages.organizer import Organizer
 from .stages.reporter import Reporter
@@ -25,6 +26,8 @@ from .stages.reporter import Reporter
 def _stage_output(stage: str, topic_dir: Path) -> tuple[Path, list[str]]:
     return {
         "collect": (topic_dir / "raw", ["*.md"]),
+        # deepen 与 collect 同写 raw/，但用独立标记判定完成，避免 resume 误跳（风险 5）
+        "deepen": (topic_dir / "raw", [".deepen_done"]),
         "clean": (topic_dir / "clean", ["*.md"]),
         "extract": (topic_dir / "extracted", ["*.json"]),
         "organize": (topic_dir / "tree", ["*.md"]),
@@ -69,6 +72,22 @@ class ResearchPipeline:
                 yield StageEvent(
                     stage=stage, status="skipped", progress=1.0,
                     message="extractor.enabled=false，跳过",
+                )
+                continue
+            # Deepen 可选（默认启用；deepen.enabled=false 或 --skip deepen 关闭）
+            if stage == "deepen" and not self.config.deepen.enabled:
+                result.stages_skipped.append(stage)
+                yield StageEvent(
+                    stage=stage, status="skipped", progress=1.0,
+                    message="deepen.enabled=false，跳过",
+                )
+                continue
+            # PDF 数据源时跳过 deepen（深挖针对 Web 搜索，PDF 摄取无意义）
+            if stage == "deepen" and self.config.pdf_dir:
+                result.stages_skipped.append(stage)
+                yield StageEvent(
+                    stage=stage, status="skipped", progress=1.0,
+                    message="PDF 数据源，跳过深挖",
                 )
                 continue
 
@@ -121,6 +140,11 @@ class ResearchPipeline:
                 result.collect_result = await Collector(self.config.collector, llm).run(
                     topic, topic_dir
                 )
+        elif stage == "deepen":
+            collector = Collector(self.config.collector, self._get_llm())
+            result.deepen_result = await DeepenStage(
+                self.config.deepen, collector, self._get_llm()
+            ).run(topic, topic_dir / "raw")
         elif stage == "clean":
             result.clean_result = Cleaner(self.config.cleaner).process(
                 topic_dir / "raw", topic_dir

@@ -14,15 +14,31 @@ llm:
 
 # Collector 配置
 collector:
-  search_engines:               # web(=duckduckgo) | arxiv | tavily
-    - web
-    - arxiv
+  search_engines:               # 可多选，见下方全部可用源
+    - web                        # web(=duckduckgo) | arxiv | tavily
+    - arxiv                      # semantic_scholar(全学术) | wikipedia(百科/人物) | github(代码)
   max_results_per_engine: 8
   depth: 2                       # 1=仅搜索 2=打开结果页 3=追踪二级链接
   language: both                 # zh | en | both
-  concurrency: 4
+  concurrency: 4                 # 抓取层并发
+  max_concurrent_searches: 3     # 搜索层并发上限（缓解 DDG/Tavily 限流）
   timeout_sec: 30
-  tavily_api_key: ${TAVILY_API_KEY}  # 仅 search_engines 含 tavily 时需要
+  tavily_api_key: ${TAVILY_API_KEY}            # 仅含 tavily 时需要
+  semantic_scholar_api_key: ${S2_API_KEY}      # 可选，提升 S2 配额（无 key 也能用）
+  github_token: ${GITHUB_TOKEN}                # 可选，GitHub 搜索 10→30 次/分钟
+
+# Deepen 反偏差深挖配置（Phase 2，可选阶段，默认启用）
+# 关闭：设 enabled: false，或 `research run ... --skip deepen`
+deepen:
+  enabled: true
+  depth: 2                       # 深挖轮次 1-3（轮 1 实体多视角，轮 2+ 缺口补搜）
+  breadth: 4                     # 每轮补充查询数上限 2-8
+  entity_split: true             # 拆分多实体话题（解决"单一锚点绑架"偏差）
+  max_entities: 5                # 实体拆分上限
+  gap_detection: true            # 扫描已采内容识别缺失维度
+  contradiction_check: true      # 检测矛盾并反向验证
+  max_input_chars: 20000         # 喂 LLM 做缺口分析的内容总量上限（防上下文溢出）
+  per_file_chars: 300            # 每个 raw 文件取标题+前 N 字
 
 # Cleaner 配置
 cleaner:
