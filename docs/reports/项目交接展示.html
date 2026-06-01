@@ -1,0 +1,797 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>research-tool · 调研工具项目交接展示</title>
+<style>
+  :root{
+    --bg:#F0EEE6;
+    --bg-soft:#F5F3EC;
+    --panel:#FBFAF6;
+    --panel-2:#F6F3EA;
+    --line:#E2DDD0;
+    --line-soft:#EAE6DA;
+    --txt:#28261F;
+    --txt-dim:#6A6457;
+    --txt-faint:#9A9385;
+    --brand:#C9613C;
+    --brand-2:#D97757;
+    --accent:#7A8CA3;
+    --gold:#B68A3E;
+    --good:#5C8A56;
+    --warn:#C08A2E;
+    --bad:#C0533F;
+    --radius:16px;
+    --shadow:0 18px 40px -24px rgba(80,60,40,.35);
+    --mono:'SFMono-Regular',ui-monospace,'Cascadia Code','Consolas',monospace;
+    --sans:-apple-system,BlinkMacSystemFont,'Segoe UI','PingFang SC','Microsoft YaHei','Hiragino Sans GB',sans-serif;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html{scroll-behavior:smooth}
+  body{
+    font-family:var(--sans);
+    background:radial-gradient(1100px 700px at 82% -8%,#F7E9DF 0%,transparent 55%),
+               radial-gradient(900px 650px at -8% 8%,#EEEADD 0%,transparent 50%),
+               var(--bg);
+    color:var(--txt);line-height:1.7;
+    -webkit-font-smoothing:antialiased;
+  }
+  ::selection{background:var(--brand);color:#fff}
+  .shell{display:flex;min-height:100vh}
+  .side{
+    position:fixed;top:0;left:0;bottom:0;width:268px;
+    background:linear-gradient(180deg,#F6F3EA,#F2EFE5);
+    border-right:1px solid var(--line);
+    padding:26px 18px 30px;overflow-y:auto;z-index:50;
+  }
+  .side::-webkit-scrollbar{width:8px}
+  .side::-webkit-scrollbar-thumb{background:#DCD6C8;border-radius:8px}
+  .brand{display:flex;align-items:center;gap:11px;margin-bottom:6px;padding:0 8px}
+  .brand .mark{
+    width:38px;height:38px;border-radius:11px;flex:0 0 auto;
+    background:linear-gradient(135deg,var(--brand),var(--brand-2));
+    display:grid;place-items:center;font-weight:800;color:#fff;font-size:18px;
+    box-shadow:0 8px 20px -8px var(--brand);
+  }
+  .brand b{font-size:16.5px;letter-spacing:.5px;display:block;line-height:1.25;color:var(--txt)}
+  .brand span{font-size:11px;color:var(--txt-faint);letter-spacing:2px}
+  .side .meta{font-size:11px;color:var(--txt-faint);padding:0 8px;margin:14px 0 18px;border-top:1px solid var(--line);padding-top:14px}
+  .side .meta code{color:var(--brand);font-family:var(--mono)}
+  nav a{
+    display:flex;align-items:center;gap:10px;
+    padding:8px 11px;border-radius:9px;color:var(--txt-dim);
+    text-decoration:none;font-size:13.5px;transition:.18s;margin-bottom:2px;
+  }
+  nav a .n{font-family:var(--mono);font-size:11px;color:var(--txt-faint);width:20px;text-align:center;transition:.18s}
+  nav a:hover{background:#EBE6D8;color:var(--txt)}
+  nav a.active{background:linear-gradient(90deg,rgba(201,97,60,.14),transparent);color:#2a2620}
+  nav a.active .n{color:var(--brand)}
+  nav a.active{box-shadow:inset 2px 0 0 var(--brand)}
+  nav .grp{font-size:10.5px;letter-spacing:2.5px;color:var(--txt-faint);text-transform:uppercase;margin:18px 0 7px 11px}
+  .main{margin-left:268px;flex:1;padding:28px 44px 60px;max-width:1200px}
+  @media(max-width:780px){.side{display:none}.main{margin-left:0;padding:18px 16px 50px}}
+  h1{font-size:32px;font-weight:700;letter-spacing:-.5px;margin:0 0 6px;line-height:1.15}
+  .sub{font-size:14px;color:var(--txt-dim);margin-bottom:24px}
+  .sub code{font-family:var(--mono);color:var(--brand);background:#F0EBE0;padding:1px 5px;border-radius:4px;font-size:12.5px}
+  h2{font-size:22px;font-weight:680;margin:0 0 4px;letter-spacing:-.3px}
+  h3{font-size:17px;font-weight:600;margin:24px 0 12px;display:flex;align-items:center;gap:10px}
+  h3 .dot{display:inline-block;width:7px;height:7px;border-radius:50%;background:var(--brand);flex:0 0 auto}
+  .sec-head{display:flex;align-items:baseline;gap:14px;flex-wrap:wrap;margin-bottom:8px;padding-top:4px}
+  .sec-head h2{margin:0}
+  .sec-head p{font-size:13px;color:var(--txt-dim);margin:0}
+  .tag{font-size:10px;letter-spacing:2px;color:var(--brand);background:rgba(201,97,60,.1);padding:2px 8px;border-radius:4px;text-transform:uppercase;font-weight:700}
+  p{font-size:14px;color:var(--txt-dim);margin-bottom:10px}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:13px;padding:16px 18px;box-shadow:var(--shadow)}
+  .card p{font-size:13px}
+  .card h4{font-size:15px;font-weight:700;margin-bottom:6px}
+  .hl{border-left:3px solid var(--brand)}
+  .grid{display:grid;gap:14px}
+  .g2{grid-template-columns:1fr 1fr}
+  .g3{grid-template-columns:1fr 1fr 1fr}
+  .g4{grid-template-columns:1fr 1fr 1fr 1fr}
+  @media(max-width:900px){.g2,.g3,.g4{grid-template-columns:1fr}}
+  .divider{height:1px;background:var(--line);margin:42px 0}
+  .verdict{
+    background:var(--panel);border:2px solid var(--brand);border-radius:var(--radius);
+    padding:22px 24px;box-shadow:var(--shadow)
+  }
+  .verdict .lbl{font-size:10px;letter-spacing:2.5px;color:var(--brand);text-transform:uppercase;margin-bottom:4px}
+  .verdict h4{font-size:17px;font-weight:700;margin-bottom:8px}
+  .verdict p{font-size:13.5px}
+  .verdict .row{display:flex;gap:22px;margin-top:12px;flex-wrap:wrap}
+  .verdict .m{font-family:var(--mono);font-size:20px;font-weight:800;color:var(--brand)}
+  .verdict .m span{display:block;font-family:var(--sans);font-size:11px;font-weight:400;color:var(--txt-dim)}
+  .chip-row{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}
+  .chip{font-family:var(--mono);font-size:11.5px;background:#EDE8DC;padding:2px 8px;border-radius:5px;color:var(--txt-dim);display:inline-block}
+  .chip.b{background:var(--brand);color:#fff}
+  .chip.t{background:#B4A78E;color:#fff}
+  ul.clean{list-style:none;display:flex;flex-direction:column;gap:8px}
+  ul.clean li{font-size:13.5px;color:var(--txt-dim);padding-left:20px;position:relative}
+  ul.clean li::before{content:"▸";position:absolute;left:0;color:var(--brand)}
+  ul.clean li b{color:var(--txt)}
+  .mono{font-family:var(--mono);color:var(--txt);font-size:12.5px}
+  .src{font-size:11.5px;color:var(--txt-faint);font-family:var(--mono);margin-top:10px;display:flex;flex-wrap:wrap;gap:6px 16px}
+  .src span::before{content:"📁 "}
+  .b-pill{font-size:11px;padding:1px 9px;border-radius:10px;font-weight:600;display:inline-block}
+  .b-pill.ok{background:#E2F0DF;color:var(--good)}
+  .b-pill.mid{background:#F3E8D0;color:var(--warn)}
+  .b-pill.no{background:#F3D6CF;color:var(--bad)}
+  .flow{display:flex;align-items:center;gap:6px;flex-wrap:wrap;padding:10px 0;font-size:13px;color:var(--txt-dim)}
+  .flow .step{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:4px 12px;font-weight:600;color:var(--txt);font-size:12.5px}
+  .flow .step.act{background:var(--brand);color:#fff;border-color:var(--brand)}
+  .flow .arrow{color:var(--txt-faint);font-size:16px}
+  .tbl-wrap{overflow-x:auto;border-radius:10px;border:1px solid var(--line)}
+  table{width:100%;border-collapse:collapse;font-size:13px;background:var(--panel)}
+  th{background:#EDE8DC;text-align:left;padding:9px 12px;font-weight:700;white-space:nowrap}
+  td{padding:8px 12px;border-top:1px solid var(--line-soft);color:var(--txt-dim)}
+  td.num{font-family:var(--mono);text-align:right}
+  .note{display:flex;gap:12px;padding:12px 14px;border-radius:10px;font-size:13px;line-height:1.5;margin:10px 0}
+  .note .ico{font-size:20px;flex:0 0 auto;margin-top:1px}
+  .note.warn{background:#F8F2E4;border:1px solid #E9D9B8}
+  .note.info{background:#ECF0F7;border:1px solid #CDD7E8}
+  .toc{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);padding:16px 20px;margin-bottom:28px;box-shadow:var(--shadow)}
+  .toc h4{font-size:14px;margin-bottom:8px;color:var(--txt-dim)}
+  .toc a{display:block;font-size:13px;color:var(--txt-dim);text-decoration:none;padding:3px 0;border-bottom:1px solid var(--line-soft)}
+  .toc a:hover{color:var(--brand)}
+  .toc a .s{font-family:var(--mono);color:var(--txt-faint);font-size:11px;margin-right:6px}
+  .code-block{background:#1E1E1E;color:#D4D4D4;border-radius:10px;padding:12px 16px;overflow-x:auto;font-family:var(--mono);font-size:12.5px;line-height:1.65;margin:8px 0}
+  .code-block .c{color:#6A9955}
+  .code-block .k{color:#569CD6}
+  .code-block .s{color:#CE9178}
+  .code-block .f{color:#DCDCAA}
+  code{font-family:var(--mono);font-size:12.5px;background:#F0EBE0;padding:1px 5px;border-radius:4px;color:var(--txt)}
+  .pill{font-size:11px;padding:1px 9px;border-radius:10px;background:#EDE8DC;color:var(--txt-dim);display:inline-block;margin:2px}
+  .arch-row{display:flex;gap:8px;margin:8px 0;flex-wrap:wrap}
+  .arch-box{flex:1;min-width:140px;background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:12px 14px;text-align:center}
+  .arch-box .title{font-size:11px;text-transform:uppercase;letter-spacing:1.5px;color:var(--txt-faint);margin-bottom:4px}
+  .arch-box .val{font-size:15px;font-weight:700;color:var(--txt)}
+  .arch-box .desc{font-size:11.5px;color:var(--txt-dim)}
+  footer{border-top:1px solid var(--line);padding:30px 0 10px;margin-top:50px;color:var(--txt-faint);font-size:12.5px;display:flex;justify-content:space-between;flex-wrap:wrap;gap:14px}
+  footer code{font-family:var(--mono);color:var(--brand)}
+  .toTop{position:fixed;right:26px;bottom:26px;width:44px;height:44px;border-radius:12px;background:var(--panel);border:1px solid var(--line);color:var(--txt);display:grid;place-items:center;cursor:pointer;opacity:0;transition:.25s;z-index:60;font-size:18px;box-shadow:var(--shadow)}
+  .toTop.show{opacity:1}
+  .toTop:hover{border-color:var(--brand);color:var(--brand)}
+  .diagram{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);padding:20px 16px;text-align:center;font-family:var(--mono);font-size:13px;line-height:2;margin:12px 0}
+  .diagram .hl{color:var(--brand);font-weight:700}
+  .diagram .dim{color:var(--txt-faint)}
+  .diagram .box-i{display:inline-block;background:#EDE8DC;border-radius:6px;padding:2px 10px;margin:2px}
+  .diagram .box-a{display:inline-block;background:var(--brand);color:#fff;border-radius:6px;padding:2px 10px;margin:2px}
+  .call-chain{background:var(--panel-2);border-radius:8px;padding:10px 14px;margin:6px 0;font-family:var(--mono);font-size:12px;line-height:2;color:var(--txt-dim)}
+  .call-chain .ln{color:var(--txt-faint);margin-right:8px;user-select:none}
+  .call-chain .hl{color:var(--txt);font-weight:600}
+</style>
+</head>
+<body>
+
+<div class="side">
+  <div class="brand">
+    <div class="mark">R</div>
+    <div><b>research-tool</b><span>调研自动化引擎</span></div>
+  </div>
+  <div class="meta">
+    <code>v0.1.0</code> · Python ≥3.11<br>
+    Pydantic v2 · Typer · Gradio
+  </div>
+  <nav>
+    <div class="grp">概览</div>
+    <a href="#overview"><span class="n">◆</span>项目总览</a>
+    <a href="#arch"><span class="n">01</span>整体架构 · 五层</a>
+    <a href="#layers"><span class="n">02</span>分层职责</a>
+    <div class="grp">流程</div>
+    <a href="#flow"><span class="n">03</span>运行流程 · 全链路</a>
+    <a href="#dataflow"><span class="n">04</span>数据流向</a>
+    <a href="#callchain"><span class="n">05</span>调用链 · 代码顺序</a>
+    <div class="grp">模块</div>
+    <a href="#files"><span class="n">06</span>核心文件精讲</a>
+    <a href="#deps"><span class="n">07</span>模块依赖关系</a>
+    <div class="grp">设计</div>
+    <a href="#features"><span class="n">08</span>核心功能清单</a>
+    <a href="#algo"><span class="n">09</span>关键算法/设计</a>
+    <a href="#config"><span class="n">10</span>配置体系</a>
+    <div class="grp">产出物</div>
+    <a href="#output"><span class="n">11</span>输出目录结构</a>
+  </nav>
+</div>
+
+<div class="main">
+
+<section id="overview">
+  <div class="sec-head">
+    <div class="tag">§0 概览</div>
+    <h1>research-tool</h1>
+    <p>给定一个主题或一批 PDF，自动完成搜索→清洗→知识树→调研报告。</p>
+  </div>
+
+  <div class="grid g2" style="margin:16px 0">
+    <div class="card hl">
+      <h4>一句话定位</h4>
+      <p><b>Python 核心引擎 + 多接口层</b>（CLI / WebUI / Python SDK）的自动化调研工具。
+      五阶段管道，Stage 之间仅通过文件系统通信，可中断恢复、可独立调试。</p>
+    </div>
+    <div class="card">
+      <h4>技术栈</h4>
+      <div class="chip-row">
+        <span class="chip b">Python 3.11+</span>
+        <span class="chip b">Pydantic v2</span>
+        <span class="chip">Typer</span>
+        <span class="chip">Rich</span>
+        <span class="chip">Gradio</span>
+        <span class="chip">httpx</span>
+        <span class="chip">Crawl4AI</span>
+        <span class="chip">MinerU</span>
+        <span class="chip">DuckDuckGo</span>
+        <span class="chip">arxiv</span>
+        <span class="chip">Tavily</span>
+        <span class="chip">OpenAI API</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="diagram" style="font-size:13.5px">
+    <div class="hl">topic</div>
+    <span class="dim">──▶</span>
+    <span class="box-a">Collect</span>
+    <span class="dim">──▶</span>
+    <span class="box-i">raw/</span>
+    <span class="dim">──▶</span>
+    <span class="box-a">Clean</span>
+    <span class="dim">──▶</span>
+    <span class="box-i">clean/</span>
+    <span class="dim">──▶</span>
+    <span class="box-i box-a">Extract</span>
+    <span class="dim">──▶</span>
+    <span class="box-i">extracted/</span>
+    <span class="dim">──▶</span>
+    <span class="box-a">Organize</span>
+    <span class="dim">──▶</span>
+    <span class="box-i">tree/</span>
+    <span class="dim">──▶</span>
+    <span class="box-a">Report</span>
+    <span class="dim">──▶</span>
+    <span class="hl">report.md</span>
+    <br><span class="dim">(Extract 可选，extractor.enabled=false 跳过)</span>
+  </div>
+</section>
+
+<div class="divider"></div>
+
+<section id="arch">
+  <div class="sec-head">
+    <div class="tag">§1 架构</div>
+    <h2>整体架构 · 五层</h2>
+  </div>
+
+  <div class="arch-row">
+    <div class="arch-box hl">
+      <div class="title">L5 接口层</div>
+      <div class="val">CLI / WebUI / SDK</div>
+      <div class="desc">Typer CLI · Gradio Web · Python async API</div>
+    </div>
+    <div class="arch-box hl">
+      <div class="title">L4 编排层</div>
+      <div class="val">ResearchPipeline</div>
+      <div class="desc">状态机编排 5 个 Stage，流式事件，中断恢复</div>
+    </div>
+    <div class="arch-box">
+      <div class="title">L3 阶段层</div>
+      <div class="val">5 Stage 实现</div>
+      <div class="desc">Collect · Clean · Extract · Organize · Report</div>
+    </div>
+    <div class="arch-box">
+      <div class="title">L2 服务层</div>
+      <div class="val">LLM / 搜索 / 抓取</div>
+      <div class="desc">OpenAI·DeepSeek·Anthropic · DDG·arxiv·Tavily · Crawl4AI·httpx</div>
+    </div>
+    <div class="arch-box">
+      <div class="title">L1 基础设施</div>
+      <div class="val">配置 / 模型 / 错误</div>
+      <div class="desc">YAML+Pydantic 配置 · 统一异常 · 文件工具</div>
+    </div>
+  </div>
+
+  <div class="card" style="margin-top:12px">
+    <h4>设计原则</h4>
+    <ul class="clean">
+      <li><b>文件系统通信</b>：Stage 之间零直接调用，只读写约定的目录结构（raw/→clean/→extracted/→tree/）</li>
+      <li><b>可中断恢复</b>：resume=true 时自动检测已有输出，跳过已完成 Stage</li>
+      <li><b>Extractor 可选</b>：不安装 LLM 也能跑（跳过抽取，Organizer 直接消费 clean/）</li>
+      <li><b>独立调试</b>：每个 Stage 可通过 CLI 单独执行</li>
+      <li><b>LLM 抽象</b>：统一 LLMClient 抽象，支持 4 种 Provider</li>
+    </ul>
+  </div>
+</section>
+
+<div class="divider"></div>
+
+<section id="layers">
+  <div class="sec-head">
+    <div class="tag">§2 职责</div>
+    <h2>分层职责详解</h2>
+  </div>
+
+  <div class="grid g2">
+    <div class="card hl">
+      <h4>L5 接口层 · cli.py / webui.py / __init__.py</h4>
+      <p><b>CLI</b>：基于 Typer，薄封装。5 个子命令 + 1 个 ui 命令。Rich 美化输出，UTF-8 重编码防 GBK 崩溃。</p>
+      <p><b>WebUI</b>：Gradio 双栏布局。左栏输入，右栏流式进度+报告渲染。后台起线程跑管道，queue.Queue 传事件。</p>
+      <p><b>SDK</b>：暴露 research()、quick_collect() 高阶函数，直接调 ResearchPipeline。</p>
+    </div>
+    <div class="card">
+      <h4>L4 编排层 · pipeline.py</h4>
+      <p><b>ResearchPipeline</b>：串行编排 5 个 Stage，支持 stream()（流式事件）和 run()（批量）。内部判断 resume 跳过。Extractor 可选跳过。PDF 模式切换采集源为 PdfIngestor。</p>
+    </div>
+    <div class="card hl">
+      <h4>L3 阶段层 · stages/</h4>
+      <p><b>Collector</b>：搜索（多轮×多引擎）→ URL 去重 → 并行抓取 → 写 raw/*.md</p>
+      <p><b>Cleaner</b>：纯本地去 HTML 标签/导航/广告/短行 → 写 clean/*.md</p>
+      <p><b>Extractor</b>：LLM 抽取实体/关系/三元组，分块并发，自动归纳 Schema</p>
+      <p><b>Organizer</b>：map-reduce：逐篇摘要→规划节点→并行写 N1~N7 → 00-主表</p>
+      <p><b>Reporter</b>：LLM 合成最终报告，4 种 style，Markdown/HTML</p>
+    </div>
+    <div class="card">
+      <h4>L2 服务层</h4>
+      <p><b>LLM</b>：抽象基类 → OpenAI / Anthropic / Mock。统一 chat/chat_structured/stream。</p>
+      <p><b>搜索</b>：SearchBackend 抽象 → DDG / Arxiv / Tavily。工厂 + CachingBackend 装饰器。</p>
+      <p><b>抓取</b>：Fetcher — 主路径 Crawl4AI，回退 httpx。PDF 自动走 MinerU。</p>
+    </div>
+    <div class="card">
+      <h4>L1 基础设施</h4>
+      <p><b>config.py</b>：YAML → ${VAR} 替换 → 环境变量 → 深度合并 → Pydantic 校验。无配置时自动补 API Key。</p>
+      <p><b>models.py</b>：所有 Pydantic 模型。配置模型 + 结果模型 + 事件模型。</p>
+      <p><b>errors.py</b>：统一异常体系，ResearchToolError + 5 个子类。</p>
+    </div>
+  </div>
+</section>
+
+<div class="divider"></div>
+
+<section id="flow">
+  <div class="sec-head">
+    <div class="tag">§3 流程</div>
+    <h2>运行流程 · 全链路</h2>
+    <p>从 start.bat 到 report.md，共 9 步</p>
+  </div>
+
+  <div class="flow">
+    <span class="step act">① start.bat</span><span class="arrow">→</span>
+    <span class="step">② .env 加载</span><span class="arrow">→</span>
+    <span class="step">③ 菜单选择</span><span class="arrow">→</span>
+    <span class="step act">④ CLI/UI 入口</span><span class="arrow">→</span>
+    <span class="step">⑤ config 装载</span><span class="arrow">→</span>
+    <span class="step act">⑥ Pipeline.stream()</span><span class="arrow">→</span>
+    <span class="step">⑦ 5 Stage 串行</span><span class="arrow">→</span>
+    <span class="step">⑧ 文件系统读写</span><span class="arrow">→</span>
+    <span class="step act">⑨ report.md</span>
+  </div>
+
+  <div class="card" style="margin-top:14px">
+    <h4>从 start.bat 到 report.md 的完整全链路</h4>
+    <div class="call-chain">
+      <span class="ln">1</span> start.bat → 检测 .venv → 激活 → 加载 .env → 显示菜单<br>
+      <span class="ln">2</span> 用户选「2.Web research」→ 输入 topic + rounds<br>
+      <span class="ln">3</span> start.bat 拼装: <span class="hl">research run "topic" -s web -r 2 --llm-expand --skip extract</span><br>
+      <span class="ln">4</span> cli.py: run() → load_config() 读 config.yaml + 环境变量 → PipelineConfig<br>
+      <span class="ln">5</span> cli.py: ResearchPipeline(config).run(topic) 执行<br>
+      <span class="ln">6</span> pipeline.py: stream() → 遍历 stages，每个先检查 resume 跳过<br>
+      <span class="ln">7</span> Stage 1: <span class="hl">Collector.run()</span> → search_only() 多轮 × 多引擎 → Fetcher 并行抓取 → 写 raw/*.md + sources.json<br>
+      <span class="ln">8</span> Stage 2: <span class="hl">Cleaner.process()</span> → 遍历 raw/*.md → clean_text() 去噪 → 写 clean/*.md + quality.json<br>
+      <span class="ln">9</span> Stage 3: extractor.enabled=false → 跳过<br>
+      <span class="ln">10</span> Stage 4: <span class="hl">Organizer.run()</span> → 逐篇 LLM 摘要 → LLM 规划节点 → 并行写 N*.md → 主表<br>
+      <span class="ln">11</span> Stage 5: <span class="hl">Reporter.run()</span> → 读 tree/* → LLM 合成 → 写 report.md<br>
+      <span class="ln">12</span> cli.py: _log("调研完成 → report.md")
+    </div>
+  </div>
+
+  <div class="grid g2" style="margin-top:14px">
+    <div class="card hl">
+      <h4>WebUI 模式</h4>
+      <p>Gradio 环境。用户点击「开始」→ run_web() 构造 override → load_config() → daemon 线程跑 Pipeline → queue.Queue 传 StageEvent → UI 右栏流式更新。完成后渲染报告。</p>
+    </div>
+    <div class="card hl">
+      <h4>PDF 模式</h4>
+      <p>--pdf-dir 设置时，Collect 不走搜索，调 PdfIngestor.run()：收集 PDF → 逐个 MinerU 解析 → (可选 LLM 翻译) → 写 raw/*.md。后续同管道。</p>
+    </div>
+  </div>
+</section>
+
+<div class="divider"></div>
+
+<section id="dataflow">
+  <div class="sec-head">
+    <div class="tag">§4 数据</div>
+    <h2>数据流向</h2>
+  </div>
+
+  <div class="diagram" style="font-size:12.5px;text-align:left;line-height:2.2;padding:16px 20px">
+    <div style="margin-bottom:8px"><span class="hl">▸ 网页调研</span></div>
+    主题 → <span class="box-a">Collect</span> → <span class="box-i">raw/*.md</span> + sources.json
+    <br>→ <span class="box-a">Clean</span> → <span class="box-i">clean/*.md</span> + quality.json
+    <br>→ <span class="box-a">Extract</span> → <span class="box-i">extracted/{entities,relations,triples,schema}.json</span>
+    <br>→ <span class="box-a">Organize</span> → <span class="box-i">tree/00-主表.md</span> + <span class="box-i">N1~N7*.md</span>
+    <br>→ <span class="box-a">Report</span> → <span class="hl">report.md</span>
+
+    <div style="margin:14px 0 8px"><span class="hl">▸ PDF 调研</span></div>
+    pdf_dir/*.pdf → <span class="box-a">PdfIngestor</span> → _mineru/ (MinerU 中间产物) → raw/*.md → （同上管道）
+  </div>
+
+  <div class="card">
+    <h4>核心数据契约</h4>
+    <ul class="clean">
+      <li>所有 Stage 通过<strong>文件系统</strong>通信，不通过内存变量</li>
+      <li>可 Ctrl+C 中断后 resume 恢复</li>
+      <li>可手动编辑中间 .md，重新跑后续阶段</li>
+      <li>可复制别人产出的 raw/，直接跑 clean→organize→report</li>
+      <li>目录结构固定：{topic}/{raw,clean,extracted,tree}/</li>
+    </ul>
+  </div>
+</section>
+
+<div class="divider"></div>
+
+<section id="callchain">
+  <div class="sec-head">
+    <div class="tag">§5 调用</div>
+    <h2>调用链 · 代码执行顺序</h2>
+  </div>
+
+  <div class="card">
+    <h4>research run "Transformer" -s web -s arxiv — 完整调用链</h4>
+    <div class="call-chain">
+      <span class="ln">1</span> <span class="hl">cli.py: run(topic, source=['web','arxiv'], ...)</span><br>
+      <span class="ln">2</span> ├─ load_config() → config.py: YAML + env + overrides → PipelineConfig<br>
+      <span class="ln">3</span> ├─ ResearchPipeline(config).run(topic)<br>
+      <span class="ln">4</span> │   └─ stream(topic): async for event in ...<br>
+      <span class="ln">5</span> │       ├─ stage="collect" → _exec("collect")<br>
+      <span class="ln">6</span> │       │   └─ Collector.run(topic, topic_dir)<br>
+      <span class="ln">7</span> │       │       ├─ search_only(): 多轮×多引擎搜索 → URL 去重<br>
+      <span class="ln">8</span> │       │       └─ Fetcher.fetch(): 并发抓取 → 垃圾过滤 → 写 raw/*.md<br>
+      <span class="ln">9</span> │       ├─ stage="clean" → Cleaner.process(raw_dir)<br>
+      <span class="ln">10</span> │       │   └─ 遍历 raw/*.md → clean_text() → 写 clean/*.md<br>
+      <span class="ln">11</span> │       ├─ stage="extract" → 跳过 (extractor.enabled=false)<br>
+      <span class="ln">12</span> │       ├─ stage="organize" → Organizer.run(clean_dir, llm)<br>
+      <span class="ln">13</span> │       │   ├─ 逐篇 LLM 摘要 (map)<br>
+      <span class="ln">14</span> │       │   ├─ LLM 规划节点 (reduce)<br>
+      <span class="ln">15</span> │       │   ├─ 并行写 N*.md<br>
+      <span class="ln">16</span> │       │   └─ 写 00-主表.md<br>
+      <span class="ln">17</span> │       └─ stage="report" → Reporter.run(tree_dir, llm)<br>
+      <span class="ln">18</span> │           ├─ 读 tree/* + raw/sources.json<br>
+      <span class="ln">19</span> │           ├─ LLM 合成报告<br>
+      <span class="ln">20</span> │           └─ 写 report.md<br>
+      <span class="ln">21</span> └─ CLI 输出完成信息
+    </div>
+  </div>
+</section>
+
+<div class="divider"></div>
+
+<section id="files">
+  <div class="sec-head">
+    <div class="tag">§6 文件</div>
+    <h2>核心文件精讲</h2>
+  </div>
+
+  <div class="grid g2">
+    <div class="card hl">
+      <h4>cli.py · CLI 入口</h4>
+      <p><b>作用</b>：Typer 命令解析，薄调用层。11 个子命令：run/collect/clean/extract/organize/report/ingest-pdf/status/config/ui/translate。</p>
+      <p><b>核心函数</b>：run() 接受 topic/source/depth/rounds 等 → 构造 Config → ResearchPipeline.run()。each stage 有独立子命令（如 clean() 直接调 Cleaner.process()）。</p>
+      <p><b>逻辑</b>：UTF-8 stdout/stderr 重编码防 GBK 崩溃；_state 维护全局；_make_llm() 懒创建 LLMClient。</p>
+    </div>
+    <div class="card">
+      <h4>pipeline.py · 编排引擎</h4>
+      <p><b>ResearchPipeline</b>：五阶段状态机。stream() 异步迭代 StageEvent；run() 遍历到结束。_exec() 分发到具体 Stage。resume 检测用 has_output() 看目录是否有文件。PDF 模式切换为 PdfIngestor。Extractor 可选跳过。</p>
+    </div>
+    <div class="card hl">
+      <h4>stages/collector.py · 采集</h4>
+      <p><b>search_only()</b>：多轮×多引擎，URL 去重，返回 SearchHit。支持 LLM 动态生成查询（优先于模板）。</p>
+      <p><b>run()</b>：search_only → Fetcher.fetch() 并发（Semaphore） → depth=3 追二级链接 → 垃圾过滤 (min_doc_chars) → 写 raw/XX-domain.md + sources.json。</p>
+      <p><b>算法</b>：多轮查询扩展（模板或 LLM），保序去重，并发 Semaphore 控制抓取。</p>
+    </div>
+    <div class="card">
+      <h4>stages/cleaner.py · 清洗</h4>
+      <p><b>clean_text(text) → str</b>：拆分 meta → 检测二进制 (%PDF) → 去 HTML 标签 → 去广告关键词 → 去导航块（连续≥3 行且 70% <40 字符）→ 定位正文起点（首个≥120 字符行）→ 截断尾部 (References) → 合并空行。</p>
+      <p><b>process(input_dir) → CleanResult</b>：遍历 raw/*.md → 每个调 clean_text → 质量评分 → 写 clean/*.md + quality.json。</p>
+    </div>
+    <div class="card hl">
+      <h4>stages/extractor.py · 信息抽取</h4>
+      <p><b>run(input_dir, llm) → ExtractResult</b>：读 clean/*.md → 分块 (4000/200 overlap) → Semaphore(4) 并发 LLM chat_structured → 去重聚合 → 自动归纳 Schema → 写 entities.json/relations.json/triples.json/schema.json。</p>
+      <p><b>关键</b>：entity_types 为 null → 自动归纳。单块失败不中断。去重用 (name_lower, type_lower) tuple。</p>
+    </div>
+    <div class="card">
+      <h4>stages/organizer.py · 知识树</h4>
+      <p><b>run(input_dir, llm) → OrganizeResult</b>：<br>
+      ① _load_clean_docs() 读 clean/*.md<br>
+      ② _summarize_all() 逐篇 LLM 摘要（分块→points 列表），每篇 ≤18 条要点<br>
+      ③ _plan_nodes() LLM 规划 4-7 个节点 + 主线<br>
+      ④ _node_body() asyncio.gather 并行写 N*.md (S1-S4 格式)<br>
+      ⑤ _main_table() 写 00-主表.md</p>
+      <p><b>算法</b>：map-reduce。每个节点 S1=原始依据 S2=核心观点 S3=节点关系 S4=主线位置。标注来源可追溯。</p>
+    </div>
+    <div class="card hl">
+      <h4>stages/reporter.py · 报告</h4>
+      <p><b>run(tree_dir, llm, topic) → ReportResult</b>：读 tree/00-主表.md + N*.md → LLM 按 style 合成 → (可选 HTML 渲染) → 写 report.md/html。</p>
+      <p><b>4 种 style</b>：report (定义→背景→要素→争议→应用→总结)、feasibility (现状→方案→利弊→风险→建议)、review (脉络→流派→文献→趋势)、article (引言→论点→结论)。</p>
+      <p><b>关键</b>：截断模型自行输出的不完整参考资料，代以 sources.json 生成的权威列表。自动附加日期/来源统计/词数。</p>
+    </div>
+    <div class="card">
+      <h4>config.py · 配置</h4>
+      <p>YAML 加载 → ${VAR} 环境变量替换 → flatten 到 PipelineConfig → 环境变量覆盖 → secret 自动补齐 → 深度合并 overrides → Pydantic 校验。</p>
+      <p>查找顺序：--config > $RESEARCH_CONFIG > ./config.yaml > ~/.research/config.yaml。零配置启动自动从 $DEEPSEEK_API_KEY 补齐 api_key。</p>
+    </div>
+    <div class="card hl">
+      <h4>search/ · 搜索后端</h4>
+      <p><b>get_backend()</b> 工厂：构造后端 + 套 CachingBackend 装饰器。<br>
+      <b>DuckDuckGoBackend</b>：免费免 Key，调 ddgs 库。<br>
+      <b>ArxivBackend</b>：官方 API，delay=3s retry=5 + 进程级全局限速（asyncio.Lock）。<br>
+      <b>TavilyBackend</b>：需 Key，稳定高质量。<br>
+      <b>CachingBackend</b>：按 engine+query 哈希缓存，TTL=86400s。</p>
+    </div>
+    <div class="card">
+      <h4>llm/ · LLM 抽象</h4>
+      <p><b>LLMClient</b>：抽象基类。from_config() 工厂选实现。<br>
+      <b>OpenAILLMClient</b>：覆盖 DeepSeek/Ollama。chat_structured 用 response_format=json_object。<br>
+      <b>AnthropicLLMClient</b>：system prompt 约束 + 容错解析。<br>
+      <b>MockLLMClient</b>：测试用，可注入固定返回/回调。</p>
+    </div>
+    <div class="card hl">
+      <h4>ingest/pdf.py · PDF 摄取</h4>
+      <p><b>PdfIngestor.run(pdf_path, work_dir) → CollectResult</b>：收集 PDF → 逐个同步调 mineru 子进程（避免显存竞争） → (可选 translate_markdown 翻译) → 写 raw/*.md + sources.json。</p>
+      <p>find_mineru() 探测路径。未安装时清晰报错含安装提示。</p>
+    </div>
+    <div class="card">
+      <h4>webui.py · Gradio 界面</h4>
+      <p><b>build_ui()</b>：双栏布局。左栏模式选择/主题/引擎/轮次/输出设置/LLM 设置。右栏进度日志 + 报告渲染 + 文件下载。</p>
+      <p><b>run_web()</b>：构造 override → load_config() → 起 thread 跑 Pipeline → queue.Queue 传 StageEvent → 流式 UI 更新。</p>
+    </div>
+  </div>
+</section>
+
+<div class="divider"></div>
+
+<section id="deps">
+  <div class="sec-head">
+    <div class="tag">§7 依赖</div>
+    <h2>模块依赖关系</h2>
+  </div>
+
+  <div class="diagram" style="font-size:12.5px;text-align:left;line-height:2;padding:16px 20px">
+    <div class="hl">依赖方向：依赖者 → 被依赖者</div>
+
+    <div style="margin-top:10px"><span class="box-a">cli.py / webui.py</span></div>
+    <div style="padding-left:24px">├─ config.py (load_config)</div>
+    <div style="padding-left:24px">├─ pipeline.py (ResearchPipeline)</div>
+    <div style="padding-left:24px">├─ models.py (Config 模型)</div>
+    <div style="padding-left:24px">└─ stages/* (独立阶段调用)</div>
+
+    <div style="margin-top:8px"><span class="box-a">pipeline.py</span></div>
+    <div style="padding-left:24px">├─ stages/*.py</div>
+    <div style="padding-left:24px">├─ llm/base.py (LLMClient)</div>
+    <div style="padding-left:24px">├─ ingest/pdf.py (PDF 模式)</div>
+    <div style="padding-left:24px">├─ config.py · models.py · slug.py</div>
+
+    <div style="margin-top:8px"><span class="box-a">stages/collector.py</span></div>
+    <div style="padding-left:24px">├─ search/ (工厂 + DDG/arxiv/tavily/cache)</div>
+    <div style="padding-left:24px">├─ stages/fetcher.py · stages/base.py</div>
+    <div style="padding-left:24px">└─ models.py</div>
+
+    <div style="margin-top:8px"><span class="box-a">所有 LLM 调用</span></div>
+    <div style="padding-left:24px">└─ llm/base.py → openai_client.py / anthropic_client.py</div>
+  </div>
+
+  <div class="grid g2" style="margin-top:14px">
+    <div class="card hl">
+      <h4>核心依赖链（简化）</h4>
+      <div class="call-chain">
+        cli.py / webui.py<br>
+        └─ pipeline.py<br>
+            ├─ stages/collector.py → search/ (DDG/arxiv/tavily) + fetcher.py<br>
+            ├─ stages/cleaner.py<br>
+            ├─ stages/extractor.py → llm/<br>
+            ├─ stages/organizer.py → llm/<br>
+            ├─ stages/reporter.py → llm/<br>
+            └─ ingest/pdf.py → llm/ (翻译时)<br>
+        <br>
+        所有模块 → config.py → models.py → errors.py<br>
+        stages/* → stages/base.py (文件工具)
+      </div>
+    </div>
+    <div class="card">
+      <h4>依赖关系速查</h4>
+      <ul class="clean">
+        <li><b>cli / webui</b> 依赖于：config、pipeline、models、stages</li>
+        <li><b>pipeline</b> 依赖于：5 个 stages、config、models、llm、ingest</li>
+        <li><b>collector</b> 依赖于：search/、fetcher、base、models</li>
+        <li><b>cleaner</b> 仅依赖于：base、models（零外部依赖）</li>
+        <li><b>extractor / organizer / reporter</b> 依赖于：llm、base、models</li>
+        <li><b>search/</b> 依赖于：models、errors、cache</li>
+        <li><b>llm/</b> 依赖于：models、errors</li>
+        <li><b>ingest/pdf</b> 依赖于：llm、models、base、translate</li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<div class="divider"></div>
+
+<section id="features">
+  <div class="sec-head">
+    <div class="tag">§8 功能</div>
+    <h2>核心功能清单</h2>
+  </div>
+
+  <div class="grid g2">
+    <div class="card hl"><h4>🔍 多引擎搜索</h4><p>DuckDuckGo（免费）、arxiv（学术）、Tavily（高质量）三种后端，可组合使用。</p></div>
+    <div class="card"><h4>🔄 多轮关键词</h4><p>1-3 轮：核心→交叉→应用/对比。中英文并行。可选 LLM 动态生成。</p></div>
+    <div class="card hl"><h4>🌐 智能抓取</h4><p>主 Crawl4AI 回退 httpx。depth 1-3。自动垃圾过滤。PDF 自动 MinerU 解析。</p></div>
+    <div class="card"><h4>📄 PDF 解析</h4><p>集成 MinerU。可选 LLM 翻译成中文。</p></div>
+    <div class="card hl"><h4>🧹 本地清洗</h4><p>零 LLM：去 HTML/导航/广告/短行/二进制。正文定位。</p></div>
+    <div class="card"><h4>🧠 LLM 信息抽取</h4><p>实体/关系/三元组。自动 Schema 归纳。可选跳过。</p></div>
+    <div class="card hl"><h4>🌲 知识树</h4><p>map-reduce。4-7 节点。S1-S4 结构化。来源可追溯。</p></div>
+    <div class="card"><h4>📝 4 种报告</h4><p>report / feasibility / review / article 四种风格。</p></div>
+    <div class="card hl"><h4>🔐 统一配置</h4><p>4 级优先级。${VAR} 引用。零配置启动。</p></div>
+    <div class="card"><h4>♻ 中断恢复</h4><p>resume=true 检测已有输出自动跳过。</p></div>
+    <div class="card hl"><h4>🖥 三种接口</h4><p>CLI / WebUI / Python SDK。</p></div>
+    <div class="card"><h4>🧪 可测试</h4><p>MockLLMClient。CachingBackend。独立 Stage 可测。</p></div>
+  </div>
+</section>
+
+<div class="divider"></div>
+
+<section id="algo">
+  <div class="sec-head">
+    <div class="tag">§9 算法</div>
+    <h2>关键算法 / 设计决策</h2>
+  </div>
+
+  <div class="grid g2">
+    <div class="card hl"><h4>多轮搜索（方法论 1.1）</h4><p>1-3 轮扩展：核心词 → 交叉/相关 → 应用/对比。中英文并行。可 LLM 动态生成。</p></div>
+    <div class="card"><h4>并发控制</h4><p>Semaphore 控抓取/LLM 并行。MinerU 逐个跑防显存竞争。</p></div>
+    <div class="card hl"><h4>导航块检测</h4><p>连续≥3 行且 70%<40 字符 → 导航。纯本地算法。</p></div>
+    <div class="card"><h4>正文起点定位</h4><p>跳过纯链接行，找到首个≥120 字符段落。纯本地。</p></div>
+    <div class="card hl"><h4>Map-Reduce 知识树</h4><p>先 map（逐篇摘要），再 reduce（合并证据→规划节点→并行写）。保证每篇都被读到。</p></div>
+    <div class="card"><h4>文件系统通信</h4><p>Stage 零直接调用。可中断、可编辑、可独立调试。</p></div>
+    <div class="card hl"><h4>LLM 结构化容错</h4><p>剥离 ```json 包裹。单块失败不中断整批。</p></div>
+    <div class="card"><h4>CachingBackend</h4><p>磁盘缓存按 engine+query 哈希。TTL=86400s。缓解限流。</p></div>
+    <div class="card hl"><h4>arxiv 全局限速</h4><p>asyncio.Lock + 进程时间戳 ≥3s。双重保护（client delay=3s retry=5）。</p></div>
+    <div class="card"><h4>翻译分块并发</h4><p>按段落 ≤3000 字符分块。Semaphore(8) 并发 LLM。单块失败留原文。</p></div>
+  </div>
+</section>
+
+<div class="divider"></div>
+
+<section id="config">
+  <div class="sec-head">
+    <div class="tag">§10 配置</div>
+    <h2>配置体系</h2>
+  </div>
+
+  <div class="grid g2">
+    <div class="card hl">
+      <h4>优先级</h4>
+      <p>命令行 overrides > 环境变量 > config.yaml > 默认值。查找：--config > $RESEARCH_CONFIG > ./config.yaml > ~/.research/config.yaml。</p>
+    </div>
+    <div class="card">
+      <h4>零配置启动</h4>
+      <p>设置 DEEPSEEK_API_KEY 即可直接 research run。start.bat 自动读 .env。</p>
+    </div>
+  </div>
+  <div class="code-block" style="margin:10px 0">
+<span class="c"># config.example.yaml 结构</span>
+llm:
+  <span class="k">provider</span>: <span class="s">deepseek</span>
+  <span class="k">model</span>: <span class="s">deepseek-chat</span>
+  <span class="k">api_key</span>: <span class="s">${DEEPSEEK_API_KEY}</span>
+collector:
+  <span class="k">search_engines</span>: [<span class="s">web</span>, <span class="s">arxiv</span>]
+  <span class="k">search_rounds</span>: <span class="s">2</span>
+cleaner: {<span class="k">strip_html</span>: <span class="s">true</span>, <span class="k">min_content_length</span>: <span class="s">200</span>}
+extractor: {<span class="k">enabled</span>: <span class="s">true</span>, <span class="k">tasks</span>: [<span class="s">ner</span>, <span class="s">triple</span>]}
+organizer: {<span class="k">max_nodes</span>: <span class="s">7</span>, <span class="k">min_nodes</span>: <span class="s">4</span>}
+reporter: {<span class="k">format</span>: <span class="s">markdown</span>, <span class="k">style</span>: <span class="s">report</span>}
+pipeline: {<span class="k">resume</span>: <span class="s">true</span>}
+  </div>
+</section>
+
+<div class="divider"></div>
+
+<section id="output">
+  <div class="sec-head">
+    <div class="tag">§11 产物</div>
+    <h2>输出目录结构</h2>
+  </div>
+
+  <div class="grid g2">
+    <div class="card hl">
+      <h4>网页调研产出</h4>
+      <div class="code-block" style="font-size:11.5px;line-height:1.6">
+research-output/
+└── <span class="hl">transformer-jia-gou</span>/    <span class="c"># slug 化主题目录</span>
+    ├── <span class="k">raw</span>/               <span class="c"># 原始抓取</span>
+    │   ├── 01-themoonlight.io.md
+    │   ├── 02-domain.md
+    │   ├── <span class="f">sources.json</span>
+    │   └── _pdfs/
+    ├── <span class="k">clean</span>/              <span class="c"># 清洗后</span>
+    │   ├── 01-*.md
+    │   └── <span class="f">quality.json</span>
+    ├── <span class="k">extracted</span>/          <span class="c"># 抽取（可选）</span>
+    │   ├── entities.json
+    │   ├── relations / triples / schema.json
+    ├── <span class="k">tree</span>/               <span class="c"># 知识树</span>
+    │   ├── <span class="hl">00-主表.md</span>
+    │   ├── N1-xxx.md
+    │   └── N2~N7*.md
+    └── <span class="hl">report.md</span>           <span class="c"># 最终报告</span>
+      </div>
+    </div>
+    <div class="card">
+      <h4>PDF 调研产出</h4>
+      <div class="code-block" style="font-size:11.5px;line-height:1.6">
+research-output/
+└── <span class="hl">li-san-shu-xue</span>/
+    ├── <span class="k">_mineru</span>/           <span class="c"># MinerU 中间产物</span>
+    │   └── 离散数学/
+    ├── <span class="k">raw</span>/
+    │   ├── 01-li-san-shu-xue.md
+    │   └── sources.json
+    ├── <span class="k">clean</span>/
+    ├── <span class="k">tree</span>/
+    │   ├── 00-主表.md
+    │   ├── N1-半群-独异点与群...
+    │   └── N2-环与域...
+    └── <span class="hl">report.md</span>
+      </div>
+    </div>
+  </div>
+</section>
+
+<div class="divider"></div>
+
+<section>
+  <div class="sec-head">
+    <div class="tag">END</div>
+    <h2>一句话总结</h2>
+  </div>
+
+  <div class="verdict">
+    <div class="lbl">CORE · 核心价值</div>
+    <h4>research-tool 是一个「从零散信息到结构化知识」的自动化管道引擎。</h4>
+    <p>通过 <b>Collect → Clean → Extract → Organize → Report</b> 五阶段流水线，把一个主题或一批 PDF 自动转化为<strong>知识树（主表+N个节点）+ 调研报告</strong>。核心设计：<b>文件系统隔离</b>、<b>可中断恢复</b>、<b>LLM 统一抽象</b>、<b>搜索后端可插拔</b>。提供 CLI / WebUI / Python SDK 三种接口。适用于学术调研、行业研究、技术方案预研。</p>
+    <div class="row">
+      <div class="m">5<span>个 Stage</span></div>
+      <div class="m">3<span>种接口</span></div>
+      <div class="m">3<span>个搜索后端</span></div>
+      <div class="m">4<span>种 LLM</span></div>
+      <div class="m">4<span>种报告风格</span></div>
+    </div>
+  </div>
+</section>
+
+<footer>
+  <span>research-tool · 交接展示文档</span>
+  <span><code>v0.1.0</code> · 生成于 2026-05-21</span>
+</footer>
+
+</div>
+
+<div class="toTop" onclick="window.scrollTo({top:0,behavior:'smooth'})" id="toTop">↑</div>
+
+<script>
+const sections = document.querySelectorAll('section[id]');
+const navLinks = document.querySelectorAll('nav a');
+const toTop = document.getElementById('toTop');
+
+window.addEventListener('scroll', () => {
+  let current = '';
+  sections.forEach(s => {
+    if (window.scrollY >= s.offsetTop - 120) current = s.id;
+  });
+  navLinks.forEach(a => {
+    a.classList.toggle('active', a.getAttribute('href') === '#' + current);
+  });
+  toTop.classList.toggle('show', window.scrollY > 400);
+});
+</script>
+</body>
+</html>

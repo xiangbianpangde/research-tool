@@ -1,0 +1,218 @@
+{
+  "project": "VideoIngest V1.1",
+  "generated_at": "2026-06-01",
+  "generator": "RA-001",
+  "version_note": "V1.1 阶段无新增 research-tool 运行（V1.0 6 次 run 已覆盖所有 V1.1 调研需求），本索引沿用 V1.0 SOURCES-VideoIngest-20260601.json 的全部来源并补充 V1.1 阶段落点映射",
+  "inheritance": "C:/Users/yhn/Desktop/workflow/产出物/02-调研验证/SOURCES-VideoIngest-20260601.json",
+  "v10_runs_inherited": 6,
+  "v10_total_sources": 364,
+  "v11_new_sources": 0,
+  "v11_total_sources": 364,
+  "quality_distribution": {
+    "S": 35,
+    "A": 80,
+    "B": 145,
+    "C": 20
+  },
+  "v11_landing_map": {
+    "S-001": {
+      "v11_prd_section": "F-003 / F-012 / Q-001",
+      "key_sources": ["src-risk-15", "src-risk-17", "src-risk-43"],
+      "v11_prd_quotes": [
+        "F-003 验收 (3): 4K/付费/限地区视频返回 E_DL_BILI_403",
+        "F-012 验收 (2): 默认提供 cookies.txt 模板",
+        "Q-001 闭环: 实测约 80% 可下"
+      ]
+    },
+    "S-002": {
+      "v11_prd_section": "F-003 / NF-008 / Q-008 / R-001",
+      "key_sources": ["src-risk-42", "src-risk-1.4", "src-risk-3.1"],
+      "v11_prd_quotes": [
+        "F-003 验收 (2): preflight 检查 deno --version >= 2.0",
+        "NF-008: Win11 / macOS 14+ / Ubuntu 22.04+ 预装/需自装 Deno >= 2.0",
+        "Q-008: 风险等级高",
+        "R-001 升级为高"
+      ]
+    },
+    "S-003": {
+      "v11_prd_section": "F-005 / NF-010 / Q-002",
+      "key_sources": ["src-tech-19", "src-tech-31", "src-local-models"],
+      "v11_prd_quotes": [
+        "F-005 验收 (3): 单次调用 <= 20k input / 4k output",
+        "F-005 验收 (4): CLI 启动时强制覆盖 LLMConfig.model 默认值",
+        "NF-010: 100% LLM 调用 model = deepseek-v4-flash",
+        "Q-002 闭环: 实测支持 1M context"
+      ]
+    },
+    "S-004": {
+      "v11_prd_section": "F-004 / F-014 / Q-003 / R-002",
+      "key_sources": ["src-whisper-19", "src-whisper-45", "src-whisper-31", "src-whisper-13"],
+      "v11_prd_quotes": [
+        "F-004 验收 (2): 默认 model_size = medium",
+        "F-014 验收 (2): 新增 --transcriber-size 参数",
+        "Q-003 闭环: 标准普通话 CER 4-8%（92-96% 准确率）"
+      ]
+    },
+    "S-005": {
+      "v11_prd_section": "F-006 / notes_schema / Q-004",
+      "key_sources": ["src-fm-13", "src-fm-22", "src-fm-12", "src-fm-50", "src-local-config"],
+      "v11_prd_quotes": [
+        "F-006 验收 (2): 字段命名空间隔离 video_* 前缀",
+        "notes_schema: video_id / video_source_url / video_title / video_author / video_duration / video_cover_url / video_tags / video_chapters[] / video_created_at",
+        "Q-004 闭环: yaml.safe_load 宽容未识别字段"
+      ]
+    },
+    "S-006": {
+      "v11_prd_section": "第 9 章 / A-006",
+      "key_sources": ["src-sol-62", "src-sol-17", "src-local-bilinote-reqs"],
+      "v11_prd_quotes": [
+        "第 9 章 集成边界表: 限定子目录 = BiliNote/backend/app/services/downloader/ + transcriber/",
+        "锁版本下限: yt-dlp>=2025.03.31, faster-whisper>=1.1.1, ffmpeg-python>=0.2.0, youtube-transcript-api>=1.0.0",
+        "Python >= 3.11"
+      ]
+    },
+    "S-007": {
+      "v11_prd_section": "G-007 / AC-E2E-08 / preflight / RR-010",
+      "key_sources": ["src-risk-42", "src-tech-54", "src-whisper-31", "src-local-prd"],
+      "v11_prd_quotes": [
+        "G-007: 第⑧棒启动前 preflight check: deno/node/ffmpeg/Whisper 模型 4 项",
+        "AC-E2E-08: 缺依赖拍在产物日志显式标注 [SIM-STUB], 不掩盖; 真实跑的拍 >= 1/2",
+        "§6.2: preflight 4 项详细规范",
+        "§9: preflight 子模块 ~150 行",
+        "RR-010: 第⑧棒 preflight 4 项全部缺失"
+      ]
+    },
+    "S-008": {
+      "v11_prd_section": "Q-007 / F-005 / A-008",
+      "key_sources": ["src-tech-19", "src-tech-31"],
+      "v11_prd_quotes": [
+        "F-005 验收 (3): 单次调用 <= 20k input / 4k output",
+        "Q-007 PM 决策选项 A: 单次整合",
+        "A-008: 单次成本 ≈ $0.0011; 20 次/天 ≈ $0.20"
+      ]
+    },
+    "S-101": {
+      "v11_prd_section": "F-012 / NF-004",
+      "key_sources": ["src-risk-22", "src-risk-53"],
+      "v11_prd_quotes": [
+        "NF-004: Cookie 文件权限 600 校验 + yt-dlp >= 2023.07.06",
+        "F-012 验收 (3): CLI 启动时校验 yt-dlp --version >= 2023.07.06, 不通过返回 E_DL_002_VERSION_TOO_OLD"
+      ]
+    },
+    "S-102": {
+      "v11_prd_section": "F-009 / Q-006 / R-004",
+      "key_sources": ["src-risk-1.4", "src-risk-3.1"],
+      "v11_prd_quotes": [
+        "F-009 验收 (2): 缓存键 = sha256(url) + etag_or_last_modified",
+        "F-009 验收 (3): CLI 增加 --no-cache 强制刷新",
+        "Q-006 闭环: 升级为双键"
+      ]
+    },
+    "S-201": {
+      "v11_prd_section": "F-018",
+      "key_sources": ["src-bili-05"],
+      "v11_prd_quotes": [
+        "F-018 验收 (2): ffmpeg -vf select='eq(pict_type,I)' -vsync vfr -frames:v 5"
+      ]
+    },
+    "S-202": {
+      "v11_prd_section": "F-010 / R-202",
+      "key_sources": ["src-tech-19", "src-bili-05"],
+      "v11_prd_quotes": [
+        "F-010 验收 (2): 降级策略 chapters < 3 时按 5 分钟等距切片",
+        "F-010 验收 (3): 触发降级时返回 E_LLM_002_CHAPTERS_FALLBACK"
+      ]
+    }
+  },
+  "key_v11_sources": [
+    {
+      "id": "src-risk-42",
+      "url": "https://www.appinn.com/yt-dlp-returned-from-youtube-crackdown",
+      "level": "A",
+      "title": "yt-dlp 与 YouTube PO Token",
+      "v11_use": "S-002 / S-007 Deno 必装核心证据"
+    },
+    {
+      "id": "src-risk-53",
+      "url": "https://github.com/yt-dlp/yt-dlp/security/advisories/GHSA-v8mc-9377-rwjj",
+      "level": "S",
+      "title": "CVE-2023-35934 yt-dlp Cookie 泄露",
+      "v11_use": "S-101 版本下限证据"
+    },
+    {
+      "id": "src-tech-19",
+      "url": "https://wavespeed.ai/blog/posts/deepseek-v4-pro-vs-flash",
+      "level": "A",
+      "title": "DeepSeek V4 Pro vs Flash 对比",
+      "v11_use": "S-003 / S-008 1M context + 成本证据"
+    },
+    {
+      "id": "src-tech-31",
+      "url": "https://www.morphllm.com/deepseek-v4",
+      "level": "A",
+      "title": "DeepSeek V4 Architecture/Benchmarks",
+      "v11_use": "S-003 / S-008 1M context 来源"
+    },
+    {
+      "id": "src-whisper-19",
+      "url": "https://github.com/openai/whisper/discussions/1762",
+      "level": "S",
+      "title": "OpenAI Whisper large-v3 release",
+      "v11_use": "S-004 中文 CER 4.2% 证据"
+    },
+    {
+      "id": "src-whisper-45",
+      "url": "https://cloud.baidu.com/article/3679456",
+      "level": "B",
+      "title": "OpenAI Whisper 中文 性能优化指南",
+      "v11_use": "S-004 中文 92-95% 准确率"
+    },
+    {
+      "id": "src-sol-62",
+      "url": "https://github.com/JefferyHcool/BiliNote",
+      "level": "S",
+      "title": "BiliNote GitHub",
+      "v11_use": "S-006 移植可行性"
+    },
+    {
+      "id": "src-fm-13",
+      "url": "https://yaml.org/spec/1.2.2",
+      "level": "S",
+      "title": "YAML 1.2.2 规范",
+      "v11_use": "S-005 front matter 标准"
+    },
+    {
+      "id": "src-fm-22",
+      "url": "https://jekyllrb.com/docs/front-matter",
+      "level": "S",
+      "title": "Jekyll Front Matter",
+      "v11_use": "S-005 字段命名规范"
+    },
+    {
+      "id": "src-local-models",
+      "url": "C:/Users/yhn/Desktop/research-tool/src/domain/models.py",
+      "level": "S",
+      "title": "本地源码 research-tool 数据模型",
+      "v11_use": "S-003 model 默认值确认（deepseek-chat → deepseek-v4-flash 强制覆盖）"
+    },
+    {
+      "id": "src-local-bilinote-reqs",
+      "url": "C:/Users/yhn/BiliNote/backend/requirements.txt",
+      "level": "S",
+      "title": "本地源码 BiliNote 依赖",
+      "v11_use": "S-006 锁版本下限证据（yt-dlp==2025.3.31, faster-whisper==1.1.1, pydantic==2.11.2）"
+    }
+  ],
+  "untouched_directions_v11": [
+    {
+      "direction": "Q-008 Deno 预装状态实测",
+      "reason": "需用户机器实际环境，本棒不消耗测试资源",
+      "follow_up": "第⑧棒首次端到端跑通时自动检测 + 打印安装命令"
+    },
+    {
+      "direction": "preflight check 4 项的三平台覆盖率统计",
+      "reason": "需第⑧棒真实环境实测",
+      "follow_up": "第⑧棒首次跑通时附 1 份环境覆盖率统计"
+    }
+  ]
+}

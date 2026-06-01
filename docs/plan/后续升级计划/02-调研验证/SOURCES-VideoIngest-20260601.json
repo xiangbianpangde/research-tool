@@ -1,0 +1,158 @@
+{
+  "project": "VideoIngest V1.0",
+  "generated_at": "2026-06-01",
+  "generator": "RA-001",
+  "total_runs": 6,
+  "total_sources_raw": 364,
+  "sources_unique_estimate": 280,
+  "quality_distribution": {
+    "S": 35,
+    "A": 80,
+    "B": 145,
+    "C": 20
+  },
+  "runs": [
+    {
+      "run_id": "R-008-competitor",
+      "topic": "BiliNote VideoLingo EchoFlow Glarity AI视频笔记工具 竞品对比",
+      "category": "竞品",
+      "output_dir": "C:/Users/yhn/Desktop/调研/research-tool/research-output/bilinote-videolingo-echoflow-glarity-ai-shi-pin-bi-ji-gong-ju-jing-pin-dui-bi/",
+      "report_path": "C:/Users/yhn/Desktop/调研/research-tool/research-output/bilinote-videolingo-echoflow-glarity-ai-shi-pin-bi-ji-gong-ju-jing-pin-dui-bi/report.md",
+      "raw_source_count": 63,
+      "key_sources": [
+        {"id": "src-bili-08", "url": "https://github.com/JefferyHcool/BiliNote", "level": "S", "title": "BiliNote 官方仓库", "use": "技术栈/功能/部署"},
+        {"id": "src-bili-05", "url": "https://bibigpt.co/blog/posts/bilinote-vs-bibigpt-bilibili-note-taking-2026", "level": "B", "title": "BibiGPT 对比 BiliNote", "use": "竞品对比"},
+        {"id": "src-bili-32", "url": "https://hovernotes.io/en/blog/ai-video-notes", "level": "B", "title": "AI Video Note Taking", "use": "市场背景"},
+        {"id": "src-bili-33", "url": "https://github.com/Huanshere/VideoLingo", "level": "S", "title": "VideoLingo 官方仓库", "use": "翻译类竞品对比"},
+        {"id": "src-bili-42", "url": "https://aitools.aiting.com/ai/glarity", "level": "B", "title": "Glarity AI 评测", "use": "浏览器插件类竞品"}
+      ]
+    },
+    {
+      "run_id": "R-008-tech",
+      "topic": "yt-dlp fast-whisper deepseek-v4-flash 框架对比 视频转写 选型",
+      "category": "技术",
+      "output_dir": "C:/Users/yhn/Desktop/调研/research-tool/research-output/yt-dlp-fast-whisper-deepseek-v4-flash-kuang-jia-dui-bi-shi-pin-zhuan-xie-xuan-xing/",
+      "report_path": "C:/Users/yhn/Desktop/调研/research-tool/research-output/yt-dlp-fast-whisper-deepseek-v4-flash-kuang-jia-dui-bi-shi-pin-zhuan-xie-xuan-xing/report.md",
+      "raw_source_count": 62,
+      "key_sources": [
+        {"id": "src-tech-19", "url": "https://wavespeed.ai/blog/posts/deepseek-v4-pro-vs-flash", "level": "A", "title": "DeepSeek V4 Pro vs Flash 对比", "use": "F-005 / Q-002 核心证据"},
+        {"id": "src-tech-31", "url": "https://www.morphllm.com/deepseek-v4", "level": "A", "title": "DeepSeek V4 Architecture/Benchmarks", "use": "1M context 来源"},
+        {"id": "src-tech-20", "url": "https://modal.com/blog/choosing-whisper-variants", "level": "A", "title": "faster-whisper vs WhisperX", "use": "F-004 选型证据"},
+        {"id": "src-tech-51", "url": "https://roundproxies.com/blog/yt-dlp", "level": "B", "title": "yt-dlp 2026 Guide", "use": "F-003 工具文档"},
+        {"id": "src-tech-54", "url": "https://www.devkantkumar.com/blog/yt-dlp-ultimate-guide-2026", "level": "B", "title": "yt-dlp Ultimate Guide", "use": "F-003 命令参考"},
+        {"id": "src-tech-16", "url": "https://www.codesota.com/guides/speech-recognition", "level": "B", "title": "Speech Recognition 2026 Benchmark", "use": "成本对比 $0.05-0.15/小时"}
+      ]
+    },
+    {
+      "run_id": "R-008-solution",
+      "topic": "research-tool 视频摄入 集成方案 自研 vs 移植 BiliNote vs 调用在线API",
+      "category": "方案",
+      "output_dir": "C:/Users/yhn/Desktop/调研/research-tool/research-output/research-tool-shi-pin-she-ru-ji-cheng-fang-an-zi-yan-vs-yi-zhi-bilinote-vs-diao-yong-zai-xian-api/",
+      "report_path": "C:/Users/yhn/Desktop/调研/research-tool/research-output/research-tool-shi-pin-she-ru-ji-cheng-fang-an-zi-yan-vs-yi-zhi-bilinote-vs-diao-yong-zai-xian-api/report.md",
+      "raw_source_count": 62,
+      "key_sources": [
+        {"id": "src-sol-62", "url": "https://github.com/JefferyHcool/BiliNote", "level": "S", "title": "BiliNote GitHub", "use": "移植可行性"},
+        {"id": "src-sol-17", "url": "https://bibigpt.co/es/blog/posts/bilinote-vs-bibigpt-open-source-bilibili-video-notes-2026", "level": "B", "title": "BiliNote 仅支持 B 站", "use": "F-003 平台广度证据"},
+        {"id": "src-sol-22", "url": "https://dev.to/masonwritescode/why-i-stopped-self-hosting-videos-and-moved-to-a-video-api-fn3", "level": "B", "title": "Why I stopped self-hosting videos", "use": "自研方案成本"},
+        {"id": "src-sol-32", "url": "https://github.com/JefferyHcool/BiliNote/releases", "level": "S", "title": "BiliNote Releases", "use": "v2.2.0 tiny 默认证据"},
+        {"id": "src-sol-44", "url": "https://www.openai-hub.com/news/435", "level": "A", "title": "BiliSum 多模态视频笔记", "use": "未来架构参考"}
+      ]
+    },
+    {
+      "run_id": "R-008-risk",
+      "topic": "yt-dlp 哔哩哔哩 YouTube 反爬 限速 风险 Cookie 视频下载",
+      "category": "风险",
+      "output_dir": "C:/Users/yhn/Desktop/调研/research-tool/research-output/yt-dlp-bi-li-bi-li-youtube-fan-pa-xian-su-feng-xian-cookie-shi-pin-xia-zai/",
+      "report_path": "C:/Users/yhn/Desktop/调研/research-tool/research-output/yt-dlp-bi-li-bi-li-youtube-fan-pa-xian-su-feng-xian-cookie-shi-pin-xia-zai/report.md",
+      "raw_source_count": 57,
+      "key_sources": [
+        {"id": "src-risk-42", "url": "https://www.appinn.com/yt-dlp-returned-from-youtube-crackdown", "level": "A", "title": "yt-dlp 与 YouTube PO Token", "use": "F-003 Deno 必装核心证据"},
+        {"id": "src-risk-53", "url": "https://github.com/yt-dlp/yt-dlp/security/advisories/GHSA-v8mc-9377-rwjj", "level": "S", "title": "CVE-2023-35934 yt-dlp Cookie 泄露", "use": "NF-004 风险"},
+        {"id": "src-risk-15", "url": "https://github.com/yt-dlp/yt-dlp/issues/10849", "level": "S", "title": "B 站 1MB/s 限速", "use": "F-003 风险"},
+        {"id": "src-risk-17", "url": "https://github.com/deniscerri/ytdlnis/issues/953", "level": "B", "title": "BiliBili won't download 4K 提示", "use": "F-012 Cookie 必装证据"},
+        {"id": "src-risk-22", "url": "https://github.com/yt-dlp/yt-dlp/wiki/FAQ", "level": "S", "title": "yt-dlp 官方 FAQ", "use": "Cookie 命令参考"}
+      ]
+    },
+    {
+      "run_id": "R-004-assumption",
+      "topic": "fast-whisper 中文 技术术语 准确率 CER 评测 优化",
+      "category": "假设单条验证",
+      "output_dir": "C:/Users/yhn/Desktop/调研/research-tool/research-output/fast-whisper-zhong-wen-ji-shu-shu-yu-zhun-que-lv-cer-ping-ce-you-hua/",
+      "report_path": "C:/Users/yhn/Desktop/调研/research-tool/research-output/fast-whisper-zhong-wen-ji-shu-shu-yu-zhun-que-lv-cer-ping-ce-you-hua/report.md",
+      "raw_source_count": 64,
+      "key_sources": [
+        {"id": "src-whisper-19", "url": "https://github.com/openai/whisper/discussions/1762", "level": "S", "title": "OpenAI Whisper large-v3 release", "use": "中文 CER 4.2% 证据"},
+        {"id": "src-whisper-45", "url": "https://cloud.baidu.com/article/3679456", "level": "B", "title": "OpenAI Whisper 中文 性能优化指南", "use": "中文 92-95% 准确率"},
+        {"id": "src-whisper-31", "url": "https://clawbot.ai/wiki/ai-processing/faster-whisper-optimized-whisper.html", "level": "B", "title": "Faster Whisper 优化原理", "use": "F-004 INT8 量化"},
+        {"id": "src-whisper-09", "url": "https://www.cnblogs.com/yangykaifa/p/19290247", "level": "C", "title": "faster-whisper 热词详解", "use": "F-014 热词优化"},
+        {"id": "src-whisper-57", "url": "https://whispernotes.app/blog/sensevoice-fastest-cjk-transcription", "level": "B", "title": "SenseVoice 粤语 7.09% CER", "use": "Whisper 方言对比"}
+      ]
+    },
+    {
+      "run_id": "R-005-assumption",
+      "topic": "research-tool raw markdown yaml front matter schema 解析器 兼容性 知识树",
+      "category": "假设单条验证",
+      "output_dir": "C:/Users/yhn/Desktop/调研/research-tool/research-output/research-tool-raw-markdown-yaml-front-matter-schema-jie-xi-qi-jian-rong-xing-zhi-shi-shu/",
+      "report_path": "C:/Users/yhn/Desktop/调研/research-tool/research-output/research-tool-raw-markdown-yaml-front-matter-schema-jie-xi-qi-jian-rong-xing-zhi-shi-shu/report.md",
+      "raw_source_count": 56,
+      "key_sources": [
+        {"id": "src-fm-13", "url": "https://yaml.org/spec/1.2.2", "level": "S", "title": "YAML 1.2.2 规范", "use": "front matter 标准"},
+        {"id": "src-fm-22", "url": "https://jekyllrb.com/docs/front-matter", "level": "S", "title": "Jekyll Front Matter", "use": "字段命名规范"},
+        {"id": "src-fm-50", "url": "https://ventral.digital/posts/2021/2/20/input-validation-json-schemas-best-practices", "level": "B", "title": "JSON Schema 验证最佳实践", "use": "F-006 schema 建议"},
+        {"id": "src-fm-12", "url": "https://blog.trysteakhouse.com/blog/front-matter-standard-using-yaml-metadata-programmatically-control-crawler-behavior", "level": "A", "title": "Front-Matter Standard", "use": "LLM 元数据提取 30-40% 提升"},
+        {"id": "src-local-models", "url": "C:/Users/yhn/Desktop/research-tool/src/domain/models.py", "level": "S", "title": "本地源码：research-tool 数据模型", "use": "PyYAML safe_load 确认"}
+      ]
+    }
+  ],
+  "local_inspections": [
+    {
+      "path": "C:/Users/yhn/Desktop/research-tool/src/domain/models.py",
+      "purpose": "R-005 验证解析器（确认 PyYAML safe_load，front matter 解析宽容）",
+      "key_findings": [
+        "line 33: model default = 'deepseek-chat' (即 v3)，本集成 v1.0 需覆盖为 'deepseek-v4-flash'",
+        "line 22: SearchEngine Literal 含预留 'bilibili' 注释，说明 BiliNote 集成已规划"
+      ]
+    },
+    {
+      "path": "C:/Users/yhn/Desktop/research-tool/docs/plan/集成bilinote-plan/00-PRD.md",
+      "purpose": "R-006 验证既有移植规划",
+      "key_findings": [
+        "v0.2.0 草稿日期 2026-07，FP11 视频/音频转图文笔记",
+        "FR2.1 默认 fast-whisper tiny（与本调研 medium 建议冲突）",
+        "FR2.3 平台字幕优先：B 站 player API / YouTube InnerTube",
+        "FR3.4 下游阶段零改动复用",
+        "NFR2 现有兼容 92/92 测试全绿"
+      ]
+    },
+    {
+      "path": "C:/Users/yhn/BiliNote/backend/requirements.txt",
+      "purpose": "R-006 验证依赖兼容性",
+      "key_findings": [
+        "line 34: faster-whisper==1.1.1",
+        "line 35: ffmpeg-python==0.2.0",
+        "line 80: pydantic==2.11.2 (v2，与 research-tool 一致)",
+        "line 127: youtube-transcript-api>=1.0.0",
+        "line 128: yt-dlp==2025.3.31",
+        "line 19: chromadb>=0.5.0 (跳过，research-tool 不需要)",
+        "line 15: celery==5.5.1 (跳过，任务队列不需要)"
+      ]
+    }
+  ],
+  "untouched_directions": [
+    {
+      "direction": "B 站具体 IP 限速阈值（不同地区不同时段差异）",
+      "reason": "需实测当地网络 + B 站 API 响应时间，本棒不消耗测试 IP 配额",
+      "follow_up": "建议在第⑧棒真实跑通时一并测量"
+    },
+    {
+      "direction": "抖音/快手/小宇宙等 v1.1 候选平台",
+      "reason": "PRD B-001 明确锁 v1.0 不做",
+      "follow_up": "留待 v1.1 调研"
+    },
+    {
+      "direction": "M-NNN 模块划分（DD-001 输出）",
+      "reason": "Q-005 依赖 SA-001，本棒不阻塞",
+      "follow_up": "在 SA-001 输出后由 PM 合并"
+    }
+  ]
+}

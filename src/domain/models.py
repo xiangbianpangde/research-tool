@@ -1,0 +1,335 @@
+"""所有公开数据模型（Pydantic v2）。
+
+配置模型对应 04-配置结构设计.md；结果模型对应 01-核心引擎设计.md 与
+05-数据流与文件规范.md 的各 Stage 输入/输出契约。
+"""
+
+from __future__ import annotations
+
+from pathlib import Path
+from typing import Literal
+
+from pydantic import BaseModel, Field, model_validator
+
+# --------------------------------------------------------------------------- #
+# 配置模型
+# --------------------------------------------------------------------------- #
+
+Provider = Literal["openai", "deepseek", "ollama", "anthropic"]
+SearchEngine = Literal[
+    "web", "arxiv", "tavily", "scholar",
+    "semantic_scholar", "wikipedia", "github", "pubmed", "google_news",
+    "openalex", "crossref",
+    # 预留 P3（BiliNote 多模态）："bilibili"
+]
+ExtractTask = Literal["ner", "re", "triple"]
+StageName = Literal["collect", "deepen", "clean", "extract", "organize", "report"]
+
+
+class LLMConfig(BaseModel):
+    """LLM 连接配置。依据 04 §1 llm 段。"""
+
+    provider: Provider = "deepseek"
+    model: str = "deepseek-chat"
+    api_key: str | None = None
+    base_url: str | None = None
+    temperature: float = Field(default=0.3, ge=0.0, le=2.0)
+    max_tokens: int = Field(default=4096, gt=0)
+
+
+class CollectorConfig(BaseModel):
+    """采集配置。依据 01 §2.3 + 04 collector 段。"""
+
+    search_engines: list[SearchEngine] = Field(default_factory=lambda: ["web"])
+    max_results_per_engine: int = Field(default=8, gt=0)
+    depth: int = Field(default=2, ge=1, le=3)
+    language: Literal["zh", "en", "both"] = "both"
+    concurrency: int = Field(default=4, gt=0)  # 抓取层并发
+    # 搜索层并发上限：限制 engine×query 同时发出的请求数，缓解 DDG/Tavily 限流
+    max_concurrent_searches: int = Field(default=3, gt=0)
+    timeout_sec: int = Field(default=30, gt=0)
+    tavily_api_key: str | None = None
+    # 可选 Key：提升对应后端配额（无 Key 也能用，仅限流更严）
+    semantic_scholar_api_key: str | None = None
+    github_token: str | None = None
+    # 邮箱（可选）：OpenAlex/Crossref 的 polite pool，填了限流更宽更稳
+    openalex_mailto: str | None = None
+    # 多轮搜索（方法论 1.1）：1=仅核心词 2=+交叉/相关概念 3=+补充细化
+    search_rounds: int = Field(default=1, ge=1, le=3)
+    max_total_results: int = Field(default=40, gt=0)  # 多轮去重后的总量上限
+    # 用 LLM 动态生成贴主题的多轮查询（替代模板扩展，需提供 llm）
+    llm_query_expansion: bool = False
+    # 用户显式提供的额外查询（最高优先级，直接并入搜索；适合点名要找的论文/方法）
+    extra_queries: list[str] = Field(default_factory=list)
+    # 核心词（P1）：两阶段搜索的去锚锚点。设置后 Phase2 用它（而非含机构名的
+    # 整条 topic）展开查询，突破"被单一机构/限定语绑架"的偏差。如 topic=
+    # "中南民族大学 康怡琳" + core_keyword="康怡琳"。
+    core_keyword: str | None = None
+    # 维度标签（P1）：仅在 Phase2（去锚）生效，与 core_keyword 组合展开查询维度，
+    # 如 ["博士", "论文", "南洋理工"]。Phase1（锚定）不加 facets，保证窄查询精准。
+    facets: list[str] = Field(default_factory=list)
+    # 时间标签（P2）：限定发表年份窗口（含起止）。None=不限。
+    # 学科调研统一过滤；人物调研一般不设（让 deepen 按画像时间线逐节点过滤）。
+    # 仅支持原生过滤的源生效（openalex/s2/crossref/pubmed），arxiv 客户端过滤，
+    # web/wikipedia 忽略。
+    from_year: int | None = None
+    to_year: int | None = None
+    # Deep-Search 深搜（P2）：多排序策略 × 多页翻页，突破"单次只取第1页相关性排序"
+    # 的覆盖不足。每个 (engine, query) 展开为 deep_pages × deep_sorts 次搜索后去重。
+    deep_search: bool = False
+    deep_pages: int = Field(default=3, ge=1, le=10)   # 翻页页数
+    deep_sorts: list[str] = Field(  # 排序策略，relevance=后端默认相关性
+        default_factory=lambda: ["relevance", "date", "citations"]
+    )
+    # 搜索结果磁盘缓存（缓解 arxiv 等限流；按 engine+query 哈希）
+    search_cache: bool = True
+    cache_dir: str | None = None  # None=~/.research/cache/search
+    cache_ttl_sec: int = Field(default=86400, ge=0)  # 缓存有效期，0=永不过期
+    # 抓到 PDF 时用 MinerU 解析为正文（否则跳过，绝不把二进制塞进 raw）
+    parse_pdf: bool = True
+    mineru_cmd: str | None = None  # mineru 可执行路径，None=走 PATH
+    # 垃圾过滤：抓取正文短于此字符数的结果直接丢弃（登录页/导航页等）
+    min_doc_chars: int = Field(default=200, ge=0)
+
+
+class PdfIngestConfig(BaseModel):
+    """PDF 摄取配置（pdf2zh/MinerU 集成）。"""
+
+    mineru_backend: Literal[
+        "pipeline", "vlm-auto-engine", "hybrid-auto-engine",
+        "vlm-http-client", "hybrid-http-client",
+    ] = "pipeline"
+    ocr_lang: str = "en"            # MinerU OCR 语言提示
+    mineru_cmd: str | None = None   # 自定义 mineru 可执行路径（默认走 PATH）
+    start_page: int | None = None
+    end_page: int | None = None
+    translate: bool = False         # 是否把英文 MD 翻译成中文（可选）
+    translate_chunk_size: int = Field(default=3000, gt=0)
+    translate_concurrency: int = Field(default=8, gt=0)
+
+
+class CleanerConfig(BaseModel):
+    """清洗配置。依据 01 §3.3 + 04 cleaner 段。"""
+
+    strip_html: bool = True
+    strip_nav: bool = True
+    strip_ads: bool = True
+    find_content_start: bool = True
+    min_content_length: int = Field(default=200, ge=0)
+    # MinHash 去重（P2-5）：char n-gram Jaccard 相似度 ≥阈值视为重复，组内保留
+    # 最长文本，其余标 dedup_of。0=关闭去重。
+    dedup_similarity: float = Field(default=0.85, ge=0.0, le=1.0)
+    # LLM 相关性过滤（P2-5）：批量对清洗后文档评 0-1 分，低分剔出 clean/（raw/
+    # 保留以便溯源）。默认关——开启会显著增加 LLM 调用。
+    relevance_filter: bool = False
+    relevance_threshold: float = Field(default=0.4, ge=0.0, le=1.0)
+    relevance_batch_size: int = Field(default=10, gt=0)
+
+
+class ExtractorConfig(BaseModel):
+    """抽取配置。依据 01 §4.3 + 04 extractor 段。"""
+
+    enabled: bool = True
+    tasks: list[ExtractTask] = Field(default_factory=lambda: ["ner", "triple"])
+    entity_types: list[str] | None = None
+    relation_types: list[str] | None = None
+    chunk_size: int = Field(default=4000, gt=0)
+    overlap: int = Field(default=200, ge=0)
+
+
+class OrganizerConfig(BaseModel):
+    """组织配置。依据 01 §5.3 + 04 organizer 段。"""
+
+    max_nodes: int = Field(default=7, gt=0)
+    min_nodes: int = Field(default=4, gt=0)
+    node_template: str = "S1-S4"
+    # 反向传播质量评估（P2-6）：节点正文中 "来源NN" 引用数 <此 → 判为稀疏节点
+    min_evidence_per_node: int = Field(default=3, ge=1)
+
+    @model_validator(mode="after")
+    def _check_node_bounds(self) -> "OrganizerConfig":
+        if self.min_nodes > self.max_nodes:
+            raise ValueError(
+                f"min_nodes ({self.min_nodes}) 不能大于 max_nodes ({self.max_nodes})"
+            )
+        return self
+
+
+class ReporterConfig(BaseModel):
+    """报告配置。依据 01 §6.3 + 04 reporter 段。"""
+
+    format: Literal["markdown", "html"] = "markdown"
+    style: Literal["report", "feasibility", "review", "article"] = "report"
+    max_length: int = Field(default=30000, gt=0)
+
+
+class DeepenConfig(BaseModel):
+    """反偏差深挖配置（Phase 2）。依据升级计划 §4。"""
+
+    enabled: bool = True               # false 或 --skip deepen 跳过深挖
+    # 画像提取（P1）：从 raw/ 摘要让 LLM 抽结构化画像（中英文名/机构/领域），
+    # 再据此生成注入查询（如补"英文名 NTU"）。失败回退现行实体查询。
+    profile_extract: bool = True
+    # 画像迭代轮数（P2-4）：=1 仅 P1 单轮；≥2 启用 timeline 回溯 + 同名消歧 + 重抽画像循环
+    profile_iterations: int = Field(default=1, ge=1, le=5)
+    min_new_files_per_iter: int = Field(default=2, ge=0)      # 本轮新增文件 <此 → 提前终止
+    min_profile_confidence: float = Field(default=0.85, ge=0.0, le=1.0)  # 画像置信度达此 → 终止
+    timeline_backtrack: bool = True    # 对画像每段经历做带时间窗口的回溯搜索
+    disambiguation: bool = True        # 同名消歧：LLM 判每份资料是否属于核心实体，他人的移到 raw/_disambig/
+    depth: int = Field(default=2, ge=1, le=3)    # 深挖轮次
+    breadth: int = Field(default=4, ge=2, le=8)  # 每轮补充查询数上限
+    entity_split: bool = True          # 拆分多实体话题（人物/组织等）
+    max_entities: int = Field(default=5, ge=1, le=8)  # 实体拆分上限（风险 7）
+    gap_detection: bool = True         # 扫描已采内容识别缺失维度
+    contradiction_check: bool = True   # 检测矛盾并反向验证
+    # 喂给 LLM 做缺口分析时的上下文截断（风险 4：每文件取标题+摘要，总量封顶）
+    max_input_chars: int = Field(default=20000, gt=0)
+    per_file_chars: int = Field(default=300, gt=0)
+
+
+class PipelineConfig(BaseModel):
+    """管道总配置。依据 01 §7.3 + 03 §2。"""
+
+    topic: str = ""
+    work_dir: Path = Path("./research-output")
+    stages: list[StageName] = Field(
+        default_factory=lambda: [
+            "collect", "deepen", "clean", "extract", "organize", "report"
+        ]
+    )
+    collector: CollectorConfig = Field(default_factory=CollectorConfig)
+    deepen: DeepenConfig = Field(default_factory=DeepenConfig)
+    pdf_ingest: PdfIngestConfig = Field(default_factory=PdfIngestConfig)
+    pdf_dir: str | None = None  # 设置后 collect 阶段改为摄取该目录下的 PDF
+    cleaner: CleanerConfig = Field(default_factory=CleanerConfig)
+    extractor: ExtractorConfig = Field(default_factory=ExtractorConfig)
+    organizer: OrganizerConfig = Field(default_factory=OrganizerConfig)
+    reporter: ReporterConfig = Field(default_factory=ReporterConfig)
+    llm: LLMConfig = Field(default_factory=LLMConfig)
+    resume: bool = True  # 幂等跳过已完成 Stage（05 §5）
+    # 反向传播（P2-6）：完成一次正向后，让 organizer 评估知识树质量，把稀疏节点/
+    # 知识断层/矛盾产出修正查询回到 collect 重跑。0=不启用（向后兼容）。
+    max_backward_rounds: int = Field(default=0, ge=0, le=3)
+
+
+# --------------------------------------------------------------------------- #
+# 结果模型
+# --------------------------------------------------------------------------- #
+
+
+class Source(BaseModel):
+    """单条采集来源。对应 sources.json 一项（05 §3 Stage1）。"""
+
+    url: str
+    title: str = ""
+    fetched_at: str = ""
+    source_engine: str = ""
+    content_hash: str = ""
+
+
+class CollectResult(BaseModel):
+    files: list[Path] = Field(default_factory=list)
+    sources: list[Source] = Field(default_factory=list)
+    raw_dir: Path
+    # 搜索后端失败/被丢弃的提示（修复 1：可观测，不再静默）
+    warnings: list[str] = Field(default_factory=list)
+
+
+class DeepenResult(BaseModel):
+    """深挖阶段产出统计。"""
+
+    entities: list[str] = Field(default_factory=list)   # 拆出的实体
+    queries: list[str] = Field(default_factory=list)    # 实际执行的补充查询
+    new_files: list[Path] = Field(default_factory=list)  # 新增 raw 文件
+    warnings: list[str] = Field(default_factory=list)
+
+
+class FileQuality(BaseModel):
+    original_size: int
+    cleaned_size: int
+    score: float
+    issues: list[str] = Field(default_factory=list)
+
+
+class CleanResult(BaseModel):
+    files: list[Path] = Field(default_factory=list)
+    quality_report: dict[str, FileQuality] = Field(default_factory=dict)
+    clean_dir: Path
+
+
+class Entity(BaseModel):
+    name: str
+    type: str
+    source_file: str = ""
+    source_line: int = 0
+    confidence: float = 1.0
+
+
+class Relation(BaseModel):
+    subject: str
+    predicate: str
+    object: str
+    source_file: str = ""
+    confidence: float = 1.0
+
+
+class Triple(BaseModel):
+    head: str
+    relation: str
+    tail: str
+    source_file: str = ""
+
+
+class ExtractResult(BaseModel):
+    entities: list[Entity] = Field(default_factory=list)
+    relations: list[Relation] = Field(default_factory=list)
+    triples: list[Triple] = Field(default_factory=list)
+    schema_: dict | None = Field(default=None, alias="schema")
+    output_dir: Path
+
+    model_config = {"populate_by_name": True}
+
+
+class OrganizeResult(BaseModel):
+    main_table: Path
+    nodes: list[Path] = Field(default_factory=list)
+    cross_refs: dict = Field(default_factory=dict)
+    tree_dir: Path
+
+
+class FeedbackPlan(BaseModel):
+    """P2-6 反向传播：知识树质量评估后产出的修正查询计划。"""
+
+    sparse_nodes: list[str] = Field(default_factory=list)  # 证据不足的节点标题
+    queries: list[str] = Field(default_factory=list)       # 用于回到 collect 的修正查询
+    notes: list[str] = Field(default_factory=list)         # 矛盾/断层等观察
+
+
+class ReportResult(BaseModel):
+    report_path: Path
+    word_count: int = 0
+    source_count: int = 0
+
+
+class StageEvent(BaseModel):
+    """流式执行事件。依据 03 §2 StageEvent。"""
+
+    stage: str
+    status: Literal["started", "progress", "completed", "failed", "skipped"]
+    progress: float = 0.0
+    message: str = ""
+    data: dict | None = None
+
+
+class PipelineResult(BaseModel):
+    topic_dir: Path
+    stages_completed: list[str] = Field(default_factory=list)
+    stages_skipped: list[str] = Field(default_factory=list)
+    failed_stage: str | None = None
+    elapsed_sec: float = 0.0
+    collect_result: CollectResult | None = None
+    deepen_result: DeepenResult | None = None
+    clean_result: CleanResult | None = None
+    extract_result: ExtractResult | None = None
+    organize_result: OrganizeResult | None = None
+    report_result: ReportResult | None = None

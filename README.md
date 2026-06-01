@@ -2,25 +2,29 @@
 
 一个 **Python 核心引擎 + 多接口层** 的调研工具：给定主题 → 自动产出知识树 / 调研报告。
 
-实现依据 `../架构设计/` 下 8 份设计文档。五阶段管道，Stage 之间仅通过文件系统通信，可中断、可恢复、可独立调试。
+实现依据 `../架构设计/` 下 8 份设计文档。六阶段管道，Stage 之间仅通过文件系统通信，可中断、可恢复、可独立调试。
 
 ```
 topic ─→ Collect ─→ Deepen ─→ Clean ─→ Extract ─→ Organize ─→ Report ─→ report.md
-         raw/       raw/++     clean/    extracted/  tree/
+         raw/       raw/++     clean/    extracted/  tree/        │
+            ▲                                                     │
+            │  Backward（可选，P2-6）：评估知识树质量              │
+            └──────── 生成修正查询 → 重采 → 下一轮正向 ◀──────────┘
 ```
 
 | 阶段 | 职责 | 输出 |
 |------|------|------|
-| Collect | 搜索（见下方 7 个源）+ 抓取（Crawl4AI，回退 httpx） | `raw/*.md` + `sources.json` |
-| Deepen | 反偏差深挖：实体拆分→多视角搜索 + 缺口/矛盾补搜（可选，默认开） | 追加 `raw/*.md` + `.deepen_done` |
-| Clean | 去 HTML/导航/广告噪音，定位正文 | `clean/*.md` + `quality.json` |
+| Collect | 搜索 10 源（见下方）+ 抓取（Crawl4AI，回退 httpx）。**P1 两阶段锚定/去锚** + **P2 时间窗口 + deep-search 多排序翻页** | `raw/*.md` + `sources.json` |
+| Deepen | 反偏差深挖：实体拆分→多视角搜索 + 缺口/矛盾补搜。**P1 LLM 结构化画像注入英文名去锚** + **P2 时间线回溯 + 同名消歧 + 多轮迭代**（可选，默认开） | 追加 `raw/*.md` + `raw/_disambig/` + `.deepen_done` |
+| Clean | 去 HTML/导航/广告噪音，定位正文。**P2 MinHash 去重 + LLM 相关性过滤** | `clean/*.md` + `quality.json` |
 | Extract | LLM 抽取实体/关系/三元组（可选） | `extracted/*.json` |
-| Organize | LLM 构建 4–7 节点知识树（S1–S4） | `tree/00-主表.md` + `N*.md` |
+| Organize | LLM 构建 4–7 节点知识树（S1–S4）。**P2 节点质量评估** | `tree/00-主表.md` + `N*.md` |
 | Report | LLM 合成报告（report/feasibility/review/article） | `report.md` |
+| Backward | 反向传播（可选，`max_backward_rounds>0`）：稀疏节点/断层/矛盾 → LLM 生成修正查询 → 追加 raw → 下一轮正向 | 触发循环，无单独产物 |
 
 ## 一键启动（Windows，推荐）
 
-双击 **`start.bat`** 即可。首次运行自动建 `.venv`、装依赖（2-5 分钟），并从
+双击 **`scripts/start.bat`** 即可。首次运行自动建 `.venv`、装依赖（2-5 分钟），并从
 `.env`（脚本目录 / 上级目录 / 用户目录任一）读取 `deepseek_api_key`、
 `tavily_api_key`。之后是菜单：
 
@@ -63,7 +67,7 @@ pip install openai           # LLM 客户端（DeepSeek/OpenAI 兼容）
 
 ## 配置
 
-复制 `config.example.yaml` 为 `config.yaml`，至少配置 LLM：
+复制 `docs/config.example.yaml` 为 `config.yaml`，至少配置 LLM：
 
 ```yaml
 llm:
@@ -96,7 +100,20 @@ research status  ./research-output/transformer        # 查看进度
 research config                                       # 查看解析后的配置
 research run "X" --skip extract --no-resume           # 跳过抽取/不跳过已完成
 research run "X" --skip deepen                        # 关闭反偏差深挖（更快/更省）
+
+# P1 两阶段锚定/去锚（解决"机构名锚定"偏差）
+research run "中南民族大学 康怡琳" --core "康怡琳" --facets "博士,论文,南洋理工"
+
+# P2 时间窗口（学科调研限定窗口；人物调研可不设让画像逐节点过滤）
+research collect "graph in-context learning" --from-year 2023 --to-year 2027 -s openalex
+
+# P2 deep-search（多排序×多页翻页，命中更全；建议配合 --deep-pages 控制成本）
+research collect "扩散模型" --deep-search --deep-pages 3 --deep-sorts "relevance,date,citations" -s openalex
 ```
+
+**复合 P2 选项需写 config.yaml**（CLI 还未暴露全部 P2 标志）：`relevance_filter`、
+`profile_iterations`、`max_backward_rounds`、`min_evidence_per_node` 等在
+`docs/config.example.yaml` 都有示例。
 
 ### 搜索源（`-s`，可多选）
 
@@ -118,9 +135,54 @@ research run "X" --skip deepen                        # 关闭反偏差深挖（
 可选 Key/邮箱在 `config.yaml` 配 `semantic_scholar_api_key` / `github_token` /
 `openalex_mailto`（OpenAlex·Crossref 的 polite pool，更稳）提升配额——均不配也能用。
 
+### P1 两阶段锚定/去锚 + P2 deep-search / 时间窗口
+
+Collect 阶段升级（按需启用，零配置时行为不变）：
+
+- **核心词 `--core` / 维度标签 `--facets`（P1）**：
+  Phase1 用整条 topic 锚定身份（如 `"中南民族大学 康怡琳"`），Phase2 用核心词
+  去锚（如单独搜 `"康怡琳"`、`"康怡琳 博士"`、`"康怡琳 论文"`），突破被单一
+  机构/限定语绑架的查询偏差。facets 只在 Phase2 生效。
+- **时间窗口 `--from-year` / `--to-year`（P2）**：openalex/semantic_scholar/
+  crossref/pubmed 原生过滤；arxiv 客户端过滤；其余源忽略。
+- **deep-search `--deep-search`（P2）**：每查询展开 `deep_pages × deep_sorts`
+  矩阵搜索（默认 3 页 × `relevance,date,citations`）；缓存键已纳入 sort/offset，
+  不串缓存。
+
 ### Deepen 反偏差深挖
 
-`run` 默认在 Collect 后插入 Deepen：先把话题**拆成独立实体**做多视角搜索（消除"单一锚点绑架"偏差，如 `"康怡琳 中南民族大学"` 会独立搜 `"Yilin Kang"`、`"康怡琳 博士"`），再扫描已采内容**补搜缺失维度**、对**矛盾信息**反向验证。调优参数全部在 `config.yaml` 的 `deepen:` 段（depth/breadth/max_entities 等），`--skip deepen` 一键关闭。
+`run` 默认在 Collect 后插入 Deepen，分多个机制：
+
+- **A 实体拆分**：把话题拆成独立实体做多视角搜索（消除"单一锚点绑架"偏差）
+- **P1 画像注入**：LLM 从 raw 摘要抽**结构化画像**（中英文名/机构/领域/关键词），
+  以**英文名优先**生成去锚查询——这是为什么人物调研能挖到 Google Scholar/dblp/
+  OpenReview/海外机构信息（OpenAlex 中文人名检索几乎无效，英文名是关键突破点）
+- **P2 画像迭代**（`profile_iterations≥2`）：
+  - **时间线回溯**：画像每段经历（如"2020–2024 南洋理工 博士"）用带年份过滤的
+    搜索回溯，命中时间窗内的论文
+  - **同名消歧**：LLM 按画像（机构+领域）判每份 raw 是否属于核心实体，他人移到
+    `raw/_disambig/`（**安全闸**：画像置信度 <0.7 时不消歧免误杀）
+  - **重抽画像 + 终止条件**（新增文件数 / 置信度阈值）
+- **B 缺口检测**：扫描已采内容识别缺失维度 → 补搜
+- **C 矛盾检测**：发现冲突 → 反向验证查询
+
+调优参数全部在 `config.yaml` 的 `deepen:` 段（depth/breadth/profile_iterations/
+timeline_backtrack/disambiguation/min_profile_confidence 等），`--skip deepen` 一键关闭。
+
+### P2 Clean 去重 + 相关性过滤
+
+- **MinHash 去重 `dedup_similarity`**：char-5gram Jaccard，相似 ≥阈值组内保留
+  最长正文，其余从 clean/ 删除并标 `dedup_of`
+- **LLM 相关性过滤 `relevance_filter`**：按主题批量评 0-1 分，低于阈值的从
+  clean/ 删除（raw/ 保留以便溯源），quality.json 标 `low_relevance`。实测能
+  剔除 70%+ 的同名污染/广告页/无关页
+
+### P2 反向传播（树状图修正）
+
+`max_backward_rounds>0` 启用循环：一次正向完成后，organizer 评估每节点的
+"来源NN" 引用数 < `min_evidence_per_node` 判为**稀疏节点**，再调一次 LLM 同时
+产出稀疏补充 / 节点桥接 / 矛盾交叉验证的修正查询，追加到 raw → 清理下游 →
+再跑一轮正向。最多循环 `max_backward_rounds` 次（默认 0 不启用，向后兼容）。
 
 ## 从 PDF 调研（pdf2zh / MinerU 集成）
 

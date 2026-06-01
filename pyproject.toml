@@ -37,11 +37,49 @@ all = [
 dev = ["pytest>=8.0", "pytest-asyncio>=0.23"]
 
 [project.scripts]
-research = "research_tool.cli:app"
+research = "src.presentation.cli:app"
 
 [tool.hatch.build.targets.wheel]
-packages = ["research_tool"]
+packages = ["src"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
-testpaths = ["tests"]
+testpaths = ["src/tests"]
+# addopts = "--cov=research_tool --cov-report=term-missing"  # 需 pip install pytest-cov
+
+[tool.coverage.run]
+source = ["src"]
+omit = ["tests/*", "src/__pycache__/*"]
+
+[tool.coverage.report]
+exclude_also = [
+    "if TYPE_CHECKING:",
+    "@abstractmethod",
+    "raise NotImplementedError",
+]
+
+# -- ruff: lint + format（02-代码规范 §二 落地配置） --
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = [
+    "E",        # pycodestyle errors
+    "F",        # pyflakes
+    "N",        # pep8-naming
+    "T20",      # flake8-print (禁止 print)
+    "T100",     # flake8-debugger (禁止调试断点)
+    "S",        # flake8-bandit (安全)
+    "PLR0915",  # pylint too-many-statements
+]
+ignore = [
+    "S101",    # assert（测试中常用）
+    "S301",    # pickle（Pydantic 不用）
+    "S403",    # pickle
+]
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["S101", "T20"]
+
+[tool.ruff.lint.pylint]
+max-statements = 50

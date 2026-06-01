@@ -1,0 +1,108 @@
+# ============================================================
+# 调研工具配置文件（示例）—— 复制为 config.yaml 后修改
+# 依据：04-配置结构设计.md
+# ============================================================
+
+# LLM 配置（必填）。默认 DeepSeek（OpenAI 兼容）。
+llm:
+  provider: deepseek            # openai | deepseek | ollama | anthropic
+  model: deepseek-chat          # 模型名
+  api_key: ${DEEPSEEK_API_KEY}  # 支持 ${ENV_VAR} 环境变量引用
+  base_url: https://api.deepseek.com/v1  # DeepSeek endpoint；OpenAI 留 null
+  temperature: 0.3
+  max_tokens: 4096
+
+# Collector 配置
+collector:
+  search_engines:               # 可多选，全部可用源见下
+    - web                        # web(=duckduckgo) | arxiv | tavily
+    - openalex                   # openalex(2.5亿+全学术,含最新) | crossref(1.5亿DOI)
+    # 其它可选： semantic_scholar | wikipedia(百科/人物) | github(代码)
+    #            pubmed(生物医学) | google_news(最新新闻)
+    # 论文优先推荐 openalex：覆盖最全、限流最宽、自动混合"经典+最新"
+  max_results_per_engine: 8
+  depth: 2                       # 1=仅搜索 2=打开结果页 3=追踪二级链接
+  language: both                 # zh | en | both
+  concurrency: 4                 # 抓取层并发
+  max_concurrent_searches: 3     # 搜索层并发上限（缓解 DDG/Tavily 限流）
+  timeout_sec: 30
+  tavily_api_key: ${TAVILY_API_KEY}            # 仅含 tavily 时需要
+  semantic_scholar_api_key: ${S2_API_KEY}      # 可选，提升 S2 配额（无 key 也能用）
+  github_token: ${GITHUB_TOKEN}                # 可选，GitHub 搜索 10→30 次/分钟
+  openalex_mailto: ${OPENALEX_MAILTO}          # 可选邮箱，OpenAlex/Crossref polite pool 更稳
+  # 两阶段锚定/去锚（P1，解决"被单一机构/限定语绑架"的查询偏差）
+  core_keyword: null             # 核心词，如 topic="中南民族大学 康怡琳" 时填 "康怡琳"
+  facets: []                     # 维度标签，仅去锚阶段生效，如 [博士, 论文, 南洋理工]
+  # 时间标签（P2）：发表年份窗口，含起止。学科调研统一过滤；人物调研一般不设
+  from_year: null                # 如 2020；openalex/s2/crossref/pubmed 原生过滤
+  to_year: null                  # 如 2027；arxiv 客户端过滤，web/wikipedia 忽略
+  # Deep-Search 深搜（P2）：多排序×多页，突破"单次只取第1页相关性排序"的覆盖不足
+  deep_search: false             # true 启用；每查询变 deep_pages×deep_sorts 次搜索
+  deep_pages: 3                  # 翻页页数 1-10
+  deep_sorts: [relevance, date, citations]  # 排序策略组合
+
+# Deepen 反偏差深挖配置（Phase 2，可选阶段，默认启用）
+# 关闭：设 enabled: false，或 `research run ... --skip deepen`
+deepen:
+  enabled: true
+  profile_extract: true          # 从已采 raw/ 抽结构化画像(中英文名/机构/领域)→注入去锚查询
+  depth: 2                       # 深挖轮次 1-3（轮 1 实体多视角，轮 2+ 缺口补搜）
+  breadth: 4                     # 每轮补充查询数上限 2-8
+  entity_split: true             # 拆分多实体话题（解决"单一锚点绑架"偏差）
+  max_entities: 5                # 实体拆分上限
+  gap_detection: true            # 扫描已采内容识别缺失维度
+  contradiction_check: true      # 检测矛盾并反向验证
+  max_input_chars: 20000         # 喂 LLM 做缺口分析的内容总量上限（防上下文溢出）
+  per_file_chars: 300            # 每个 raw 文件取标题+前 N 字
+
+# Cleaner 配置
+cleaner:
+  strip_html: true
+  strip_nav: true
+  strip_ads: true
+  find_content_start: true
+  min_content_length: 200
+  # MinHash 去重（P2-5）：相似度阈值，组内保留最长正文；0=关闭
+  dedup_similarity: 0.85
+  # LLM 相关性过滤（P2-5）：默认关，开启会增加 LLM 调用
+  relevance_filter: false        # true 启用；低分文件从 clean/ 删除，raw/ 仍保留
+  relevance_threshold: 0.4
+  relevance_batch_size: 10
+
+# Extractor 配置
+extractor:
+  enabled: true                  # false=跳过抽取，Organizer 直接吃 clean 文本
+  tasks:
+    - ner
+    - triple
+  entity_types: null             # null=自动归纳 Schema
+  relation_types: null
+  chunk_size: 4000
+  overlap: 200
+
+# Organizer 配置
+organizer:
+  max_nodes: 7
+  min_nodes: 4
+  # 反向传播稀疏节点判定阈值（P2-6）：节点正文 "来源NN" 引用 <此 → 稀疏
+  min_evidence_per_node: 3
+
+# Reporter 配置
+reporter:
+  format: markdown               # markdown | html
+  style: report                  # report | feasibility | review | article
+  max_length: 20000
+
+# Pipeline 配置
+pipeline:
+  work_dir: ./research-output
+  stages:
+    - collect
+    - clean
+    - extract
+    - organize
+    - report
+  resume: true
+  # 反向传播（P2-6）：完成一次正向后让 organizer 评估知识树质量，把修正查询回到
+  # collect 重跑。0=不启用（默认，向后兼容），≥1 启用循环。
+  max_backward_rounds: 0

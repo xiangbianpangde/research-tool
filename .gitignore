@@ -9,8 +9,23 @@ dist/
 venv/
 config.yaml
 research-output/
-pdf-demo/
 .env
 webui-test/
 out-icl/
 out-*/
+tests/fixtures/*/raw/
+tests/fixtures/*/clean/
+tests/fixtures/*/extracted/
+tests/fixtures/*/tree/
+tests/fixtures/*/report.md
+
+# 工具数据
+.benchmarks/
+.ruff_cache/
+.deepseek/
+state/
+
+# 08-图谱工具
+.codegraph/
+.understand-anything/intermediate/
+.understand-anything/diff-overlay.json
