@@ -323,8 +323,102 @@ def report(
 
 
 # --------------------------------------------------------------------------- #
-# run（一键全流程）
+# V1.1 VideoIngest：--video-url 视频入口（扩展 run 命令）
 # --------------------------------------------------------------------------- #
+
+
+def _validate_video_urls(urls: list[str]) -> list[str]:
+    """校验 --video-url 列表的白名单（bilibili / youtube）；非法 URL 立即拒绝。
+
+    Raises:
+        typer.BadParameter: 含非法 URL
+    """
+    from ..application.video_pipeline import validate_video_url  # 延迟 import
+    from ..domain.errors import VideoIngestError
+
+    cleaned: list[str] = []
+    for u in urls:
+        if not u or not u.strip():
+            continue
+        u = u.strip()
+        try:
+            vu = validate_video_url(u)
+            if vu is None:
+                raise typer.BadParameter(
+                    f"不支持的 URL（仅 bilibili / youtube 一期 P0）: {u[:60]}"
+                )
+            cleaned.append(u)
+        except VideoIngestError as e:
+            raise typer.BadParameter(
+                f"URL 校验失败: {u[:60]}\n  {e}"
+            ) from e
+    if not cleaned:
+        raise typer.BadParameter("至少需要 1 个有效 --video-url")
+    if len(cleaned) > 10:
+        raise typer.BadParameter(
+            f"--video-url 数量 {len(cleaned)} 超过上限 10"
+        )
+    return cleaned
+
+
+def _run_video_ingest(
+    *,
+    topic: str,
+    video_urls: list[str],
+    output: Optional[Path],
+    no_cache: bool,
+    model: Optional[str],
+) -> None:
+    """V1.1 VideoIngest 入口（CLI 薄封装）。"""
+    from ..application.video_pipeline import process_videos
+    from ..common.slug import slugify
+    from ..domain.errors import VideoIngestError
+
+    valid_urls = _validate_video_urls(video_urls)
+    work_dir = output or Path("./research-output")
+    topic_dir = work_dir / slugify(topic)
+    logger.info(
+        "VideoIngest 启动: topic=%r, urls=%d, work_dir=%s, no_cache=%s",
+        topic, len(valid_urls), topic_dir, no_cache,
+    )
+
+    async def _go():
+        report = await process_videos(
+            topic=topic,
+            urls=valid_urls,
+            work_dir=topic_dir,
+            run_pipeline=True,  # V1.1: 视频落 raw/ 后自动触发 5 阶段管道
+        )
+        # 报告汇总
+        logger.info(
+            "VideoIngest 完成: 成功 %d / 失败 %d（总耗时 %.1fs）",
+            report.success_count, report.failed_count, report.total_duration_ms / 1000,
+        )
+        for r in report.results:
+            if r.status == "success":
+                logger.info("  ✓ %s → %s", r.url[:60], r.markdown_path)
+            else:
+                logger.error("  ✗ %s — %s", r.url[:60], r.error)
+        if report.stages_result is not None:
+            sr = report.stages_result
+            if sr.success:
+                logger.info(
+                    "✓ 5 阶段管道完成: %s (%.1fs)",
+                    ",".join(sr.stages_run), sr.duration_ms / 1000,
+                )
+            else:
+                logger.warning(
+                    "5 阶段管道部分失败: stages=%s err=%s",
+                    sr.stages_run, sr.error,
+                )
+        # 全部失败 → 退出码非 0
+        if report.success_count == 0 and report.failed_count > 0:
+            raise VideoIngestError("E_VID_PIPELINE_FAIL", "所有视频 URL 处理失败")
+
+    _run(_go())
+
+
+
 
 def _build_run_overrides(
     *,
@@ -468,8 +562,33 @@ def run(
     model: Optional[str] = typer.Option(
         None, "--model", rich_help_panel=_ADVANCED, help="覆盖 LLM 模型（=llm.model）"
     ),
+    video_url: list[str] = typer.Option(
+        [], "--video-url", rich_help_panel=_ADVANCED,
+        help=(
+            "V1.1 VideoIngest：视频 URL（可多次）。一期 P0 仅支持 bilibili.com / b23.tv / "
+            "youtube.com / youtu.be。多个 URL 默认 3 并发。"
+        ),
+    ),
+    no_cache: bool = typer.Option(
+        False, "--no-cache", rich_help_panel=_ADVANCED,
+        help="V1.1 VideoIngest：跳过 M-004 转写缓存（强制重转）。",
+    ),
 ) -> None:
-    """一键全流程：collect/PDF摄取 → clean → extract → organize → report。"""
+    """一键全流程：collect/PDF摄取 → clean → extract → organize → report。
+
+    V1.1 扩展：传 --video-url 时进入 VideoIngest 流程（下载→转写→总结→raw/）。
+    """
+    # V1.1 VideoIngest 入口：--video-url 优先于其他 stage
+    if video_url:
+        _run_video_ingest(
+            topic=topic,
+            video_urls=video_url,
+            output=output,
+            no_cache=no_cache,
+            model=model,
+        )
+        return
+
     all_stages = ["collect", "deepen", "clean", "extract", "organize", "report"]
     stages = [s for s in all_stages if s not in skip]
 

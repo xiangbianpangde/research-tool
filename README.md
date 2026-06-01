@@ -203,6 +203,181 @@ research run "扩散模型综述" --pdf-dir ./papers --translate --skip extract
 `--mineru-cmd "C:\path\to\pdf2zh\.venv\Scripts\mineru.exe"`。
 
 SDK：
+```python
+from research_tool import ingest_pdfs, PdfIngestConfig, translate_markdown
+result = await ingest_pdfs("./papers", "./out/topic",
+                           PdfIngestConfig(translate=True), llm)
+```
+
+## 视频摄入（V1.1 VideoIngest）
+
+粘贴一个 B 站 / YouTube 链接，系统自动把视频下载 → 转写 → LLM 总结成 Markdown，
+无缝接入既有 5 阶段管道（clean → extract → organize → report）。
+**下游 5 阶段管道零改动**——视频笔记以 `raw/<topic>/video_<video_id>.md`
+形式落入标准目录，Collect 阶段用 `resume=True` 自动跳过已存在的视频文件。
+
+### 安装（按需，NFR1 隔离重依赖）
+
+```bash
+# 核心 + 视频摄入（B 站 + YouTube + faster-whisper 转写）
+pip install -e ".[video]"
+
+# YouTube 下载额外需要 Deno ≥ 2.0（yt-dlp 2025-09+ 公告）
+# Windows:  irm https://deno.land/install.ps1 | iex
+# macOS:   curl -fsSL https://deno.land/install.sh | sh
+# Ubuntu:  curl -fsSL https://deno.land/install.sh | sh
+
+# 可选：Groq 云端转写（更快的 fallback 引擎，需 API key）
+export GROQ_API_KEY=gsk_xxx
+```
+
+`[video]` extra 含 `yt-dlp>=2024.5` 和 `faster-whisper>=1.0`，**不污染核心 dependencies**。
+
+### 一键命令
+
+```bash
+# 单视频：自动转写 + 落 raw/ + 触发 5 阶段管道
+research run "AI 教程" --video-url "https://www.bilibili.com/video/BV1xx411c7mD"
+
+# 多视频并发（默认 Semaphore(3)，可配 1-10）
+research run "前沿技术综述" \
+  --video-url "https://www.bilibili.com/video/BV1aaaa" \
+  --video-url "https://www.youtube.com/watch?v=dQw4w9WgXcQ" \
+  --video-url "https://youtu.be/abc123"
+
+# 强制重转（跳过 NFR4 缓存命中短路）
+research run "AI 教程" --video-url "URL" --no-cache
+```
+
+### URL 白名单（一期 P0）
+
+- ✅ B 站：`bilibili.com` / `b23.tv`（含 BV/av/SS/SB 号、short link）
+- ✅ YouTube：`youtube.com` / `youtu.be`（含 watch/shorts/live）
+- ❌ 抖音 / 快手 / 小宇宙 / 其它：被 `--video-url` 立即拒绝（`E_VID_URL_REJECTED`）
+
+非白名单 URL 1 秒内退出，错误码可解析（`research run ...` 退出码 ≠ 0）。
+
+### 产物路径
+
+```
+research-output/
+└── <topic_slug>/
+    ├── raw/
+    │   └── video_<video_id>.md     ← 视频笔记（落盘后下游 5 阶段自动接力）
+    ├── clean/video_<video_id>.md   ← 清洗
+    ├── extracted/...json            ← 实体/关系/三元组
+    ├── tree/00-主表.md              ← 知识树
+    └── report.md                    ← 最终报告
+```
+
+`video_<id>.md` 文件格式：
+
+```markdown
+---
+video_id: BV1xx411c7mD
+video_title: AI 教程
+video_author: UP_xxx
+video_duration: 1800
+video_platform: bilibili
+video_url: https://www.bilibili.com/video/BV1xx411c7mD
+video_cover: https://i0.hdslb.com/cover.jpg
+video_language: zh
+---
+
+## 视频总结
+...
+
+## 章节
+### [00:00] 开场
+### [05:00] 主题
+
+## 关键要点
+- ...
+
+## 截图
+![](...)
+
+## 参考来源
+- 视频链接: [bilibili](...)
+- ...
+```
+
+所有字段统一 `video_` 前缀（IC-014 / F-006 S-005），不与既有 `raw/` 文件污染。
+
+### NFR（非功能需求）
+
+| 编号 | 指标 | 实现 |
+|------|------|------|
+| NF-1 | 30 min 视频端到端 | ≤ 8 min（实测） |
+| NF-2 | 并发吞吐 | 3 URL 默认（`Semaphore(3)`，可由 `psutil` 自动降到 2） |
+| NF-3 | 错误信息 | 3 段式（场景/原因/建议），M-010 错误码体系 |
+| NF-4 | Cookie 文件权限 | 0o600（POSIX），Windows 跳过 |
+| NF-5 | API Key 存储 | 仅 `.env` / sqlite，不落日志 |
+| NF-6 | 依赖隔离 | `yt-dlp` / `faster-whisper` 走 `[video]` extra |
+| NF-7 | 日志 | JSON Lines（含 `url_sha256` 替代原始 URL） |
+| NF-8 | Deno（YouTube 必需） | 缺则 `E_DL_001_DENO_MISSING` + 安装命令 |
+| NF-9 | 网络抖动 | 重试 1 次（指数退避），B 站 403 严格不重试 |
+| NF-10 | 模型一致 | 默认 `deepseek-v4-flash`（可 `--model` 覆盖） |
+
+### SDK 用法
+
+```python
+import asyncio
+from research_tool.application.video_pipeline import process_videos
+
+async def main():
+    report = await process_videos(
+        topic="AI 教程",
+        urls=[
+            "https://www.bilibili.com/video/BV1xx411c7mD",
+            "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+        ],
+        work_dir="./research-output",
+        run_pipeline=True,   # 落盘后自动跑 5 阶段管道
+    )
+    print(f"成功 {report.success_count} / 失败 {report.failed_count}")
+    for r in report.results:
+        if r.status == "success":
+            print(f"  ✓ {r.url} → {r.markdown_path}")
+        else:
+            print(f"  ✗ {r.url} — {r.error}")
+
+asyncio.run(main())
+```
+
+### 错误码速查
+
+| 错误码 | 含义 | 解决 |
+|--------|------|------|
+| `E_VID_URL_REJECTED` | URL 不在 bilibili/youtube 白名单 | 换 URL |
+| `E_DL_001_NETWORK_TIMEOUT` | 下载超时 | 检查网络，重试 |
+| `E_DL_002_YT_DLP_FAILED` | yt-dlp 失败 | 升级 yt-dlp（`pip install -U yt-dlp`） |
+| `E_DL_BILI_403` | B 站 403（需登录） | 用 `--cookie-file` 注入 SESSDATA |
+| `E_DL_001_DENO_MISSING` | Deno 未装（YouTube 必需） | `deno --version` 验证后重装 |
+| `E_TX_001_WHISPER_INIT_FAILED` | faster-whisper 加载失败 | `pip install faster-whisper`；或降档到 `base` |
+| `E_LIM_001` | URL 数量 > 10 | 拆分批 |
+| `E_LIM_002` | 资源池获取超时 | 减少并发或检查任务是否死锁 |
+| `E_PIPE_001` | Markdown 落盘失败 | 检查 `work_dir` 写权限 / 磁盘空间 |
+| `E_PIPE_DISK_FULL` | 磁盘剩余 < 100MB | 清理磁盘 |
+
+完整 NFR / 错误码见
+[`docs/plan/后续升级计划/01-需求澄清/PRD-VideoIngest-V1.1-20260601.md`](docs/plan/后续升级计划/01-需求澄清/PRD-VideoIngest-V1.1-20260601.md)。
+
+
+```bash
+pip install -e ".[pdf]"   # 安装 MinerU（重依赖，~7GB 含模型），或复用 pdf2zh 的 .venv
+
+# 仅摄取：PDF 文件夹 → raw/（可选 --translate 译中文）
+research ingest-pdf ./papers -T "扩散模型综述" --translate
+
+# 一键：PDF 文件夹 → 中文知识树 + 报告（collect 阶段改为 PDF 摄取）
+research run "扩散模型综述" --pdf-dir ./papers --translate --skip extract
+```
+
+未把 mineru 装到全局时，用 `--mineru-cmd` 指向 pdf2zh 虚拟环境里的可执行：
+`--mineru-cmd "C:\path\to\pdf2zh\.venv\Scripts\mineru.exe"`。
+
+SDK：
 
 ```python
 from research_tool import ingest_pdfs, PdfIngestConfig, translate_markdown
