@@ -27,12 +27,18 @@ search = ["ddgs>=6.0", "arxiv>=2.1", "tavily-python>=0.5"]
 pdf = ["mineru>=2.0"]
 # 可视化 Web 界面
 ui = ["gradio>=4.0"]
+# VideoIngest V1.1 视频摄取（按 NFR1 隔离：yt-dlp / faster-whisper 均为重依赖）
+# 注：NFR1 要求 yt-dlp 与 faster-whisper 放在 optional，避免污染核心 dependencies；
+#     实际启用需 `pip install research-tool[video]`。
+video = ["yt-dlp>=2024.5", "faster-whisper>=1.0"]
 # 全部
 all = [
     "crawl4ai>=0.4",
     "ddgs>=6.0",
     "arxiv>=2.1",
     "tavily-python>=0.5",
+    "yt-dlp>=2024.5",
+    "faster-whisper>=1.0",
 ]
 dev = ["pytest>=8.0", "pytest-asyncio>=0.23"]
 
