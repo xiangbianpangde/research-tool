@@ -321,6 +321,132 @@ class StageEvent(BaseModel):
     data: dict | None = None
 
 
+# --------------------------------------------------------------------------- #
+# V1.1 VideoIngest 新增模型（依据 DD-001:DE-001~DE-010）
+# 追加在末尾，不修改既有类，避免破坏 V1.0 测试断言
+# --------------------------------------------------------------------------- #
+
+
+VideoPlatform = Literal["youtube", "bilibili", "local"]
+
+
+class VideoURL(BaseModel):
+    """统一视频 URL 表示（DE-001）。
+
+    平台无关的 URL 包装；platform 字段决定走哪个适配器。
+    """
+
+    platform: VideoPlatform
+    url: str
+    video_id: str | None = None  # 平台侧 id（BV号 / YouTube 11位）
+
+
+class DownloadTask(BaseModel):
+    """下载结果（DE-005）。
+
+    file_path 必填（即使本地文件也是已解析的绝对路径）；
+    etag 用于 M-004 缓存键的次级区分。
+    """
+
+    file_path: str
+    size_mb: float = 0.0
+    duration_sec: int = 0
+    video_id: str = ""
+    etag: str = ""
+    platform: str = ""
+    title: str = ""
+    cover_url: str | None = None
+
+
+class VideoMeta(BaseModel):
+    """视频元数据（DE-002）。"""
+
+    video_id: str
+    platform: str
+    title: str
+    author: str = ""
+    duration_sec: int = 0
+    url: str = ""
+    cover_url: str | None = None
+    language: str = "zh"  # 默认中文（V1.1 需求）
+
+
+class TranscriptSegment(BaseModel):
+    """转写段落（DE-009）。"""
+
+    start: float
+    end: float
+    text: str
+
+
+class Transcript(BaseModel):
+    """转写结果（DE-008）。"""
+
+    language: str = "zh"
+    full_text: str = ""
+    segments: list[TranscriptSegment] = Field(default_factory=list)
+    engine: str = ""  # "whisper" / "groq" / "bcut"
+    cer_estimate: float = 0.0
+    raw: dict | None = None
+
+
+class Chapter(BaseModel):
+    """章节（DE-003）。"""
+
+    start_sec: float
+    end_sec: float
+    title: str
+    summary: str = ""
+
+
+class LLMSummary(BaseModel):
+    """LLM 总结输出（DE-006）。
+
+    字段命名遵循 M-007 笔记输出契约：
+    - video_summary  : 整段总结
+    - video_chapters : 章节列表
+    - video_takeaways: 关键要点
+    """
+
+    video_summary: str = ""
+    video_chapters: list[Chapter] = Field(default_factory=list)
+    video_takeaways: list[str] = Field(default_factory=list)
+    model: str = ""  # 实际调用的 LLM 模型名
+
+
+class ScreenshotFrame(BaseModel):
+    """截图帧（DE-005 复用；V1.1 track-core 仅声明契约，不实际生成）。"""
+
+    timestamp_sec: float
+    path: str  # 相对路径或绝对路径
+    caption: str = ""
+
+
+class VideoIngestConfig(BaseModel):
+    """VideoIngest V1.1 配置（DE-011 / DD-001）。"""
+
+    # 输出根目录
+    work_dir: Path = Path("./research-output/video")
+    # 默认语言
+    language: Literal["zh", "en", "ja"] = "zh"
+    # M-005 转写引擎偏好（whisper 优先，回退 groq）
+    preferred_engine: Literal["whisper", "groq"] = "whisper"
+    # M-005 whisper 模型档位
+    whisper_model_size: Literal["tiny", "base", "small", "medium", "large-v3"] = "medium"
+    # M-005 降档目标（RAM < 8GB）
+    whisper_fallback_sizes: list[str] = Field(default_factory=lambda: ["base", "small"])
+    # M-003 重试次数
+    download_retry_times: int = Field(default=1, ge=0, le=3)
+    # M-005 转写超时（秒）
+    transcribe_timeout_sec: int = Field(default=1800, ge=30)  # 默认 30 分钟
+    # Groq API key（可选）
+    groq_api_key: str | None = None
+    # Cookie 文件路径（YouTube / Bilibili 通用）
+    cookie_path: str | None = None
+    # ffmpeg 路径
+    ffmpeg_path: str | None = None
+
+
 class PipelineResult(BaseModel):
     topic_dir: Path
     stages_completed: list[str] = Field(default_factory=list)
