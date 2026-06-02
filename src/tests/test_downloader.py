@@ -413,4 +413,4 @@ def asyncio_run(coro):
     """把 coroutine 跑完（用于同步测试）。"""
     import asyncio
 
-    return asyncio.get_event_loop().run_until_complete(coro)
+    return asyncio.run(coro)
