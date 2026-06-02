@@ -29,3 +29,7 @@ state/
 .codegraph/
 .understand-anything/intermediate/
 .understand-anything/diff-overlay.json
+
+# mavis / opencode runtime 数据
+/.mavis/
+/.opencode/
