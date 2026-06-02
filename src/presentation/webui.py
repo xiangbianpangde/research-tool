@@ -2,6 +2,9 @@
 
 左栏输入与设置，右栏流式进度 + 报告渲染 + 文件下载。
 启动：`research ui` 或 `python -m research_tool.webui`，浏览器开 127.0.0.1:7861。
+
+V1.1：新增「视频调研」模式 —— 粘贴 B 站 / YouTube URL（每行 1 个），
+自动完成 下载 → 转写 → 笔记 → 清洗 → 抽取 → 知识树 → 报告 全流程。
 """
 
 from __future__ import annotations
@@ -15,6 +18,7 @@ from pathlib import Path
 from ..domain.config import load_config
 from ..common.logging_config import get_logger
 from ..application.pipeline import ResearchPipeline
+from ..application.video_pipeline import VideoPipeline
 from ..common.slug import slugify
 
 logger = get_logger(__name__)
@@ -58,6 +62,44 @@ def _run_threaded(cfg, topic: str, q: "queue.Queue") -> None:
         q.put(("done", None))
 
 
+def _run_threaded_video(
+    topic: str, urls: list[str], work_dir: str, q: "queue.Queue"
+) -> None:
+    """视频模式后端：跑 VideoPipeline（内部含 4 阶段管道）。"""
+    async def go():
+        q.put(("log", f"▶ 启动视频摄入（共 {len(urls)} 个 URL）"))
+        pipe = VideoPipeline(topic=topic, work_dir=work_dir, run_pipeline=True)
+        result = await pipe.process_urls(urls)
+
+        # 逐 URL 进度
+        for r in result.results:
+            icon = "✓" if r.status == "success" else "✗"
+            tail = f" → {r.markdown_path.name}" if r.markdown_path else f"（{r.error}）"
+            q.put(("log", f"  {icon} {r.url}{tail}"))
+        q.put(
+            ("log", f"✓ 视频摄入：{result.success_count} 成功 / {result.failed_count} 失败")
+        )
+
+        # 4 阶段管道结果
+        if result.stages_result:
+            sr = result.stages_result
+            stages = ", ".join(sr.stages_run) or "（无）"
+            q.put(("log", f"✓ 4 阶段管道：{stages}（{sr.duration_ms / 1000:.1f}s）"))
+        q.put(("result", result))
+
+    try:
+        asyncio.run(go())
+    except Exception as e:  # noqa: BLE001
+        q.put(("error", str(e)))
+    finally:
+        q.put(("done", None))
+
+
+def _parse_video_urls(s: str | None) -> list[str]:
+    """多行文本 → URL 列表（去空行 + strip）。"""
+    return [v.strip() for v in (s or "").splitlines() if v.strip()]
+
+
 _STAGE_CN = {
     "collect": "采集", "deepen": "反偏差深挖", "clean": "清洗", "extract": "抽取",
     "organize": "构建知识树", "report": "生成报告",
@@ -72,7 +114,7 @@ def _csv(s: str | None) -> list[str]:
     return [v.strip() for v in (s or "").split(",") if v.strip()]
 
 
-def run_web(
+def run_web(  # noqa: PLR0915 - Gradio 事件处理，单函数承载多模式分支
     mode, topic, engines, rounds, style, max_nodes, min_nodes, do_extract,
     pdf_path, mineru_cmd, translate, provider, model, base_url, api_key, work_dir,
     do_deepen=True,
@@ -80,6 +122,8 @@ def run_web(
     core_kw="", facets_csv="", from_year=None, to_year=None,
     deep_search=False, profile_iterations=1,
     relevance_filter=False, backward_rounds=0,
+    # V1.1 视频调研
+    video_urls="",
 ):
     """Gradio 事件处理：流式产出 (日志, 报告markdown, 文件列表, 输出目录)。"""
     topic = (topic or "").strip()
@@ -87,6 +131,55 @@ def run_web(
         yield "⚠ 请先填写调研主题。", "", None, ""
         return
 
+    # ===== V1.1 视频模式分支 ===== #
+    if mode == "视频调研":
+        urls = _parse_video_urls(video_urls)
+        if not urls:
+            yield "⚠ 视频模式需填写至少 1 个 B 站 / YouTube 链接（每行一个）。", "", None, ""
+            return
+        out_dir = str(Path(work_dir or "./research-output") / slugify(topic))
+        log: list[str] = [
+            f"主题：{topic}",
+            f"模式：视频调研（{len(urls)} 个 URL）",
+            "流程：下载 → 转写 → 笔记 → 清洗 → 抽取 → 知识树 → 报告",
+            "—" * 20,
+        ]
+        yield "\n".join(log), "", None, out_dir
+
+        q: queue.Queue = queue.Queue()
+        threading.Thread(
+            target=_run_threaded_video,
+            args=(topic, urls, work_dir or "./research-output", q),
+            daemon=True,
+        ).start()
+
+        while True:
+            kind, payload = q.get()
+            if kind == "log":
+                log.append(payload)
+                yield "\n".join(log), "", None, out_dir
+            elif kind == "result":
+                log.append(f"\n📊 视频报告已生成 → {out_dir}/report.md")
+            elif kind == "error":
+                log.append(f"❌ 视频调研出错：{payload}")
+                yield "\n".join(log), "", None, out_dir
+                return
+            elif kind == "done":
+                break
+
+        report = Path(out_dir) / "report.md"
+        md = report.read_text(encoding="utf-8") if report.exists() else "（未生成报告）"
+        tree_dir = Path(out_dir) / "tree"
+        files: list[str] = []
+        if report.exists():
+            files.append(str(report))
+        if tree_dir.exists():
+            files += [str(p) for p in sorted(tree_dir.glob("*.md"))]
+        log.append("\n✅ 完成！报告见右侧，可下载全部文件。")
+        yield "\n".join(log), md, files or None, out_dir
+        return
+
+    # ===== 网页 / PDF 模式原有逻辑 ===== #
     stages = ["collect"]
     # 反偏差深挖（仅网页调研有意义；PDF 摄取无需深挖）
     if do_deepen and mode != "PDF 调研":
@@ -206,7 +299,7 @@ def run_web(
     yield "\n".join(log), md, files or None, str(topic_dir)
 
 
-def build_ui():
+def build_ui():  # noqa: PLR0915 - Gradio 布局 + 事件绑定，单函数承载 UI 组装
     import gradio as gr
 
     with gr.Blocks(title="research-tool 调研工具") as app:
@@ -219,7 +312,7 @@ def build_ui():
             with gr.Column(scale=1, min_width=380):
                 gr.Markdown("### 1) 模式与主题")
                 mode = gr.Radio(
-                    ["网页调研", "PDF 调研"], value="网页调研", label="数据来源"
+                    ["网页调研", "PDF 调研", "视频调研"], value="网页调研", label="数据来源"
                 )
                 topic = gr.Textbox(
                     label="调研主题", placeholder="如：扩散模型综述 / 离散数学典型代数系统"
@@ -266,6 +359,17 @@ def build_ui():
                     mineru_cmd = gr.Textbox(
                         label="mineru 路径（留空走 PATH）",
                         placeholder=r"C:\Users\you\pdf2zh\.venv\Scripts\mineru.exe",
+                    )
+
+                with gr.Group(visible=False) as video_group:
+                    gr.Markdown(
+                        "**V1.1 视频调研** — 粘贴 B 站 / YouTube 链接，每行 1 个，"
+                        "自动完成下载 + 转写 + 笔记 + 调研报告全流程。"
+                    )
+                    video_urls = gr.Textbox(
+                        label="视频 URL（每行 1 个，1-10 个）",
+                        placeholder="https://www.bilibili.com/video/BV1xxxxxxxxx\nhttps://www.youtube.com/watch?v=xxxxxxxxxxx",
+                        lines=4,
                     )
 
                 gr.Markdown("### 2) 输出设置")
@@ -326,9 +430,10 @@ def build_ui():
             return (
                 gr.update(visible=(m == "网页调研")),
                 gr.update(visible=(m == "PDF 调研")),
+                gr.update(visible=(m == "视频调研")),
             )
 
-        mode.change(_toggle, inputs=mode, outputs=[web_group, pdf_group])
+        mode.change(_toggle, inputs=mode, outputs=[web_group, pdf_group, video_group])
 
         run_btn.click(
             run_web,
@@ -340,6 +445,8 @@ def build_ui():
                 core_kw, facets_csv, from_year, to_year,
                 deep_search, profile_iterations,
                 relevance_filter, backward_rounds,
+                # V1.1 视频调研
+                video_urls,
             ],
             outputs=[log_box, report_md, files, out_dir_box],
             api_name="run",
