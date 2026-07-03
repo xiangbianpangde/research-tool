@@ -15,12 +15,13 @@ from pydantic import BaseModel, Field, model_validator
 # 配置模型
 # --------------------------------------------------------------------------- #
 
-Provider = Literal["openai", "deepseek", "ollama", "anthropic"]
+Provider = Literal["openai", "deepseek", "ollama", "anthropic", "minimax"]
 SearchEngine = Literal[
     "web", "arxiv", "tavily", "scholar",
     "semantic_scholar", "wikipedia", "github", "pubmed", "google_news",
     "openalex", "crossref",
-    # 预留 P3（BiliNote 多模态）："bilibili"
+    "bilibili",  # V1.1 落地（GAP-V1）：通过 yt-dlp BiliSearch extractor 搜 B 站视频
+    "x", "twitter",
 ]
 ExtractTask = Literal["ner", "re", "triple"]
 StageName = Literal["collect", "deepen", "clean", "extract", "organize", "report"]
@@ -90,17 +91,29 @@ class CollectorConfig(BaseModel):
     mineru_cmd: str | None = None  # mineru 可执行路径，None=走 PATH
     # 垃圾过滤：抓取正文短于此字符数的结果直接丢弃（登录页/导航页等）
     min_doc_chars: int = Field(default=200, ge=0)
+    # 轻量搜索结果相关性过滤：在抓取前按 topic/query 与 title/snippet 的词重叠剔除
+    # 明显跑偏的命中。0=关闭；默认保守开启，避免 OpenAlex/Crossref 混入离题 PDF。
+    search_relevance_min_overlap: float = Field(default=0.12, ge=0.0, le=1.0)
+    # X/Twitter 搜索后端：默认调用 twitter-cli；也可设为 opencli。
+    x_backend: Literal["twitter-cli", "opencli"] = "opencli"
+    x_cmd: str = "twitter"
 
 
 class PdfIngestConfig(BaseModel):
     """PDF 摄取配置（pdf2zh/MinerU 集成）。"""
 
+    ocr_engine: Literal[
+        "auto", "mineru", "custom", "paddleocr-vl", "unlimited-ocr", "vision-llm"
+    ] = "mineru"
     mineru_backend: Literal[
         "pipeline", "vlm-auto-engine", "hybrid-auto-engine",
         "vlm-http-client", "hybrid-http-client",
     ] = "pipeline"
     ocr_lang: str = "en"            # MinerU OCR 语言提示
     mineru_cmd: str | None = None   # 自定义 mineru 可执行路径（默认走 PATH）
+    ocr_cmd: str | None = None      # custom / model wrapper 命令；输出 Markdown 或写出 md
+    ocr_model_path: str | None = None  # 本地模型目录（如 PaddleOCR-VL / Unlimited-OCR）
+    vision_prompt: str = "Extract the document text as clean Markdown."
     start_page: int | None = None
     end_page: int | None = None
     translate: bool = False         # 是否把英文 MD 翻译成中文（可选）
@@ -225,6 +238,9 @@ class Source(BaseModel):
     fetched_at: str = ""
     source_engine: str = ""
     content_hash: str = ""
+    # V1.1：保留搜索后端附带的结构化片段（UP主/时长/简介），
+    # 让桥接脚本可以做 author/duration 过滤而不丢信息。默认空，向后兼容。
+    snippet: str = ""
 
 
 class CollectResult(BaseModel):

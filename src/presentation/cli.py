@@ -141,6 +141,18 @@ def collect(
         "relevance,date,citations", "--deep-sorts",
         help="深搜排序策略，逗号分隔：relevance/date/citations",
     ),
+    search_relevance_min_overlap: float = typer.Option(
+        0.12, "--search-relevance-min-overlap",
+        help="抓取前轻量相关性阈值，0=关闭",
+    ),
+    x_backend: str = typer.Option(
+        "opencli", "--x-backend",
+        help="X/Twitter 后端：opencli 或 twitter-cli",
+    ),
+    x_cmd: str = typer.Option(
+        "twitter", "--x-cmd",
+        help="twitter-cli 命令名或路径（仅 --x-backend twitter-cli 时使用）",
+    ),
     output: Path = typer.Option(Path("./research-output"), "-o", "--output"),
     dry_run: bool = typer.Option(False, "--dry-run", help="仅搜索不抓取"),
 ) -> None:
@@ -162,6 +174,9 @@ def collect(
         deep_search=deep_search,
         deep_pages=deep_pages,
         deep_sorts=_split_csv(deep_sorts) or ["relevance", "date", "citations"],
+        search_relevance_min_overlap=search_relevance_min_overlap,
+        x_backend=x_backend,
+        x_cmd=x_cmd,
     )
     topic_dir = output / slugify(topic)
 
@@ -190,16 +205,30 @@ def ingest_pdf(
     topic: str = typer.Option(..., "-T", "--topic", help="调研主题（决定输出子目录）"),
     output: Path = typer.Option(Path("./research-output"), "-o", "--output"),
     backend: str = typer.Option("pipeline", "-b", "--backend", help="MinerU 后端"),
+    ocr_engine: str = typer.Option(
+        "mineru", "--ocr-engine",
+        help="OCR 引擎：auto/mineru/custom/paddleocr-vl/unlimited-ocr/vision-llm",
+    ),
     lang: str = typer.Option("en", "-l", "--lang", help="OCR 语言提示"),
     translate: bool = typer.Option(False, "--translate", help="把英文 MD 译成中文"),
     mineru_cmd: Optional[str] = typer.Option(None, "--mineru-cmd", help="mineru 可执行路径"),
+    ocr_cmd: Optional[str] = typer.Option(
+        None, "--ocr-cmd", help="自定义 OCR 命令，可用 {pdf}/{out}/{lang}/{model} 占位"
+    ),
+    ocr_model_path: Optional[str] = typer.Option(None, "--ocr-model-path", help="本地 OCR 模型目录"),
     model: Optional[str] = typer.Option(None, "--model", help="翻译用 LLM 模型"),
 ) -> None:
     """用 MinerU 把本地 PDF 转为 raw/ Markdown（可选翻译），供后续阶段接力。"""
     from ..infrastructure.ingest import PdfIngestor
 
     cfg = PdfIngestConfig(
-        mineru_backend=backend, ocr_lang=lang, translate=translate, mineru_cmd=mineru_cmd
+        ocr_engine=ocr_engine,
+        mineru_backend=backend,
+        ocr_lang=lang,
+        translate=translate,
+        mineru_cmd=mineru_cmd,
+        ocr_cmd=ocr_cmd,
+        ocr_model_path=ocr_model_path,
     )
     topic_dir = output / slugify(topic)
 
@@ -211,6 +240,24 @@ def ingest_pdf(
             logger.info("（已翻译为中文）")
 
     _run(_go())
+
+
+@app.command(name="ocr-engines")
+def ocr_engines(
+    ocr_cmd: Optional[str] = typer.Option(None, "--ocr-cmd", help="用于扫描 custom/model OCR 的命令"),
+    ocr_model_path: Optional[str] = typer.Option(None, "--ocr-model-path", help="本地 OCR 模型目录"),
+) -> None:
+    """扫描当前可用 OCR 引擎。"""
+    from ..infrastructure.ingest.ocr import scan_ocr_engines
+
+    cfg = PdfIngestConfig(ocr_cmd=ocr_cmd, ocr_model_path=ocr_model_path)
+    table = Table(title="OCR engines")
+    table.add_column("engine")
+    table.add_column("available")
+    table.add_column("detail")
+    for status in scan_ocr_engines(cfg):
+        table.add_row(status.name, "yes" if status.available else "no", status.detail)
+    _out.print(table)
 
 
 # --------------------------------------------------------------------------- #
@@ -388,6 +435,7 @@ def _run_video_ingest(
             urls=valid_urls,
             work_dir=topic_dir,
             run_pipeline=True,  # V1.1: 视频落 raw/ 后自动触发 5 阶段管道
+            use_cache=not no_cache,  # --no-cache → 跳过转写缓存强制重转
         )
         # 报告汇总
         logger.info(
@@ -438,11 +486,17 @@ def _build_run_overrides(
     deep_search: bool,
     deep_pages: int | None,
     deep_sorts: str | None,
+    search_relevance_min_overlap: float | None,
+    x_backend: str | None,
+    x_cmd: str | None,
     relevance_filter: bool,
     profile_iterations: int | None,
     max_backward_rounds: int | None,
     pdf_dir: Path | None,
     mineru_cmd: str | None,
+    ocr_engine: str | None,
+    ocr_cmd: str | None,
+    ocr_model_path: str | None,
     translate: bool,
     model: str | None,
 ) -> dict:
@@ -471,6 +525,12 @@ def _build_run_overrides(
         overrides["collector"]["deep_pages"] = deep_pages
     if deep_sorts:
         overrides["collector"]["deep_sorts"] = _split_csv(deep_sorts)
+    if search_relevance_min_overlap is not None:
+        overrides["collector"]["search_relevance_min_overlap"] = search_relevance_min_overlap
+    if x_backend:
+        overrides["collector"]["x_backend"] = x_backend
+    if x_cmd:
+        overrides["collector"]["x_cmd"] = x_cmd
     if relevance_filter:
         overrides["cleaner"] = {"relevance_filter": True}
     if profile_iterations is not None:
@@ -482,6 +542,12 @@ def _build_run_overrides(
     if pdf_dir:
         overrides["pdf_dir"] = str(pdf_dir)
         overrides["pdf_ingest"] = {"translate": translate}
+        if ocr_engine:
+            overrides["pdf_ingest"]["ocr_engine"] = ocr_engine
+        if ocr_cmd:
+            overrides["pdf_ingest"]["ocr_cmd"] = ocr_cmd
+        if ocr_model_path:
+            overrides["pdf_ingest"]["ocr_model_path"] = ocr_model_path
         if mineru_cmd:
             overrides["pdf_ingest"]["mineru_cmd"] = mineru_cmd
     if model:
@@ -538,6 +604,18 @@ def run(
         None, "--deep-sorts", rich_help_panel=_ADVANCED,
         help="深搜排序逗号分隔（=collector.deep_sorts，默认 relevance,date,citations）",
     ),
+    search_relevance_min_overlap: Optional[float] = typer.Option(
+        None, "--search-relevance-min-overlap", rich_help_panel=_ADVANCED,
+        help="抓取前轻量相关性阈值，0=关闭（=collector.search_relevance_min_overlap）",
+    ),
+    x_backend: Optional[str] = typer.Option(
+        None, "--x-backend", rich_help_panel=_ADVANCED,
+        help="X/Twitter 后端：opencli 或 twitter-cli（=collector.x_backend）",
+    ),
+    x_cmd: Optional[str] = typer.Option(
+        None, "--x-cmd", rich_help_panel=_ADVANCED,
+        help="twitter-cli 命令名或路径（=collector.x_cmd）",
+    ),
     relevance_filter: bool = typer.Option(
         False, "--relevance-filter", rich_help_panel=_ADVANCED,
         help="LLM 按主题给清洗后文档评 0-1 分，剔低分（=cleaner.relevance_filter）",
@@ -555,6 +633,17 @@ def run(
     ),
     mineru_cmd: Optional[str] = typer.Option(
         None, "--mineru-cmd", rich_help_panel=_ADVANCED, help="mineru 路径（Web 抓到的 PDF 也用它解析）"
+    ),
+    ocr_engine: Optional[str] = typer.Option(
+        None, "--ocr-engine", rich_help_panel=_ADVANCED,
+        help="PDF OCR 引擎：auto/mineru/custom/paddleocr-vl/unlimited-ocr/vision-llm",
+    ),
+    ocr_cmd: Optional[str] = typer.Option(
+        None, "--ocr-cmd", rich_help_panel=_ADVANCED,
+        help="PDF OCR 命令，可用 {pdf}/{out}/{lang}/{model} 占位",
+    ),
+    ocr_model_path: Optional[str] = typer.Option(
+        None, "--ocr-model-path", rich_help_panel=_ADVANCED, help="本地 OCR 模型目录"
     ),
     translate: bool = typer.Option(
         False, "--translate", rich_help_panel=_ADVANCED, help="PDF 英文 MD 译成中文"
@@ -602,10 +691,14 @@ def run(
         llm_expand=llm_expand, query=query, core=core, facets=facets,
         from_year=from_year, to_year=to_year, deep_search=deep_search,
         deep_pages=deep_pages, deep_sorts=deep_sorts,
+        search_relevance_min_overlap=search_relevance_min_overlap,
+        x_backend=x_backend, x_cmd=x_cmd,
         relevance_filter=relevance_filter,
         profile_iterations=profile_iterations,
         max_backward_rounds=max_backward_rounds,
-        pdf_dir=pdf_dir, mineru_cmd=mineru_cmd, translate=translate, model=model,
+        pdf_dir=pdf_dir, mineru_cmd=mineru_cmd,
+        ocr_engine=ocr_engine, ocr_cmd=ocr_cmd, ocr_model_path=ocr_model_path,
+        translate=translate, model=model,
     )
 
     async def _go():

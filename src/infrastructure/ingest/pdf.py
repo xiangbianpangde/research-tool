@@ -14,8 +14,6 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
-import shutil
-import subprocess
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -24,6 +22,7 @@ from ..llm.base import LLMClient
 from ...domain.models import CollectResult, PdfIngestConfig, Source
 from ..stages.base import ensure_dir, safe_filename, write_json, write_text
 from ...common.translate import translate_markdown
+from .ocr import create_ocr_engine, scan_ocr_engines
 
 
 def _now_iso() -> str:
@@ -36,23 +35,17 @@ def _sha256(text: str) -> str:
 
 def _resolve_mineru(cmd: str | None) -> str:
     """定位 mineru 可执行；找不到抛清晰错误（含安装提示）。"""
-    candidate = cmd or "mineru"
-    if Path(candidate).exists() or shutil.which(candidate):
-        return candidate
-    raise StageError(
-        "ingest-pdf",
-        "未找到 mineru。请安装 MinerU（pip install mineru，约 7GB 含模型），"
-        "或用 pdf_ingest.mineru_cmd 指定 pdf2zh 虚拟环境里的 mineru 路径，例如 "
-        r"C:\Users\you\Desktop\pdf2zh-v0.1.0\pdf2zh\.venv\Scripts\mineru.exe",
-    )
+    cfg = PdfIngestConfig(ocr_engine="mineru", mineru_cmd=cmd)
+    status = scan_ocr_engines(cfg)[0]
+    if status.available:
+        return cmd or "mineru"
+    raise StageError("ingest-pdf", "未找到 mineru。请安装 MinerU 或指定 mineru_cmd。")
 
 
 def find_mineru(cmd: str | None = None) -> str | None:
     """返回可用的 mineru 路径，找不到返回 None（不抛错，供采集路径探测）。"""
-    candidate = cmd or "mineru"
-    if Path(candidate).exists() or shutil.which(candidate):
-        return candidate
-    return None
+    cfg = PdfIngestConfig(ocr_engine="mineru", mineru_cmd=cmd)
+    return (cmd or "mineru") if scan_ocr_engines(cfg)[0].available else None
 
 
 def mineru_to_markdown(
@@ -66,24 +59,15 @@ def mineru_to_markdown(
     end: int | None = None,
 ) -> str:
     """调用 mineru 解析单个 PDF，返回其 Markdown 文本（找不到产物则抛 StageError）。"""
-    cmd = [mineru, "-p", str(pdf), "-o", str(parse_root), "-b", backend, "-l", lang]
-    if start is not None:
-        cmd += ["-s", str(start)]
-    if end is not None:
-        cmd += ["-e", str(end)]
-    result = subprocess.run(cmd, capture_output=True, text=True)
-    if result.returncode != 0:
-        raise StageError(
-            "ingest-pdf",
-            f"mineru 解析失败（{pdf.name}, code={result.returncode}）：\n"
-            f"{(result.stderr or '')[-800:]}",
-        )
-    md_files = list((parse_root / pdf.stem).rglob(f"{pdf.stem}.md"))
-    if not md_files:
-        md_files = list((parse_root / pdf.stem).rglob("*.md"))
-    if not md_files:
-        raise StageError("ingest-pdf", f"mineru 未产出 Markdown：{pdf.name}")
-    return md_files[0].read_text(encoding="utf-8")
+    cfg = PdfIngestConfig(
+        ocr_engine="mineru",
+        mineru_cmd=mineru,
+        mineru_backend=backend,
+        ocr_lang=lang,
+        start_page=start,
+        end_page=end,
+    )
+    return create_ocr_engine(cfg).parse(pdf, parse_root)
 
 
 def _collect_pdfs(path: Path) -> list[Path]:
@@ -116,19 +100,19 @@ class PdfIngestor:
         pdfs = _collect_pdfs(Path(pdf_path))
         if not pdfs:
             raise StageError("ingest-pdf", f"未找到 PDF：{pdf_path}")
-        mineru = _resolve_mineru(self.config.mineru_cmd)
-
         work_dir = Path(work_dir)
         raw_dir = ensure_dir(work_dir / "raw")
-        parse_root = ensure_dir(work_dir / "_mineru")  # MinerU 中间产物
+        parse_root = ensure_dir(work_dir / "_ocr")  # OCR 中间产物
+        ocr_engine = create_ocr_engine(self.config)
+        status = ocr_engine.available()
+        if not status.available:
+            raise StageError("ingest-pdf", f"OCR 引擎不可用: {status.name} ({status.detail})")
 
         files: list[Path] = []
         sources: list[Source] = []
         for idx, pdf in enumerate(pdfs, 1):
             # MinerU 是 CPU/GPU 密集子进程，逐个跑（避免显存竞争）
-            content = await asyncio.to_thread(
-                self._run_mineru, pdf, mineru, parse_root
-            )
+            content = await asyncio.to_thread(ocr_engine.parse, pdf, parse_root)
             translated = False
             if self.config.translate and self.llm is not None:
                 content = await translate_markdown(
@@ -145,7 +129,7 @@ class PdfIngestor:
                 f"<!-- source: file://{pdf.resolve()} -->\n"
                 f"<!-- title: {pdf.stem} -->\n"
                 f"<!-- fetched: {_now_iso()} -->\n"
-                f"<!-- via: mineru({self.config.mineru_backend})"
+                f"<!-- via: ocr:{ocr_engine.name}"
                 f"{' + translate' if translated else ''} -->\n\n"
             )
             write_text(fpath, header + content)

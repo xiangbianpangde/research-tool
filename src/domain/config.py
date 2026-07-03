@@ -91,6 +91,7 @@ def _flatten_to_pipeline(raw: dict) -> dict:
         ("llm", "llm"),
         ("collector", "collector"),
         ("deepen", "deepen"),
+        ("pdf_ingest", "pdf_ingest"),
         ("cleaner", "cleaner"),
         ("extractor", "extractor"),
         ("organizer", "organizer"),
@@ -127,6 +128,7 @@ _PROVIDER_KEY_ENV = {
     "openai": "OPENAI_API_KEY",
     "ollama": "OPENAI_API_KEY",
     "anthropic": "ANTHROPIC_API_KEY",
+    "minimax": "MINIMAX_API_KEY",
 }
 
 

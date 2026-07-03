@@ -8,6 +8,7 @@ dist/
 .venv/
 venv/
 config.yaml
+config.*.yaml
 research-output/
 .env
 webui-test/

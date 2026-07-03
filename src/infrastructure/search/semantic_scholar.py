@@ -9,6 +9,8 @@ API: https://api.semanticscholar.org/graph/v1/paper/search
 
 from __future__ import annotations
 
+import httpx
+
 from ...domain.errors import SearchError
 from ._http import describe, get_json
 from .base import SearchBackend, SearchHit
@@ -53,6 +55,14 @@ class SemanticScholarBackend(SearchBackend):
             params["offset"] = offset
         try:
             data = await get_json(_ENDPOINT, params=params, headers=headers)
+        except httpx.HTTPStatusError as e:
+            status = e.response.status_code if e.response is not None else None
+            if status == 429 and not self.api_key:
+                raise SearchError(
+                    "semantic_scholar 触发 429 限流；请配置 "
+                    "collector.semantic_scholar_api_key 或稍后重试"
+                ) from e
+            raise SearchError(f"semantic_scholar 搜索失败: {describe(e)}") from e
         except Exception as e:  # noqa: BLE001
             raise SearchError(f"semantic_scholar 搜索失败: {describe(e)}") from e
 

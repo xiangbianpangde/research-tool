@@ -47,6 +47,14 @@ def _build_inner(name: str, config: CollectorConfig) -> SearchBackend:
         from .crossref_backend import CrossrefBackend
 
         return CrossrefBackend(config.openalex_mailto)
+    if name == "bilibili":
+        from .bilibili_backend import BilibiliBackend
+
+        return BilibiliBackend()
+    if name in ("x", "twitter"):
+        from .x_backend import XBackend
+
+        return XBackend(config)
     raise ValueError(f"未知搜索引擎: {name}")
 
 

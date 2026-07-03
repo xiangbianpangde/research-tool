@@ -8,6 +8,7 @@ import pytest
 from src.infrastructure.search.github_backend import GitHubBackend
 from src.infrastructure.search.semantic_scholar import SemanticScholarBackend
 from src.infrastructure.search.wikipedia_backend import WikipediaBackend
+from src.domain.models import CollectorConfig
 
 
 @pytest.mark.asyncio
@@ -199,3 +200,57 @@ async def test_backend_failure_raises_searcherror(monkeypatch):
     monkeypatch.setattr("src.infrastructure.search.github_backend.get_json", boom)
     with pytest.raises(SearchError):
         await GitHubBackend().search("x", 5)
+
+
+@pytest.mark.asyncio
+async def test_arxiv_atom_parses_and_filters_year(monkeypatch):
+    from src.infrastructure.search.arxiv_backend import ArxivBackend
+
+    xml = """<?xml version="1.0" encoding="UTF-8"?>
+    <feed xmlns="http://www.w3.org/2005/Atom">
+      <entry>
+        <id>https://arxiv.org/abs/2401.00001v1</id>
+        <title>Medical MLLM</title>
+        <summary>Multimodal diagnosis.</summary>
+        <published>2024-01-01T00:00:00Z</published>
+      </entry>
+      <entry>
+        <id>https://arxiv.org/abs/1901.00001v1</id>
+        <title>Old paper</title>
+        <summary>Old.</summary>
+        <published>2019-01-01T00:00:00Z</published>
+      </entry>
+    </feed>"""
+
+    async def fake(url, **kw):
+        return xml
+
+    monkeypatch.setattr("src.infrastructure.search.arxiv_backend.get_text", fake)
+    hits = await ArxivBackend().search("medical mllm", 5, from_year=2024)
+    assert len(hits) == 1
+    assert hits[0].title == "Medical MLLM"
+    assert hits[0].source_engine == "arxiv"
+
+
+@pytest.mark.asyncio
+async def test_x_backend_parses_twitter_cli_json(monkeypatch):
+    from src.infrastructure.search.x_backend import XBackend
+
+    monkeypatch.setattr("src.infrastructure.search.x_backend.shutil.which", lambda c: c)
+
+    class R:
+        returncode = 0
+        stderr = ""
+        stdout = '[{"id":"123","username":"alice","text":"medical mllm result"}]'
+
+    monkeypatch.setattr("src.infrastructure.search.x_backend.subprocess.run", lambda *a, **k: R())
+    hits = await XBackend(CollectorConfig(search_engines=["x"])).search("medical mllm", 5)
+    assert hits[0].url == "https://x.com/alice/status/123"
+    assert hits[0].source_engine == "x"
+
+
+def test_x_backend_parses_json_before_opencli_notice():
+    from src.infrastructure.search.x_backend import XBackend
+
+    data = XBackend._loads_json_output('[{"id":"123"}]\n\nExtension update available')
+    assert data == [{"id": "123"}]

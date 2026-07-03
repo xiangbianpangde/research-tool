@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import re
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -125,6 +126,33 @@ def _url_hash(url: str) -> str:
     return hashlib.sha256(url.encode("utf-8")).hexdigest()[:6]
 
 
+_TOKEN_RE = re.compile(r"[A-Za-z][A-Za-z0-9-]{2,}|[\u4e00-\u9fff]{2,}")
+_STOPWORDS = {
+    "the", "and", "for", "with", "from", "into", "using", "review", "survey",
+    "study", "paper", "application", "applications", "model", "models",
+    "large", "language",
+}
+
+
+def _tokens(text: str) -> set[str]:
+    return {
+        t.lower()
+        for t in _TOKEN_RE.findall(text or "")
+        if t.lower() not in _STOPWORDS
+    }
+
+
+def _hit_relevance(topic: str, hit: SearchHit) -> float:
+    """Cheap pre-fetch relevance score based on topic/query vs title/snippet overlap."""
+    topic_tokens = _tokens(topic)
+    if not topic_tokens:
+        return 1.0
+    hit_tokens = _tokens(f"{hit.title}\n{hit.snippet}\n{hit.url}")
+    if not hit_tokens:
+        return 0.0
+    return len(topic_tokens & hit_tokens) / len(topic_tokens)
+
+
 class Collector:
     def __init__(
         self, config: CollectorConfig | None = None, llm: LLMClient | None = None
@@ -225,6 +253,12 @@ class Collector:
                 warnings.append(f"{engine} 搜索失败 query={query!r}: {res}")
                 continue
             for hit in res:
+                threshold = self.config.search_relevance_min_overlap
+                if threshold > 0 and _hit_relevance(query, hit) < threshold:
+                    warnings.append(
+                        f"{engine} 低相关命中已跳过 query={query!r}: {hit.title[:80]}"
+                    )
+                    continue
                 if hit.url in seen:
                     continue
                 seen.add(hit.url)
@@ -319,6 +353,7 @@ class Collector:
                     fetched_at=_now_iso(),
                     source_engine=hit.source_engine,
                     content_hash=_sha256(fr.markdown),
+                    snippet=hit.snippet,
                 )
             )
 

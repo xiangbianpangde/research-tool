@@ -18,7 +18,8 @@ collector:
     - web                        # web(=duckduckgo) | arxiv | tavily
     - openalex                   # openalex(2.5亿+全学术,含最新) | crossref(1.5亿DOI)
     # 其它可选： semantic_scholar | wikipedia(百科/人物) | github(代码)
-    #            pubmed(生物医学) | google_news(最新新闻)
+    #            pubmed(生物医学) | google_news(最新新闻) | bilibili(视频)
+    #            x / twitter(X 平台公开推文，默认通过 OpenCLI 复用浏览器登录态)
     # 论文优先推荐 openalex：覆盖最全、限流最宽、自动混合"经典+最新"
   max_results_per_engine: 8
   depth: 2                       # 1=仅搜索 2=打开结果页 3=追踪二级链接
@@ -30,6 +31,12 @@ collector:
   semantic_scholar_api_key: ${S2_API_KEY}      # 可选，提升 S2 配额（无 key 也能用）
   github_token: ${GITHUB_TOKEN}                # 可选，GitHub 搜索 10→30 次/分钟
   openalex_mailto: ${OPENALEX_MAILTO}          # 可选邮箱，OpenAlex/Crossref polite pool 更稳
+  # X/Twitter 渠道：默认 OpenCLI；需浏览器安装 opencli extension 并登录 x.com。
+  # 若改用 twitter-cli，可设 x_backend: twitter-cli，并按需改 x_cmd。
+  # twitter-cli 会读取 TWITTER_AUTH_TOKEN / TWITTER_CT0，或从浏览器自动提取。
+  # 不要把 X cookie 写入配置文件或提交到远程仓库。
+  x_backend: opencli              # opencli | twitter-cli
+  x_cmd: twitter                  # twitter-cli 命令名或绝对路径
   # 两阶段锚定/去锚（P1，解决"被单一机构/限定语绑架"的查询偏差）
   core_keyword: null             # 核心词，如 topic="中南民族大学 康怡琳" 时填 "康怡琳"
   facets: []                     # 维度标签，仅去锚阶段生效，如 [博士, 论文, 南洋理工]

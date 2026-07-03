@@ -386,7 +386,7 @@ def build_ui():  # noqa: PLR0915 - Gradio 布局 + 事件绑定，单函数承�
                             engines = gr.CheckboxGroup(
                                 ["web", "arxiv", "openalex", "crossref", "tavily",
                                  "semantic_scholar", "wikipedia", "github",
-                                 "pubmed", "google_news"],
+                                 "pubmed", "google_news", "bilibili", "x"],
                                 value=["web", "openalex"], label="搜索来源（可多选）",
                             )
                             rounds = gr.Slider(1, 3, value=2, step=1, label="搜索轮次（多轮关键词）")  # noqa: E501

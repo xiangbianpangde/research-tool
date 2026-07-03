@@ -129,6 +129,8 @@ research collect "扩散模型" --deep-search --deep-pages 3 --deep-sorts "relev
 | `github` | GitHub | 可选 | 开源实现、代码、社区活跃度 |
 | `google_news` | Google News | 免 | 最新进展 / 新闻 |
 | `tavily` | Tavily | 需 | LLM 优化的网页搜索 |
+| `bilibili` | Bilibili | 免 | B 站视频搜索 |
+| `x` / `twitter` | X/Twitter | 需登录态 | 通过 `twitter-cli` 或 OpenCLI 读取公开推文搜索 |
 
 **论文调研推荐 `openalex`**：覆盖最全、限流最宽、且自动一半按相关性 + 一半按发表日期检索，
 解决 arxiv/semantic_scholar 默认按相关性排序「搜不到近期论文」的问题。
@@ -195,12 +197,98 @@ pip install -e ".[pdf]"   # 安装 MinerU（重依赖，~7GB 含模型），或�
 # 仅摄取：PDF 文件夹 → raw/（可选 --translate 译中文）
 research ingest-pdf ./papers -T "扩散模型综述" --translate
 
+# 扫描当前可用 OCR 引擎
+research ocr-engines
+
+# 切换 OCR 引擎：MinerU / custom / PaddleOCR-VL / Unlimited-OCR / vision-llm
+research ingest-pdf ./papers -T "扩散模型综述" --ocr-engine mineru
+research ingest-pdf ./papers -T "表格密集文档" --ocr-engine custom --ocr-cmd "my-ocr {pdf} {out}"
+research ingest-pdf ./papers -T "视觉模型 OCR" --ocr-engine paddleocr-vl ^
+  --ocr-cmd "my-paddleocr-vl --model {model} --input {pdf} --output {out}" ^
+  --ocr-model-path "C:\Users\yhn\.cache\research-tool\models\PaddlePaddle__PaddleOCR-VL-1.6"
+
 # 一键：PDF 文件夹 → 中文知识树 + 报告（collect 阶段改为 PDF 摄取）
 research run "扩散模型综述" --pdf-dir ./papers --translate --skip extract
 ```
 
-未把 mineru 装到全局时，用 `--mineru-cmd` 指向 pdf2zh 虚拟环境里的可执行：
+默认仍使用 MinerU。未把 mineru 装到全局时，用 `--mineru-cmd` 指向 pdf2zh 虚拟环境里的可执行：
 `--mineru-cmd "C:\path\to\pdf2zh\.venv\Scripts\mineru.exe"`。
+
+OCR 引擎说明：
+
+- `mineru`：内置 MinerU CLI 调用，保持旧行为。
+- `custom`：外部命令包装，命令可用 `{pdf}`、`{out}`、`{lang}`、`{model}` 占位；命令可直接 stdout 输出 Markdown，或在 `{out}` 下写 `.md/.txt`。
+- `paddleocr-vl` / `unlimited-ocr`：本项目不强制安装 Paddle/Torch 重依赖，通过 `--ocr-cmd` + `--ocr-model-path` 接入本地模型包装脚本。
+- `vision-llm`：为图片理解型 OCR 预留同样的命令包装入口。
+
+已下载模型默认缓存位置：
+
+- `C:\Users\yhn\.cache\research-tool\models\PaddlePaddle__PaddleOCR-VL-1.6`
+- `C:\Users\yhn\.cache\research-tool\models\baidu__Unlimited-OCR`
+
+### X / Twitter 渠道
+
+默认使用 OpenCLI 复用浏览器登录态，不需要手动复制 X cookie：
+
+```bash
+opencli doctor
+research collect "multimodal medical AI" -s x -n 3 --dry-run
+research run "multimodal medical AI" -s x --x-backend opencli
+```
+
+Windows 本机已下载的 OpenCLI 浏览器桥接扩展路径：
+
+```text
+C:\Users\yhn\.cache\research-tool\opencli\opencli-extension-v1.0.20
+```
+
+首次使用需要在 Chrome/Edge 打开 `chrome://extensions`，启用 Developer mode，
+点击 `Load unpacked`，选择上面的扩展目录，并保持浏览器里已登录 `x.com`。
+
+如果要退回 `twitter-cli`，可在配置中指定：
+
+```yaml
+collector:
+  x_backend: twitter-cli
+```
+
+命令行也可直接指定：
+
+```bash
+research collect "multimodal medical AI" -s x --x-backend twitter-cli --x-cmd twitter
+```
+
+`twitter-cli` 的认证优先级是：先读环境变量 `TWITTER_AUTH_TOKEN` / `TWITTER_CT0`，
+再尝试从本机浏览器自动提取 cookie。推荐先试自动提取：
+
+```powershell
+$env:TWITTER_BROWSER="chrome"          # 可选：chrome / edge / firefox / brave / arc
+$env:TWITTER_CHROME_PROFILE="Default"  # 可选：也可能是 "Profile 1"
+twitter status
+```
+
+如果自动提取失败，可以手动从浏览器获取 cookie：
+
+1. 在 Chrome/Edge 登录 `https://x.com`。
+2. 按 `F12` 打开 DevTools，进入 `Application` → `Cookies` → `https://x.com`。
+3. 找到 `auth_token` 和 `ct0` 两行，复制它们的 `Value`。
+4. 在 PowerShell 当前会话中设置：
+
+```powershell
+$env:TWITTER_AUTH_TOKEN="复制到的 auth_token"
+$env:TWITTER_CT0="复制到的 ct0"
+twitter status
+```
+
+需要长期保存到当前 Windows 用户环境变量时：
+
+```powershell
+[Environment]::SetEnvironmentVariable("TWITTER_AUTH_TOKEN", "复制到的 auth_token", "User")
+[Environment]::SetEnvironmentVariable("TWITTER_CT0", "复制到的 ct0", "User")
+```
+
+设置后重新打开终端再运行 `twitter status`。Cookie 等同于登录凭证，不要提交到
+`config.yaml`、README、issue、聊天记录或任何远程仓库；失效时重新登录 X 后再取一次。
 
 SDK：
 ```python

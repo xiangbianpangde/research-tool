@@ -1,77 +1,75 @@
-"""arxiv 搜索后端（免费官方 API）。
-
-依据 07 §4 AutoSchemaKG/学术来源。返回 arxiv 摘要页 URL，供 Collector 抓取。
-"""
+"""arXiv search backend using the official Atom API."""
 
 from __future__ import annotations
 
-import asyncio
+import xml.etree.ElementTree as ET
+
+import httpx
 
 from ...domain.errors import SearchError
+from ._http import describe, get_text
 from .base import SearchBackend, SearchHit
+
+_ENDPOINT = "https://export.arxiv.org/api/query"
+_NS = {"a": "http://www.w3.org/2005/Atom"}
 
 
 class ArxivBackend(SearchBackend):
     name = "arxiv"
 
-    def _search_sync(
-        self, query: str, max_results: int,
-        from_year: int | None, to_year: int | None,
-        sort: str | None, offset: int,
+    async def search(
+        self,
+        query: str,
+        max_results: int,
+        language: str = "both",
+        *,
+        from_year: int | None = None,
+        to_year: int | None = None,
+        sort: str | None = None,
+        offset: int = 0,
     ) -> list[SearchHit]:
+        sort_by = "submittedDate" if sort == "date" else "relevance"
+        params = {
+            "search_query": f"all:{query}",
+            "start": max(offset, 0),
+            "max_results": min(max_results * 3 if (from_year or to_year) else max_results, 50),
+            "sortBy": sort_by,
+            "sortOrder": "descending",
+        }
         try:
-            import arxiv
-        except ImportError as e:  # pragma: no cover
-            raise SearchError(
-                "需要 arxiv 包：pip install arxiv（或 research-tool[search]）"
-            ) from e
-        # arxiv 无 citations 排序：date→SubmittedDate，其余→Relevance
-        criterion = (
-            arxiv.SortCriterion.SubmittedDate if sort == "date"
-            else arxiv.SortCriterion.Relevance
-        )
-        # 年份过滤靠客户端：多取一些再筛，避免过滤后不足量
-        want = max_results + (offset or 0)
-        fetch = want * 2 if (from_year or to_year) else want
-        client = arxiv.Client(
-            page_size=min(fetch, 100), delay_seconds=3.0, num_retries=5
-        )
-        search = arxiv.Search(
-            query=query, max_results=fetch, sort_by=criterion,
-        )
+            text = await get_text(_ENDPOINT, params=params, timeout=25.0, retries=2)
+        except httpx.HTTPStatusError as e:
+            status = e.response.status_code if e.response is not None else None
+            if status == 429:
+                raise SearchError("arxiv 官方 API 限流 429；请稍后重试或减少并发/查询频率") from e
+            raise SearchError(f"arxiv 搜索失败: {describe(e)}") from e
+        except Exception as e:  # noqa: BLE001
+            raise SearchError(f"arxiv 搜索失败: {describe(e)}") from e
+
+        try:
+            root = ET.fromstring(text)
+        except ET.ParseError as e:
+            raise SearchError(f"arxiv 响应 XML 解析失败: {e}") from e
+
         hits: list[SearchHit] = []
-        for r in client.results(search):
-            year = getattr(r, "published", None)
-            year = year.year if year else None
+        for entry in root.findall("a:entry", _NS):
+            title = " ".join((entry.findtext("a:title", default="", namespaces=_NS) or "").split())
+            summary = " ".join((entry.findtext("a:summary", default="", namespaces=_NS) or "").split())
+            url = entry.findtext("a:id", default="", namespaces=_NS) or ""
+            published = entry.findtext("a:published", default="", namespaces=_NS) or ""
+            year = int(published[:4]) if published[:4].isdigit() else None
             if from_year is not None and (year is None or year < from_year):
                 continue
             if to_year is not None and (year is None or year > to_year):
                 continue
             hits.append(
                 SearchHit(
-                    url=r.entry_id,  # abs 页 URL
-                    title=r.title,
-                    snippet=(r.summary or "")[:500],
+                    url=url,
+                    title=title,
+                    snippet=f"{year or ''}\n{summary[:500]}".strip(),
                     source_engine=self.name,
                 )
             )
-        # 客户端分页：跳过 offset 条，再取 max_results 条
-        return hits[offset: offset + max_results] if offset else hits[:max_results]
-
-    async def search(
-        self, query: str, max_results: int, language: str = "both",
-        *, from_year: int | None = None, to_year: int | None = None,
-        sort: str | None = None, offset: int = 0,
-    ) -> list[SearchHit]:
-        from .cache import arxiv_throttle
-
-        await arxiv_throttle()  # 进程级最小请求间隔，缓解 429
-        try:
-            return await asyncio.to_thread(
-                self._search_sync, query, max_results,
-                from_year, to_year, sort, offset,
-            )
-        except SearchError:
-            raise
-        except Exception as e:  # noqa: BLE001
-            raise SearchError(f"arxiv 搜索失败: {e}") from e
+            if len(hits) >= max_results:
+                break
+        return hits
