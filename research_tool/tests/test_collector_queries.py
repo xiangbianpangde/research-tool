@@ -1,8 +1,8 @@
 import pytest
 
-from src.infrastructure.llm import MockLLMClient
-from src.domain.models import CollectorConfig
-from src.infrastructure.stages.collector import (
+from research_tool.infrastructure.llm import MockLLMClient
+from research_tool.domain.models import CollectorConfig
+from research_tool.infrastructure.stages.collector import (
     Collector,
     _build_queries,
     _llm_build_queries,
@@ -50,7 +50,7 @@ async def test_collector_uses_template_without_llm(monkeypatch):
         return []
 
     monkeypatch.setattr(
-        "src.infrastructure.search.duckduckgo.DuckDuckGoBackend.search", fake_search
+        "research_tool.infrastructure.search.duckduckgo.DuckDuckGoBackend.search", fake_search
     )
     await c.search_only("X")
     assert "X overview" in captured["queries"]
@@ -58,7 +58,7 @@ async def test_collector_uses_template_without_llm(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_search_relevance_prefilter_skips_offtopic(monkeypatch):
-    from src.infrastructure.search.base import SearchHit
+    from research_tool.infrastructure.search.base import SearchHit
 
     cfg = CollectorConfig(search_relevance_min_overlap=0.5, search_cache=False)
     c = Collector(cfg)
@@ -70,7 +70,7 @@ async def test_search_relevance_prefilter_skips_offtopic(monkeypatch):
         ]
 
     monkeypatch.setattr(
-        "src.infrastructure.search.duckduckgo.DuckDuckGoBackend.search", fake_search
+        "research_tool.infrastructure.search.duckduckgo.DuckDuckGoBackend.search", fake_search
     )
     sr = await c.search_only("medical image diagnosis")
     assert [h.url for h in sr.hits] == ["https://example.com/a"]

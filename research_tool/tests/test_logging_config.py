@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 
-from src.common.logging_config import (
+from research_tool.common.logging_config import (
     DEFAULT_LOG_DIR,
     DEFAULT_RETENTION_DAYS,
     DailyRotatingHandler,

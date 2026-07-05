@@ -18,8 +18,8 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from src.domain.errors import DownloadError
-from src.infrastructure.ingest.downloader import (
+from research_tool.domain.errors import DownloadError
+from research_tool.infrastructure.ingest.downloader import (
     COOKIE_REQUIRED_PERMS,
     E_DL_001,
     E_DL_002_VERSION_TOO_OLD,
@@ -396,7 +396,7 @@ def _make_result(video_id: str, title: str):
     """构造 DownloadResult（用于 mock 返回）。"""
     import tempfile
 
-    from src.infrastructure.ingest.downloader import DownloadResult
+    from research_tool.infrastructure.ingest.downloader import DownloadResult
 
     return DownloadResult(
         file_path=f"{tempfile.gettempdir()}/{video_id}.m4a",

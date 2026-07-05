@@ -7,7 +7,7 @@ from unittest.mock import patch
 
 import pytest
 
-from src.infrastructure.ingest.preflight import (
+from research_tool.infrastructure.ingest.preflight import (
     DEFAULT_TTL_SECONDS,
     PreflightFacade,
     PreflightReport,
@@ -76,19 +76,19 @@ class TestPreflightFacade:
         invalidate_cache()
         with (
             patch(
-                "src.infrastructure.ingest.preflight._check_ytdlp_sync",
+                "research_tool.infrastructure.ingest.preflight._check_ytdlp_sync",
                 return_value=(True, "2024.5.1"),
             ),
             patch(
-                "src.infrastructure.ingest.preflight._check_ffmpeg_sync",
+                "research_tool.infrastructure.ingest.preflight._check_ffmpeg_sync",
                 return_value=(True, "6.0"),
             ),
             patch(
-                "src.infrastructure.ingest.preflight._check_whisper_sync",
+                "research_tool.infrastructure.ingest.preflight._check_whisper_sync",
                 return_value=(True, "medium"),
             ),
             patch(
-                "src.infrastructure.ingest.preflight._check_cache_writable_sync",
+                "research_tool.infrastructure.ingest.preflight._check_cache_writable_sync",
                 return_value=True,
             ),
         ):
@@ -105,19 +105,19 @@ class TestPreflightFacade:
         invalidate_cache()
         with (
             patch(
-                "src.infrastructure.ingest.preflight._check_ytdlp_sync",
+                "research_tool.infrastructure.ingest.preflight._check_ytdlp_sync",
                 return_value=(False, None),
             ),
             patch(
-                "src.infrastructure.ingest.preflight._check_ffmpeg_sync",
+                "research_tool.infrastructure.ingest.preflight._check_ffmpeg_sync",
                 return_value=(True, "6.0"),
             ),
             patch(
-                "src.infrastructure.ingest.preflight._check_whisper_sync",
+                "research_tool.infrastructure.ingest.preflight._check_whisper_sync",
                 return_value=(True, "medium"),
             ),
             patch(
-                "src.infrastructure.ingest.preflight._check_cache_writable_sync",
+                "research_tool.infrastructure.ingest.preflight._check_cache_writable_sync",
                 return_value=True,
             ),
         ):
@@ -131,19 +131,19 @@ class TestPreflightFacade:
         invalidate_cache()
         with (
             patch(
-                "src.infrastructure.ingest.preflight._check_ytdlp_sync",
+                "research_tool.infrastructure.ingest.preflight._check_ytdlp_sync",
                 return_value=(True, "2024"),
             ),
             patch(
-                "src.infrastructure.ingest.preflight._check_ffmpeg_sync",
+                "research_tool.infrastructure.ingest.preflight._check_ffmpeg_sync",
                 return_value=(False, None),
             ),
             patch(
-                "src.infrastructure.ingest.preflight._check_whisper_sync",
+                "research_tool.infrastructure.ingest.preflight._check_whisper_sync",
                 return_value=(False, None),
             ),
             patch(
-                "src.infrastructure.ingest.preflight._check_cache_writable_sync",
+                "research_tool.infrastructure.ingest.preflight._check_cache_writable_sync",
                 return_value=False,
             ),
         ):
@@ -161,19 +161,19 @@ class TestPreflightFacade:
         invalidate_cache()
         with (
             patch(
-                "src.infrastructure.ingest.preflight._check_ytdlp_sync",
+                "research_tool.infrastructure.ingest.preflight._check_ytdlp_sync",
                 return_value=(True, "2024"),
             ) as mock_yt,
             patch(
-                "src.infrastructure.ingest.preflight._check_ffmpeg_sync",
+                "research_tool.infrastructure.ingest.preflight._check_ffmpeg_sync",
                 return_value=(True, "6.0"),
             ),
             patch(
-                "src.infrastructure.ingest.preflight._check_whisper_sync",
+                "research_tool.infrastructure.ingest.preflight._check_whisper_sync",
                 return_value=(True, "medium"),
             ),
             patch(
-                "src.infrastructure.ingest.preflight._check_cache_writable_sync",
+                "research_tool.infrastructure.ingest.preflight._check_cache_writable_sync",
                 return_value=True,
             ),
         ):
@@ -190,19 +190,19 @@ class TestPreflightFacade:
         invalidate_cache()
         with (
             patch(
-                "src.infrastructure.ingest.preflight._check_ytdlp_sync",
+                "research_tool.infrastructure.ingest.preflight._check_ytdlp_sync",
                 return_value=(True, "2024"),
             ) as mock_yt,
             patch(
-                "src.infrastructure.ingest.preflight._check_ffmpeg_sync",
+                "research_tool.infrastructure.ingest.preflight._check_ffmpeg_sync",
                 return_value=(True, "6.0"),
             ),
             patch(
-                "src.infrastructure.ingest.preflight._check_whisper_sync",
+                "research_tool.infrastructure.ingest.preflight._check_whisper_sync",
                 return_value=(True, "medium"),
             ),
             patch(
-                "src.infrastructure.ingest.preflight._check_cache_writable_sync",
+                "research_tool.infrastructure.ingest.preflight._check_cache_writable_sync",
                 return_value=True,
             ),
         ):
@@ -216,19 +216,19 @@ class TestPreflightFacade:
         invalidate_cache()
         with (
             patch(
-                "src.infrastructure.ingest.preflight._check_ytdlp_sync",
+                "research_tool.infrastructure.ingest.preflight._check_ytdlp_sync",
                 side_effect=RuntimeError("boom"),
             ),
             patch(
-                "src.infrastructure.ingest.preflight._check_ffmpeg_sync",
+                "research_tool.infrastructure.ingest.preflight._check_ffmpeg_sync",
                 return_value=(True, "6.0"),
             ),
             patch(
-                "src.infrastructure.ingest.preflight._check_whisper_sync",
+                "research_tool.infrastructure.ingest.preflight._check_whisper_sync",
                 return_value=(True, "medium"),
             ),
             patch(
-                "src.infrastructure.ingest.preflight._check_cache_writable_sync",
+                "research_tool.infrastructure.ingest.preflight._check_cache_writable_sync",
                 return_value=True,
             ),
         ):
@@ -246,19 +246,19 @@ class TestModuleLevel:
         invalidate_cache()
         with (
             patch(
-                "src.infrastructure.ingest.preflight._check_ytdlp_sync",
+                "research_tool.infrastructure.ingest.preflight._check_ytdlp_sync",
                 return_value=(True, "v"),
             ),
             patch(
-                "src.infrastructure.ingest.preflight._check_ffmpeg_sync",
+                "research_tool.infrastructure.ingest.preflight._check_ffmpeg_sync",
                 return_value=(True, "v"),
             ),
             patch(
-                "src.infrastructure.ingest.preflight._check_whisper_sync",
+                "research_tool.infrastructure.ingest.preflight._check_whisper_sync",
                 return_value=(True, "medium"),
             ),
             patch(
-                "src.infrastructure.ingest.preflight._check_cache_writable_sync",
+                "research_tool.infrastructure.ingest.preflight._check_cache_writable_sync",
                 return_value=True,
             ),
         ):

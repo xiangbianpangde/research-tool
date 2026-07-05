@@ -2,11 +2,11 @@
 
 import pytest
 
-from src.domain.errors import SearchError
-from src.domain.models import CollectorConfig
-from src.infrastructure.search.base import SearchHit
-from src.infrastructure.stages.collector import Collector
-from src.infrastructure.stages.fetcher import FetchResult, Fetcher
+from research_tool.domain.errors import SearchError
+from research_tool.domain.models import CollectorConfig
+from research_tool.infrastructure.search.base import SearchHit
+from research_tool.infrastructure.stages.collector import Collector
+from research_tool.infrastructure.stages.fetcher import FetchResult, Fetcher
 
 _LONG = "实质内容。" * 60  # > min_doc_chars
 
@@ -23,10 +23,10 @@ async def test_search_warnings_not_silent(monkeypatch):
         raise SearchError("github 搜索失败: 429")
 
     monkeypatch.setattr(
-        "src.infrastructure.search.duckduckgo.DuckDuckGoBackend.search", ddg_ok
+        "research_tool.infrastructure.search.duckduckgo.DuckDuckGoBackend.search", ddg_ok
     )
     monkeypatch.setattr(
-        "src.infrastructure.search.github_backend.GitHubBackend.search", gh_boom
+        "research_tool.infrastructure.search.github_backend.GitHubBackend.search", gh_boom
     )
 
     sr = await c.search_queries(["X"])

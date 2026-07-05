@@ -7,9 +7,9 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from src.domain.errors import LLMError
-from src.domain.models import LLMConfig
-from src.infrastructure.llm.deepseek_client import DeepseekClient, _parse_summary, _truncate_text
+from research_tool.domain.errors import LLMError
+from research_tool.domain.models import LLMConfig
+from research_tool.infrastructure.llm.deepseek_client import DeepseekClient, _parse_summary, _truncate_text
 
 
 class TestDeepseekClientConstruction:

@@ -16,7 +16,7 @@ from unittest.mock import patch
 
 import pytest
 
-from src.application.video_concurrent_orchestrator import (
+from research_tool.application.video_concurrent_orchestrator import (
     ConcurrencyResolver,
     DEFAULT_CONCURRENCY,
     E_LIM_001,
@@ -32,7 +32,7 @@ from src.application.video_concurrent_orchestrator import (
     gather_tasks,
     reset_singleton,
 )
-from src.domain.errors import VideoIngestError
+from research_tool.domain.errors import VideoIngestError
 
 
 # --------------------------------------------------------------------------- #

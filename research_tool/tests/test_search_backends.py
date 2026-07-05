@@ -5,10 +5,10 @@
 
 import pytest
 
-from src.infrastructure.search.github_backend import GitHubBackend
-from src.infrastructure.search.semantic_scholar import SemanticScholarBackend
-from src.infrastructure.search.wikipedia_backend import WikipediaBackend
-from src.domain.models import CollectorConfig
+from research_tool.infrastructure.search.github_backend import GitHubBackend
+from research_tool.infrastructure.search.semantic_scholar import SemanticScholarBackend
+from research_tool.infrastructure.search.wikipedia_backend import WikipediaBackend
+from research_tool.domain.models import CollectorConfig
 
 
 @pytest.mark.asyncio
@@ -28,7 +28,7 @@ async def test_semantic_scholar_prefers_arxiv_url(monkeypatch):
             ]
         }
 
-    monkeypatch.setattr("src.infrastructure.search.semantic_scholar.get_json", fake)
+    monkeypatch.setattr("research_tool.infrastructure.search.semantic_scholar.get_json", fake)
     hits = await SemanticScholarBackend().search("transformer", 10)
     assert len(hits) == 1
     h = hits[0]
@@ -52,7 +52,7 @@ async def test_wikipedia_both_langs_and_strips_html(monkeypatch):
             ]
         }
 
-    monkeypatch.setattr("src.infrastructure.search.wikipedia_backend.get_json", fake)
+    monkeypatch.setattr("research_tool.infrastructure.search.wikipedia_backend.get_json", fake)
     hits = await WikipediaBackend().search("Yilin Kang", 10, language="both")
     # both → 同时搜 en + zh 两个站点
     assert {h.url.split("/wiki/")[0] for h in hits} == {
@@ -79,7 +79,7 @@ async def test_github_repo_metadata(monkeypatch):
             ]
         }
 
-    monkeypatch.setattr("src.infrastructure.search.github_backend.get_json", fake)
+    monkeypatch.setattr("research_tool.infrastructure.search.github_backend.get_json", fake)
     hits = await GitHubBackend().search("transformer", 10)
     assert hits[0].title == "huggingface/transformers"
     assert "★120000" in hits[0].snippet and "Python" in hits[0].snippet
@@ -87,7 +87,7 @@ async def test_github_repo_metadata(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_pubmed_two_step(monkeypatch):
-    from src.infrastructure.search.pubmed_backend import PubMedBackend
+    from research_tool.infrastructure.search.pubmed_backend import PubMedBackend
 
     async def fake(url, **kw):
         if "esearch" in url:
@@ -105,7 +105,7 @@ async def test_pubmed_two_step(monkeypatch):
             }
         }
 
-    monkeypatch.setattr("src.infrastructure.search.pubmed_backend.get_json", fake)
+    monkeypatch.setattr("research_tool.infrastructure.search.pubmed_backend.get_json", fake)
     hits = await PubMedBackend().search("crispr", 10)
     assert [h.url for h in hits] == [
         "https://pubmed.ncbi.nlm.nih.gov/111/",
@@ -116,7 +116,7 @@ async def test_pubmed_two_step(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_google_news_parses_rss(monkeypatch):
-    from src.infrastructure.search.google_news import GoogleNewsBackend
+    from research_tool.infrastructure.search.google_news import GoogleNewsBackend
 
     rss = """<?xml version="1.0"?><rss version="2.0"><channel>
       <item>
@@ -130,7 +130,7 @@ async def test_google_news_parses_rss(monkeypatch):
     async def fake(url, **kw):
         return rss
 
-    monkeypatch.setattr("src.infrastructure.search.google_news.get_text", fake)
+    monkeypatch.setattr("research_tool.infrastructure.search.google_news.get_text", fake)
     hits = await GoogleNewsBackend().search("ai", 10)
     assert hits[0].title == "AI breakthrough"
     assert hits[0].url.endswith("/abc")
@@ -139,7 +139,7 @@ async def test_google_news_parses_rss(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_openalex_mixes_relevant_and_recent(monkeypatch):
-    from src.infrastructure.search.openalex_backend import OpenAlexBackend
+    from research_tool.infrastructure.search.openalex_backend import OpenAlexBackend
 
     async def fake(url, **kw):
         sort = (kw.get("params") or {}).get("sort")
@@ -159,7 +159,7 @@ async def test_openalex_mixes_relevant_and_recent(monkeypatch):
             "best_oa_location": {"pdf_url": "https://x/classic.pdf"},
         }]}
 
-    monkeypatch.setattr("src.infrastructure.search.openalex_backend.get_json", fake)
+    monkeypatch.setattr("research_tool.infrastructure.search.openalex_backend.get_json", fake)
     hits = await OpenAlexBackend().search("transformer", 4)
     titles = [h.title for h in hits]
     assert "Classic high-cite" in titles and "Recent 2026 paper" in titles  # 经典+最新都在
@@ -170,7 +170,7 @@ async def test_openalex_mixes_relevant_and_recent(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_crossref_filters_future_years(monkeypatch):
-    from src.infrastructure.search.crossref_backend import CrossrefBackend
+    from research_tool.infrastructure.search.crossref_backend import CrossrefBackend
 
     async def fake(url, **kw):
         return {"message": {"items": [
@@ -184,7 +184,7 @@ async def test_crossref_filters_future_years(monkeypatch):
             }
         ]}}
 
-    monkeypatch.setattr("src.infrastructure.search.crossref_backend.get_json", fake)
+    monkeypatch.setattr("research_tool.infrastructure.search.crossref_backend.get_json", fake)
     hits = await CrossrefBackend().search("x", 5)
     assert hits[0].title == "Bad date paper"
     assert "2115" not in hits[0].snippet and "2019" in hits[0].snippet  # 脏年份被滤掉
@@ -192,19 +192,19 @@ async def test_crossref_filters_future_years(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_backend_failure_raises_searcherror(monkeypatch):
-    from src.domain.errors import SearchError
+    from research_tool.domain.errors import SearchError
 
     async def boom(url, **kw):
         raise RuntimeError("429 forever")
 
-    monkeypatch.setattr("src.infrastructure.search.github_backend.get_json", boom)
+    monkeypatch.setattr("research_tool.infrastructure.search.github_backend.get_json", boom)
     with pytest.raises(SearchError):
         await GitHubBackend().search("x", 5)
 
 
 @pytest.mark.asyncio
 async def test_arxiv_atom_parses_and_filters_year(monkeypatch):
-    from src.infrastructure.search.arxiv_backend import ArxivBackend
+    from research_tool.infrastructure.search.arxiv_backend import ArxivBackend
 
     xml = """<?xml version="1.0" encoding="UTF-8"?>
     <feed xmlns="http://www.w3.org/2005/Atom">
@@ -225,7 +225,7 @@ async def test_arxiv_atom_parses_and_filters_year(monkeypatch):
     async def fake(url, **kw):
         return xml
 
-    monkeypatch.setattr("src.infrastructure.search.arxiv_backend.get_text", fake)
+    monkeypatch.setattr("research_tool.infrastructure.search.arxiv_backend.get_text", fake)
     hits = await ArxivBackend().search("medical mllm", 5, from_year=2024)
     assert len(hits) == 1
     assert hits[0].title == "Medical MLLM"
@@ -234,23 +234,23 @@ async def test_arxiv_atom_parses_and_filters_year(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_x_backend_parses_twitter_cli_json(monkeypatch):
-    from src.infrastructure.search.x_backend import XBackend
+    from research_tool.infrastructure.search.x_backend import XBackend
 
-    monkeypatch.setattr("src.infrastructure.search.x_backend.shutil.which", lambda c: c)
+    monkeypatch.setattr("research_tool.infrastructure.search.x_backend.shutil.which", lambda c: c)
 
     class R:
         returncode = 0
         stderr = ""
         stdout = '[{"id":"123","username":"alice","text":"medical mllm result"}]'
 
-    monkeypatch.setattr("src.infrastructure.search.x_backend.subprocess.run", lambda *a, **k: R())
+    monkeypatch.setattr("research_tool.infrastructure.search.x_backend.subprocess.run", lambda *a, **k: R())
     hits = await XBackend(CollectorConfig(search_engines=["x"])).search("medical mllm", 5)
     assert hits[0].url == "https://x.com/alice/status/123"
     assert hits[0].source_engine == "x"
 
 
 def test_x_backend_parses_json_before_opencli_notice():
-    from src.infrastructure.search.x_backend import XBackend
+    from research_tool.infrastructure.search.x_backend import XBackend
 
     data = XBackend._loads_json_output('[{"id":"123"}]\n\nExtension update available')
     assert data == [{"id": "123"}]

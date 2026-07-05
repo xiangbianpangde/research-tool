@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from src.domain.errors import (
+from research_tool.domain.errors import (
     CacheError,
     ConfigError,
     DownloadError,

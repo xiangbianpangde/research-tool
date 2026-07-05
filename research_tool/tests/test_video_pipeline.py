@@ -14,7 +14,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from src.application.video_pipeline import (
+from research_tool.application.video_pipeline import (
     E_VID_URL_REJECTED,
     VideoPipeline,
     VideoPipelineReport,
@@ -25,8 +25,8 @@ from src.application.video_pipeline import (
     process_videos,
     validate_video_url,
 )
-from src.domain.errors import VideoIngestError
-from src.domain.models import VideoURL
+from research_tool.domain.errors import VideoIngestError
+from research_tool.domain.models import VideoURL
 
 
 # --------------------------------------------------------------------------- #
@@ -135,7 +135,7 @@ class TestMakeMeta:
     """download_result → VideoMeta 测试。"""
 
     def test_make_meta_basic(self, tmp_path: Path):
-        from src.infrastructure.ingest.downloader import DownloadResult
+        from research_tool.infrastructure.ingest.downloader import DownloadResult
 
         fake_audio = tmp_path / "test.m4a"
         fake_audio.write_bytes(b"fake")
@@ -160,7 +160,7 @@ class TestMakeMeta:
         assert meta.platform == "bilibili"
 
     def test_make_meta_no_id_uses_video_id(self, tmp_path: Path):
-        from src.infrastructure.ingest.downloader import DownloadResult
+        from research_tool.infrastructure.ingest.downloader import DownloadResult
 
         fake_audio = tmp_path / "test.m4a"
         fake_audio.write_bytes(b"fake")
@@ -180,7 +180,7 @@ class TestMakeMeta:
         assert meta.video_id == "BV1xx"
 
     def test_make_meta_empty_title_uses_default(self, tmp_path: Path):
-        from src.infrastructure.ingest.downloader import DownloadResult
+        from research_tool.infrastructure.ingest.downloader import DownloadResult
 
         fake_audio = tmp_path / "test.m4a"
         fake_audio.write_bytes(b"fake")
@@ -291,7 +291,7 @@ class TestVideoPipeline:
         mock_stages.duration_ms = 100
 
         with patch(
-            "src.infrastructure.ingest.pipeline_adapter.trigger_pipeline",
+            "research_tool.infrastructure.ingest.pipeline_adapter.trigger_pipeline",
             AsyncMock(return_value=mock_stages),
         ) as mock_trigger:
             report = await pipeline.process_urls(
@@ -307,7 +307,7 @@ class TestVideoPipeline:
         pipeline = VideoPipeline(topic="test", work_dir=tmp_path, run_pipeline=True)
 
         with patch(
-            "src.infrastructure.ingest.pipeline_adapter.trigger_pipeline",
+            "research_tool.infrastructure.ingest.pipeline_adapter.trigger_pipeline",
             AsyncMock(return_value=MagicMock(success=False, stages_run=[], duration_ms=0)),
         ) as mock_trigger:
             report = await pipeline.process_urls(
@@ -329,7 +329,7 @@ class TestModuleEntry:
     async def test_process_videos_basic(self, tmp_path: Path):
         # process_videos 不接受 task_func（生产环境始终走真实任务）
         # 这里通过 VideoPipeline 间接覆盖
-        from src.application.video_pipeline import VideoPipeline
+        from research_tool.application.video_pipeline import VideoPipeline
 
         async def fake_task(url: str) -> Path:
             out = tmp_path / "test.md"

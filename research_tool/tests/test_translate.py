@@ -1,7 +1,7 @@
 import pytest
 
-from src.infrastructure.llm import MockLLMClient
-from src.common.translate import chunk_markdown, translate_markdown
+from research_tool.infrastructure.llm import MockLLMClient
+from research_tool.common.translate import chunk_markdown, translate_markdown
 
 
 def test_chunk_respects_size_and_paragraphs():

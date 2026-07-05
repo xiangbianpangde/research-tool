@@ -9,7 +9,7 @@ from pathlib import Path
 
 import pytest
 
-from src.infrastructure.ingest.cache_manager import (
+from research_tool.infrastructure.ingest.cache_manager import (
     CacheEntry,
     CacheManager,
     CacheRepository,

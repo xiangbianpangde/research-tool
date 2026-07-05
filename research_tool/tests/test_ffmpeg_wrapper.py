@@ -8,8 +8,8 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from src.domain.errors import FFmpegError
-from src.infrastructure.ingest.ffmpeg_wrapper import (
+from research_tool.domain.errors import FFmpegError
+from research_tool.infrastructure.ingest.ffmpeg_wrapper import (
     AudioExtractor,
     FFmpegInvoker,
     KeyframeCapture,

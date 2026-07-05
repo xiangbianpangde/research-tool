@@ -1,9 +1,9 @@
 import pytest
 
-from src.domain.models import CollectorConfig
-from src.infrastructure.search import get_backend
-from src.infrastructure.search.base import SearchBackend, SearchHit
-from src.infrastructure.search.cache import CachingBackend, SearchCache
+from research_tool.domain.models import CollectorConfig
+from research_tool.infrastructure.search import get_backend
+from research_tool.infrastructure.search.base import SearchBackend, SearchHit
+from research_tool.infrastructure.search.cache import CachingBackend, SearchCache
 
 _V = "5|en|None|None|None|0"
 

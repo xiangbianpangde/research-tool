@@ -43,19 +43,19 @@ all = [
 dev = ["pytest>=8.0", "pytest-asyncio>=0.23"]
 
 [project.scripts]
-research = "src.presentation.cli:app"
+research = "research_tool.presentation.cli:app"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src"]
+packages = ["research_tool"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
-testpaths = ["src/tests"]
+testpaths = ["research_tool/tests"]
 # addopts = "--cov=research_tool --cov-report=term-missing"  # 需 pip install pytest-cov
 
 [tool.coverage.run]
-source = ["src"]
-omit = ["tests/*", "src/__pycache__/*"]
+source = ["research_tool"]
+omit = ["research_tool/tests/*", "research_tool/__pycache__/*"]
 
 [tool.coverage.report]
 exclude_also = [
@@ -85,7 +85,7 @@ ignore = [
     "S403",    # pickle
 ]
 [tool.ruff.lint.per-file-ignores]
-"tests/*" = ["S101", "T20"]
+"research_tool/tests/*" = ["S101", "T20"]
 
 [tool.ruff.lint.pylint]
 max-statements = 50

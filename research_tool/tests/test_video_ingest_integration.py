@@ -16,25 +16,25 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from src.domain.models import (
+from research_tool.domain.models import (
     Chapter,
     LLMSummary,
     Transcript,
     TranscriptSegment,
     VideoMeta,
 )
-from src.infrastructure.ingest.cache_manager import CacheEntry, CacheManager, compute_url_sha256
-from src.infrastructure.ingest.downloader import (
+from research_tool.infrastructure.ingest.cache_manager import CacheEntry, CacheManager, compute_url_sha256
+from research_tool.infrastructure.ingest.downloader import (
     BilibiliDownloader,
     DownloadResult,
     VideoDownloader,
     PLATFORM_BILIBILI,
 )
-from src.infrastructure.ingest.notes_schema import (
+from research_tool.infrastructure.ingest.notes_schema import (
     REFERENCES_SECTION_TITLE,
     assemble_markdown,
 )
-from src.infrastructure.ingest.transcriber import (
+from research_tool.infrastructure.ingest.transcriber import (
     EngineType,
     compute_audio_fingerprint,
     transcribe,
@@ -104,7 +104,7 @@ class TestBilibiliPipelineIntegration:
         bilibili_dl._extract_info_async = fake_extract  # type: ignore[method-assign]
         # BiliDownloader 期望 _extract_info_async 返回的 file_path 是真实存在的；
         # 由于 mock 没真下载，把 _info_to_result 替换为写文件版本
-        from src.infrastructure.ingest.downloader import BilibiliDownloader as B
+        from research_tool.infrastructure.ingest.downloader import BilibiliDownloader as B
 
         original_info_to_result = B._info_to_result
 
@@ -129,7 +129,7 @@ class TestBilibiliPipelineIntegration:
         assert Path(result.file_path).exists()
 
         # 3) 转写（mock WhisperEngine 走 fast 路径）
-        from src.infrastructure.ingest.transcriber import WhisperEngine
+        from research_tool.infrastructure.ingest.transcriber import WhisperEngine
 
         class FakeSeg:
             def __init__(self, s, e, t):
@@ -221,9 +221,9 @@ class TestBilibiliPipelineIntegration:
             return expected_first
 
         with (
-            patch("src.infrastructure.ingest.transcriber._run_engine", side_effect=fake_run),
+            patch("research_tool.infrastructure.ingest.transcriber._run_engine", side_effect=fake_run),
             patch(
-                "src.infrastructure.ingest.transcriber.get_cache_manager",
+                "research_tool.infrastructure.ingest.transcriber.get_cache_manager",
                 AsyncMock(return_value=cm1),
             ),
         ):
@@ -239,7 +239,7 @@ class TestBilibiliPipelineIntegration:
         cm1.write.assert_called_once()
 
         # 3) 第二次：构造缓存命中（payload = 第一次的 transcript）
-        from src.infrastructure.ingest.transcriber import _transcript_to_payload
+        from research_tool.infrastructure.ingest.transcriber import _transcript_to_payload
 
         payload = _transcript_to_payload(expected_first, EngineType.WHISPER, "tiny", 1.0)
         cm2 = MagicMock(spec=CacheManager)
@@ -260,9 +260,9 @@ class TestBilibiliPipelineIntegration:
             raise RuntimeError("cache hit should not call engine")
 
         with (
-            patch("src.infrastructure.ingest.transcriber._run_engine", side_effect=should_not_run),
+            patch("research_tool.infrastructure.ingest.transcriber._run_engine", side_effect=should_not_run),
             patch(
-                "src.infrastructure.ingest.transcriber.get_cache_manager",
+                "research_tool.infrastructure.ingest.transcriber.get_cache_manager",
                 AsyncMock(return_value=cm2),
             ),
         ):
@@ -342,7 +342,7 @@ class TestEndToEndFlow:
     @pytest.mark.asyncio
     async def test_local_file_path_through_assembler(self, tmp_path: Path):
         """本地文件路径（无网络）走 LocalFileResolver → 转写 → Markdown。"""
-        from src.infrastructure.ingest.downloader import LocalFileResolver
+        from research_tool.infrastructure.ingest.downloader import LocalFileResolver
 
         # 1) 准备假视频文件
         video = tmp_path / "x.mp4"
@@ -353,12 +353,12 @@ class TestEndToEndFlow:
         assert Path(result.file_path).exists()
 
         # 3) 用 ffmpeg 抽音轨（mock 一下避免实际调用）
-        from src.infrastructure.ingest.ffmpeg_wrapper import AudioExtractResult
+        from research_tool.infrastructure.ingest.ffmpeg_wrapper import AudioExtractResult
 
         audio_path = tmp_path / "x.mp3"
         audio_path.write_bytes(b"fake audio")
         with patch(
-            "src.infrastructure.ingest.ffmpeg_wrapper.AudioExtractor.extract",
+            "research_tool.infrastructure.ingest.ffmpeg_wrapper.AudioExtractor.extract",
             AsyncMock(
                 return_value=AudioExtractResult(
                     audio_path=audio_path,
@@ -368,7 +368,7 @@ class TestEndToEndFlow:
                 )
             ),
         ):
-            from src.infrastructure.ingest.ffmpeg_wrapper import AudioExtractor
+            from research_tool.infrastructure.ingest.ffmpeg_wrapper import AudioExtractor
 
             audio = await AudioExtractor().extract(video, audio_path)
         assert audio.audio_path == audio_path

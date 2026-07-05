@@ -15,7 +15,7 @@ from pathlib import Path
 
 import pytest
 
-from src.domain.models import (
+from research_tool.domain.models import (
     Chapter,
     LLMSummary,
     ScreenshotFrame,
@@ -23,7 +23,7 @@ from src.domain.models import (
     TranscriptSegment,
     VideoMeta,
 )
-from src.infrastructure.ingest.notes_schema import (
+from research_tool.infrastructure.ingest.notes_schema import (
     FRONT_MATTER_KEY_PREFIX,
     PLACEHOLDER_SCREENSHOT_PATH,
     REFERENCES_SECTION_TITLE,

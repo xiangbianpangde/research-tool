@@ -5,16 +5,16 @@
 
 import pytest
 
-from src.infrastructure.llm import MockLLMClient
-from src.domain.models import (
+from research_tool.infrastructure.llm import MockLLMClient
+from research_tool.domain.models import (
     CleanerConfig,
     ExtractorConfig,
     OrganizerConfig,
     PipelineConfig,
     ReporterConfig,
 )
-from src.application.pipeline import ResearchPipeline
-from src.infrastructure.stages import Cleaner, Extractor, Organizer, Reporter
+from research_tool.application.pipeline import ResearchPipeline
+from research_tool.infrastructure.stages import Cleaner, Extractor, Organizer, Reporter
 
 RAW = """<!-- source: https://example.com/a -->
 <!-- title: Transformer -->

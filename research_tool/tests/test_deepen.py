@@ -2,12 +2,12 @@
 
 import pytest
 
-from src.infrastructure.llm import MockLLMClient
-from src.domain.models import CollectorConfig, DeepenConfig
-from src.infrastructure.search.base import SearchHit, SearchResult
-from src.infrastructure.stages.collector import Collector
-from src.infrastructure.stages.deepen import DeepenStage
-from src.infrastructure.stages.fetcher import FetchResult, Fetcher
+from research_tool.infrastructure.llm import MockLLMClient
+from research_tool.domain.models import CollectorConfig, DeepenConfig
+from research_tool.infrastructure.search.base import SearchHit, SearchResult
+from research_tool.infrastructure.stages.collector import Collector
+from research_tool.infrastructure.stages.deepen import DeepenStage
+from research_tool.infrastructure.stages.fetcher import FetchResult, Fetcher
 
 _LONG = "实质内容。" * 60
 
@@ -86,8 +86,8 @@ async def test_deepen_disabled_entity_split_single_entity(monkeypatch, tmp_path)
 @pytest.mark.asyncio
 async def test_pipeline_deepen_stage_and_resume(monkeypatch, tmp_path):
     """deepen 在管道里跑通，且 .deepen_done 让 resume 正确跳过（风险 5）。"""
-    from src.domain.models import PipelineConfig
-    from src.application.pipeline import ResearchPipeline
+    from research_tool.domain.models import PipelineConfig
+    from research_tool.application.pipeline import ResearchPipeline
 
     topic_dir = tmp_path / "out" / "x"
     raw = topic_dir / "raw"
@@ -121,9 +121,9 @@ async def test_pipeline_deepen_stage_and_resume(monkeypatch, tmp_path):
 
 @pytest.mark.asyncio
 async def test_pipeline_deepen_disabled_skips(monkeypatch, tmp_path):
-    from src.domain.models import DeepenConfig as _DC
-    from src.domain.models import PipelineConfig
-    from src.application.pipeline import ResearchPipeline
+    from research_tool.domain.models import DeepenConfig as _DC
+    from research_tool.domain.models import PipelineConfig
+    from research_tool.application.pipeline import ResearchPipeline
 
     topic_dir = tmp_path / "out" / "x"
     (topic_dir / "raw").mkdir(parents=True)

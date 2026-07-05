@@ -2,9 +2,9 @@
 
 import pytest
 
-from src.infrastructure.ingest.pdf import PdfIngestor
-from src.infrastructure.llm import MockLLMClient
-from src.domain.models import PdfIngestConfig
+from research_tool.infrastructure.ingest.pdf import PdfIngestor
+from research_tool.infrastructure.llm import MockLLMClient
+from research_tool.domain.models import PdfIngestConfig
 
 
 def _make_pdf(tmp_path, name="paper.pdf"):
@@ -16,7 +16,7 @@ def _make_pdf(tmp_path, name="paper.pdf"):
 @pytest.fixture
 def fake_mineru(monkeypatch, tmp_path):
     """伪造 mineru：把 PATH 查找通过，并让 subprocess 写出一个 MD。"""
-    monkeypatch.setattr("src.infrastructure.ingest.ocr.shutil.which", lambda c: "/usr/bin/mineru")
+    monkeypatch.setattr("research_tool.infrastructure.ingest.ocr.shutil.which", lambda c: "/usr/bin/mineru")
 
     def fake_run(cmd, **kwargs):
         # cmd: [mineru, -p, pdf, -o, parse_root, -b, ..., -l, ...]
@@ -34,7 +34,7 @@ def fake_mineru(monkeypatch, tmp_path):
 
         return R()
 
-    monkeypatch.setattr("src.infrastructure.ingest.ocr.subprocess.run", fake_run)
+    monkeypatch.setattr("research_tool.infrastructure.ingest.ocr.subprocess.run", fake_run)
 
 
 @pytest.mark.asyncio
@@ -68,7 +68,7 @@ async def test_translate_requires_llm(tmp_path):
 
 @pytest.mark.asyncio
 async def test_missing_mineru_clear_error(tmp_path, monkeypatch):
-    monkeypatch.setattr("src.infrastructure.ingest.ocr.shutil.which", lambda c: None)
+    monkeypatch.setattr("research_tool.infrastructure.ingest.ocr.shutil.which", lambda c: None)
     _make_pdf(tmp_path)
     with pytest.raises(Exception, match="mineru"):
         await PdfIngestor(PdfIngestConfig()).run(tmp_path, tmp_path / "out")
@@ -83,7 +83,7 @@ async def test_custom_ocr_stdout(tmp_path, monkeypatch):
         stderr = ""
         stdout = "# Custom\n\nOCR text from custom engine."
 
-    monkeypatch.setattr("src.infrastructure.ingest.ocr.subprocess.run", lambda *a, **k: R())
+    monkeypatch.setattr("research_tool.infrastructure.ingest.ocr.subprocess.run", lambda *a, **k: R())
     cfg = PdfIngestConfig(ocr_engine="custom", ocr_cmd="custom-ocr {pdf} {out}")
     res = await PdfIngestor(cfg).run(tmp_path, tmp_path / "out")
     text = res.files[0].read_text(encoding="utf-8")
@@ -92,9 +92,9 @@ async def test_custom_ocr_stdout(tmp_path, monkeypatch):
 
 
 def test_scan_ocr_engines(monkeypatch):
-    from src.infrastructure.ingest.ocr import scan_ocr_engines
+    from research_tool.infrastructure.ingest.ocr import scan_ocr_engines
 
-    monkeypatch.setattr("src.infrastructure.ingest.ocr.shutil.which", lambda c: "/usr/bin/mineru" if c == "mineru" else None)
+    monkeypatch.setattr("research_tool.infrastructure.ingest.ocr.shutil.which", lambda c: "/usr/bin/mineru" if c == "mineru" else None)
     statuses = {s.name: s.available for s in scan_ocr_engines(PdfIngestConfig())}
     assert statuses["mineru"] is True
     assert statuses["custom"] is False

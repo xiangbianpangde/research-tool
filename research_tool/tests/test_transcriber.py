@@ -18,10 +18,10 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from src.domain.errors import TranscribeError
-from src.domain.models import Transcript, TranscriptSegment
-from src.infrastructure.ingest.cache_manager import CacheEntry, CacheManager
-from src.infrastructure.ingest.transcriber import (
+from research_tool.domain.errors import TranscribeError
+from research_tool.domain.models import Transcript, TranscriptSegment
+from research_tool.infrastructure.ingest.cache_manager import CacheEntry, CacheManager
+from research_tool.infrastructure.ingest.transcriber import (
     E_TR_001,
     E_TR_002,
     E_TR_003,
@@ -218,7 +218,7 @@ class TestTranscribeCacheHit:
 
         # mock cache_manager：query 返回非空，write 不被调
         cm = MagicMock(spec=CacheManager)
-        from src.infrastructure.ingest.cache_manager import compute_url_sha256
+        from research_tool.infrastructure.ingest.cache_manager import compute_url_sha256
 
         cached_payload = {
             "language": "zh",
@@ -244,7 +244,7 @@ class TestTranscribeCacheHit:
         # 引擎选择：没装 faster_whisper；没 groq_api_key
         # 但缓存命中短路应跳过所有引擎
         with patch(
-            "src.infrastructure.ingest.transcriber.get_cache_manager", AsyncMock(return_value=cm)
+            "research_tool.infrastructure.ingest.transcriber.get_cache_manager", AsyncMock(return_value=cm)
         ):
             result = await transcribe(
                 str(audio),
@@ -279,11 +279,11 @@ class TestTranscribeCacheHit:
 
         with (
             patch(
-                "src.infrastructure.ingest.transcriber._run_engine",
+                "research_tool.infrastructure.ingest.transcriber._run_engine",
                 AsyncMock(return_value=expected),
             ),
             patch(
-                "src.infrastructure.ingest.transcriber.get_cache_manager",
+                "research_tool.infrastructure.ingest.transcriber.get_cache_manager",
                 AsyncMock(return_value=cm),
             ),
         ):
@@ -327,9 +327,9 @@ class TestTranscribeFailureModes:
             return Transcript(language="zh", full_text="groq result", segments=[], engine="groq")
 
         with (
-            patch("src.infrastructure.ingest.transcriber._run_engine", side_effect=fake_run),
+            patch("research_tool.infrastructure.ingest.transcriber._run_engine", side_effect=fake_run),
             patch(
-                "src.infrastructure.ingest.transcriber.get_cache_manager",
+                "research_tool.infrastructure.ingest.transcriber.get_cache_manager",
                 AsyncMock(return_value=cm),
             ),
         ):
@@ -363,9 +363,9 @@ class TestTranscribeFailureModes:
             )
 
         with (
-            patch("src.infrastructure.ingest.transcriber._run_engine", side_effect=always_fail),
+            patch("research_tool.infrastructure.ingest.transcriber._run_engine", side_effect=always_fail),
             patch(
-                "src.infrastructure.ingest.transcriber.get_cache_manager",
+                "research_tool.infrastructure.ingest.transcriber.get_cache_manager",
                 AsyncMock(return_value=cm),
             ),
         ):
@@ -397,9 +397,9 @@ class TestTranscribeFailureModes:
             raise RuntimeError("unreachable")
 
         with (
-            patch("src.infrastructure.ingest.transcriber._run_engine", side_effect=slow_engine),
+            patch("research_tool.infrastructure.ingest.transcriber._run_engine", side_effect=slow_engine),
             patch(
-                "src.infrastructure.ingest.transcriber.get_cache_manager",
+                "research_tool.infrastructure.ingest.transcriber.get_cache_manager",
                 AsyncMock(return_value=cm),
             ),
         ):
@@ -428,20 +428,20 @@ class TestGroqEngineMocked:
     def test_needs_compress_small_file(self, tmp_path: Path):
         f = tmp_path / "small.mp3"
         f.write_bytes(b"x" * 100)  # < 18MB
-        from src.infrastructure.ingest.transcriber import GroqEngine
+        from research_tool.infrastructure.ingest.transcriber import GroqEngine
 
         assert GroqEngine._needs_compress(str(f)) is False
 
     def test_needs_compress_large_file(self, tmp_path: Path):
         # 不实际写 18MB；patch getsize
         with patch("os.path.getsize", return_value=GROQ_MAX_FILE_BYTES + 1):
-            from src.infrastructure.ingest.transcriber import GroqEngine
+            from research_tool.infrastructure.ingest.transcriber import GroqEngine
 
             assert GroqEngine._needs_compress("fake/path.mp3") is True
 
     def test_init_requires_api_key(self):
         with pytest.raises(TranscribeError):
-            from src.infrastructure.ingest.transcriber import GroqEngine
+            from research_tool.infrastructure.ingest.transcriber import GroqEngine
 
             GroqEngine(api_key="")
 
@@ -457,7 +457,7 @@ class TestGroqEngineMocked:
         fake_client = MagicMock()
         fake_client.audio.transcriptions.create = MagicMock(return_value=fake_resp)
         with patch("openai.OpenAI", return_value=fake_client):
-            from src.infrastructure.ingest.transcriber import GroqEngine
+            from research_tool.infrastructure.ingest.transcriber import GroqEngine
 
             ge = GroqEngine(api_key="gsk-test", model="whisper-large-v3")
             result = ge.transcribe(str(f), language="zh")
@@ -474,7 +474,7 @@ class TestGroqEngineMocked:
             patch.object(
                 # 避免实际调 ffmpeg：patch 整个 _compress_audio
                 __import__(
-                    "src.infrastructure.ingest.transcriber", fromlist=["GroqEngine"]
+                    "research_tool.infrastructure.ingest.transcriber", fromlist=["GroqEngine"]
                 ).GroqEngine,
                 "_compress_audio",
                 return_value=str(f),
@@ -486,7 +486,7 @@ class TestGroqEngineMocked:
                 return_value={"language": "zh", "text": "x", "segments": []}
             )
             mock_openai.return_value = fake_client
-            from src.infrastructure.ingest.transcriber import GroqEngine
+            from research_tool.infrastructure.ingest.transcriber import GroqEngine
 
             ge = GroqEngine(api_key="gsk-test")
             result = ge.transcribe(str(f), language="zh")

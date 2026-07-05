@@ -1,5 +1,5 @@
-from src.domain.models import CleanerConfig
-from src.infrastructure.stages.cleaner import Cleaner
+from research_tool.domain.models import CleanerConfig
+from research_tool.infrastructure.stages.cleaner import Cleaner
 
 NOISY = """<!-- source: https://x.com/a -->
 <!-- title: Test -->

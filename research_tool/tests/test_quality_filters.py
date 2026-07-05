@@ -2,10 +2,10 @@
 
 import pytest
 
-from src.domain.models import CleanerConfig, CollectorConfig
-from src.infrastructure.stages.cleaner import Cleaner, _looks_binary
-from src.infrastructure.stages.collector import Collector
-from src.infrastructure.stages.fetcher import FetchResult, Fetcher
+from research_tool.domain.models import CleanerConfig, CollectorConfig
+from research_tool.infrastructure.stages.cleaner import Cleaner, _looks_binary
+from research_tool.infrastructure.stages.collector import Collector
+from research_tool.infrastructure.stages.fetcher import FetchResult, Fetcher
 
 
 def test_looks_binary_detects_pdf():
@@ -31,7 +31,7 @@ def test_cleaner_drops_binary_keeps_header():
 async def test_fetcher_pdf_skipped_without_mineru(monkeypatch):
     f = Fetcher(mineru_cmd="definitely-not-a-real-mineru-xyz")
     monkeypatch.setattr(
-        "src.infrastructure.ingest.pdf.find_mineru", lambda cmd=None: None
+        "research_tool.infrastructure.ingest.pdf.find_mineru", lambda cmd=None: None
     )
     r = await f._pdf_bytes_to_md("https://x.org/p.pdf", b"%PDF-1.4 ...")
     assert not r.ok and "mineru" in r.error
@@ -42,7 +42,7 @@ async def test_collector_filters_short_docs(monkeypatch, tmp_path):
     cfg = CollectorConfig(min_doc_chars=200, depth=2)
     c = Collector(cfg)
 
-    from src.infrastructure.search.base import SearchHit, SearchResult
+    from research_tool.infrastructure.search.base import SearchHit, SearchResult
 
     async def fake_search_only(topic):
         return SearchResult(

@@ -1,4 +1,4 @@
-from src.infrastructure.stages.base import domain_of, safe_filename
+from research_tool.infrastructure.stages.base import domain_of, safe_filename
 
 
 def test_preserves_cjk():

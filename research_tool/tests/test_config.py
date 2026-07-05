@@ -1,7 +1,7 @@
 import pytest
 
-from src.domain.config import load_config
-from src.domain.errors import ConfigValidationError
+from research_tool.domain.config import load_config
+from research_tool.domain.errors import ConfigValidationError
 
 
 def _write(tmp_path, text):

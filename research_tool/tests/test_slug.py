@@ -1,4 +1,4 @@
-from src.common.slug import slugify
+from research_tool.common.slug import slugify
 
 
 def test_english():

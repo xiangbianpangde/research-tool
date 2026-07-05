@@ -21,23 +21,23 @@ import pytest
 import yaml
 from typer.testing import CliRunner
 
-from src.application.video_pipeline import (
+from research_tool.application.video_pipeline import (
     VideoPipeline,
     validate_video_url,
 )
-from src.domain.errors import VideoIngestError
-from src.domain.models import (
+from research_tool.domain.errors import VideoIngestError
+from research_tool.domain.models import (
     LLMSummary,
     Transcript,
     TranscriptSegment,
     VideoURL,
 )
-from src.infrastructure.ingest.downloader import DownloadResult
-from src.infrastructure.ingest.pipeline_adapter import (
+from research_tool.infrastructure.ingest.downloader import DownloadResult
+from research_tool.infrastructure.ingest.pipeline_adapter import (
     VIDEO_FILENAME_PREFIX,
     StagesResult,
 )
-from src.presentation.cli import app
+from research_tool.presentation.cli import app
 
 
 # --------------------------------------------------------------------------- #
@@ -84,7 +84,7 @@ def make_fake_transcript() -> Transcript:
 
 def make_fake_summary() -> LLMSummary:
     """构造假 LLMSummary。"""
-    from src.domain.models import Chapter
+    from research_tool.domain.models import Chapter
 
     return LLMSummary(
         video_summary="本视频介绍了 AI 的基本概念和发展历程。",
@@ -128,7 +128,7 @@ class TestEndToEndMocked:
             return fake_summary
 
         # 2) 构造任务函数
-        from src.application.video_pipeline import build_video_task_func
+        from research_tool.application.video_pipeline import build_video_task_func
 
         task_func = build_video_task_func(
             topic="AI 教程",
@@ -196,7 +196,7 @@ class TestEndToEndMocked:
         def fake_summarize(text: str, meta, transcript: str) -> LLMSummary:
             return make_fake_summary()
 
-        from src.application.video_pipeline import build_video_task_func
+        from research_tool.application.video_pipeline import build_video_task_func
 
         task_func = build_video_task_func(
             topic="YouTube Test",
@@ -244,7 +244,7 @@ class TestEndToEndMocked:
         def fake_summarize(text: str, meta, transcript: str) -> LLMSummary:
             return make_fake_summary()
 
-        from src.application.video_pipeline import build_video_task_func
+        from research_tool.application.video_pipeline import build_video_task_func
 
         task_func = build_video_task_func(
             topic="multi",
@@ -277,7 +277,7 @@ class TestEndToEndMocked:
         def fake_summarize(text: str, meta, transcript: str) -> LLMSummary:
             return make_fake_summary()
 
-        from src.application.video_pipeline import build_video_task_func
+        from research_tool.application.video_pipeline import build_video_task_func
 
         task_func = build_video_task_func(
             topic="t",
@@ -295,7 +295,7 @@ class TestEndToEndMocked:
         )
 
         with patch(
-            "src.infrastructure.ingest.pipeline_adapter.trigger_pipeline",
+            "research_tool.infrastructure.ingest.pipeline_adapter.trigger_pipeline",
             AsyncMock(return_value=mock_stages_result),
         ) as mock_trigger:
             pipeline = VideoPipeline(topic="t", work_dir=tmp_path, run_pipeline=True)
@@ -350,7 +350,7 @@ class TestCliVideoUrl:
         ]
 
         with patch(
-            "src.application.video_pipeline.process_videos",
+            "research_tool.application.video_pipeline.process_videos",
             AsyncMock(return_value=mock_report),
         ) as mock_process:
             result = runner.invoke(
@@ -384,7 +384,7 @@ class TestCliVideoUrl:
         mock_report.results = [mock_results, mock_results]
 
         with patch(
-            "src.application.video_pipeline.process_videos",
+            "research_tool.application.video_pipeline.process_videos",
             AsyncMock(return_value=mock_report),
         ) as mock_process:
             result = runner.invoke(
@@ -474,7 +474,7 @@ class TestDownstreamConsumption:
     async def test_collector_recognizes_video_markdown(self, tmp_path: Path):
         """模拟 Collect 阶段的 has_output 检测：raw/*.md 存在 → 视为已完成。"""
         # 1) 落盘一个 video markdown
-        from src.infrastructure.ingest.pipeline_adapter import write_markdown
+        from research_tool.infrastructure.ingest.pipeline_adapter import write_markdown
 
         md = "---\nvideo_id: BV1xx\nvideo_title: test\n---\nbody"
         topic = "test consumer"
@@ -483,8 +483,8 @@ class TestDownstreamConsumption:
         assert out_path.exists()
 
         # 2) 模拟 Collect 阶段的 has_output 检查（用现有基础设施代码）
-        from src.infrastructure.stages.base import has_output
-        from src.common.slug import slugify
+        from research_tool.infrastructure.stages.base import has_output
+        from research_tool.common.slug import slugify
 
         topic_slug = slugify(topic)
         topic_dir = tmp_path / topic_slug
@@ -496,8 +496,8 @@ class TestDownstreamConsumption:
     def test_collector_skips_when_video_markdown_exists(self, tmp_path: Path):
         """如果 raw/ 已有 video_<id>.md，run pipeline 时 Collect 自动跳过（resume=True）。"""
         # 写一个 video markdown
-        from src.infrastructure.ingest.pipeline_adapter import write_markdown
-        from src.common.slug import slugify
+        from research_tool.infrastructure.ingest.pipeline_adapter import write_markdown
+        from research_tool.common.slug import slugify
 
         md = "# video\n"
         topic = "test"
@@ -505,8 +505,8 @@ class TestDownstreamConsumption:
         assert out_path.exists()
 
         # 用现有 collect 阶段代码验证
-        from src.infrastructure.stages.base import has_output
-        from src.application.pipeline import _stage_output
+        from research_tool.infrastructure.stages.base import has_output
+        from research_tool.application.pipeline import _stage_output
 
         topic_slug = slugify(topic)
         topic_dir = tmp_path / topic_slug

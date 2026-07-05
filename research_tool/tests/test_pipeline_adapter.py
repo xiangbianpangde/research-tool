@@ -15,8 +15,8 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from src.domain.errors import VideoIngestError
-from src.infrastructure.ingest.pipeline_adapter import (
+from research_tool.domain.errors import VideoIngestError
+from research_tool.infrastructure.ingest.pipeline_adapter import (
     COLLECT_CONFIG_VERSION,
     E_PIPE_001,
     E_PIPE_CONFIG_MISMATCH,
@@ -163,7 +163,7 @@ class TestPipelineTrigger:
 
         # Mock ResearchPipeline.stream 生成 StageEvent 序列
         async def fake_stream(topic):
-            from src.domain.models import StageEvent
+            from research_tool.domain.models import StageEvent
 
             for stage in ["clean", "extract", "organize", "report"]:
                 yield StageEvent(stage=stage, status="started", message=f"start {stage}")
@@ -177,8 +177,8 @@ class TestPipelineTrigger:
         mock_cfg.work_dir = tmp_path
 
         with (
-            patch("src.application.pipeline.ResearchPipeline", return_value=mock_pipeline),
-            patch("src.domain.config.load_config", return_value=mock_cfg),
+            patch("research_tool.application.pipeline.ResearchPipeline", return_value=mock_pipeline),
+            patch("research_tool.domain.config.load_config", return_value=mock_cfg),
         ):
             result = await trigger.trigger("topic", work_dir=tmp_path)
 
@@ -192,7 +192,7 @@ class TestPipelineTrigger:
         trigger = PipelineTrigger(stages=["clean"])
 
         async def fake_stream(topic):
-            from src.domain.models import StageEvent
+            from research_tool.domain.models import StageEvent
 
             yield StageEvent(stage="clean", status="started", message="")
             yield StageEvent(stage="clean", status="failed", message="clean failed")
@@ -205,8 +205,8 @@ class TestPipelineTrigger:
         mock_cfg.work_dir = tmp_path
 
         with (
-            patch("src.application.pipeline.ResearchPipeline", return_value=mock_pipeline),
-            patch("src.domain.config.load_config", return_value=mock_cfg),
+            patch("research_tool.application.pipeline.ResearchPipeline", return_value=mock_pipeline),
+            patch("research_tool.domain.config.load_config", return_value=mock_cfg),
         ):
             result = await trigger.trigger("topic", work_dir=tmp_path)
 
@@ -217,7 +217,7 @@ class TestPipelineTrigger:
     async def test_trigger_config_load_failure(self, tmp_path: Path):
         """config 加载失败 → StagesResult(success=False, error=config load failed)。"""
         trigger = PipelineTrigger()
-        with patch("src.domain.config.load_config", side_effect=ValueError("bad config")):
+        with patch("research_tool.domain.config.load_config", side_effect=ValueError("bad config")):
             result = await trigger.trigger("topic", work_dir=tmp_path)
         assert not result.success
         assert "config load failed" in (result.error or "")
@@ -226,7 +226,7 @@ class TestPipelineTrigger:
     async def test_trigger_module_level(self, tmp_path: Path):
         """模块级便捷函数 trigger_pipeline 也能工作。"""
         async def fake_stream(topic):
-            from src.domain.models import StageEvent
+            from research_tool.domain.models import StageEvent
 
             yield StageEvent(stage="clean", status="completed", message="")
 
@@ -238,8 +238,8 @@ class TestPipelineTrigger:
         mock_cfg.work_dir = tmp_path
 
         with (
-            patch("src.application.pipeline.ResearchPipeline", return_value=mock_pipeline),
-            patch("src.domain.config.load_config", return_value=mock_cfg),
+            patch("research_tool.application.pipeline.ResearchPipeline", return_value=mock_pipeline),
+            patch("research_tool.domain.config.load_config", return_value=mock_cfg),
         ):
             result = await trigger_pipeline("topic", work_dir=tmp_path, stages=["clean"])
         assert isinstance(result, StagesResult)
@@ -319,7 +319,7 @@ class TestCollectConfigInjector:
         injector = CollectConfigInjector()
 
         # 直接让 domain.models.CollectorConfig 抛错
-        import src.domain.models as models_mod
+        import research_tool.domain.models as models_mod
 
         original = getattr(models_mod, "CollectorConfig", None)
         # 用一个会抛错的属性
