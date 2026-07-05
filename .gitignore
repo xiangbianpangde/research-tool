@@ -34,3 +34,7 @@ state/
 # mavis / opencode runtime 数据
 /.mavis/
 /.opencode/
+
+# 密钥清理辅助文件（本地临时存放待 scrub 的密钥字面量，绝不可入库）
+_secret_to_scrub.txt
+_secret_smoketest.txt
