@@ -38,3 +38,17 @@ state/
 # 密钥清理辅助文件（本地临时存放待 scrub 的密钥字面量，绝不可入库）
 _secret_to_scrub.txt
 _secret_smoketest.txt
+
+# personal scratch / runners (user-specific paths, not project code)
+_xtasks/
+/collect_x_github.ps1
+/run_research.sh
+/run_relevance.sh
+/compile_report.sh
+
+# runtime logs / scratch (root-level)
+/*.log
+/*.err
+/*.stderr
+/*.stdout
+/run_research.bat
