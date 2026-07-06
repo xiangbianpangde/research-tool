@@ -5,6 +5,30 @@
 
 from __future__ import annotations
 
+from pathlib import Path as _Path
+
+# 在导入任何业务模块前加载 .env（V1.1：让 .env 里的 API key / FFMPEG_PATH 自动可用）
+# 失败静默：python-dotenv 未装、.env 不存在都不应阻断 import。
+try:
+    import os as _os
+    from dotenv import load_dotenv as _load_dotenv  # type: ignore[import-not-found]
+
+    _env_path = _Path(__file__).resolve().parent.parent / ".env"
+    if _env_path.exists():
+        _load_dotenv(_env_path, override=False)
+    # 跨平台：.env 里常写小写 key（如 minimax_api_key），把它们镜像成大写一份，
+    # 让 _PROVIDER_KEY_ENV 这类只查大写名的代码在 Linux 上也能拿到值。
+    for _k in list(_os.environ.keys()):
+        _kl = _k.lower()
+        if (
+            _kl.endswith("_api_key")
+            or _kl.endswith("_api_url")
+            or _kl in ("ffmpeg_path", "minimax_model")
+        ):
+            _os.environ.setdefault(_k.upper(), _os.environ[_k])
+except Exception:  # noqa: S110  # .env autoload — best-effort, must not block import
+    pass
+
 from pathlib import Path
 
 from .domain.config import load_config

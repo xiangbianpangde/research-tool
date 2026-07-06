@@ -26,6 +26,7 @@ _DEFAULT_BASE_URL = {
     "ollama": "http://localhost:11434/v1",
     "openai": None,
     "anthropic": None,
+    "minimax": "https://api.minimaxi.com/v1",
 }
 
 
@@ -56,9 +57,7 @@ class LLMClient(abc.ABC):
         """让 LLM 输出 JSON 并解析为给定的 Pydantic 模型。"""
 
     @abc.abstractmethod
-    def stream(
-        self, prompt: str, system: str | None = None
-    ) -> AsyncIterator[str]:
+    def stream(self, prompt: str, system: str | None = None) -> AsyncIterator[str]:
         """流式返回文本增量。"""
 
     # -- 工厂 ------------------------------------------------------------ #
@@ -72,10 +71,16 @@ class LLMClient(abc.ABC):
         base_url: str | None = None,
         **kwargs,
     ) -> "LLMClient":
-        """显式创建客户端（03 §4 方式2）。"""
+        """显式创建客户端（03 §4 方式2）。api_key 缺省时按 provider 从环境变量兜底。"""
         model = model or _default_model(provider)
         if base_url is None:
             base_url = _DEFAULT_BASE_URL.get(provider)
+        if api_key is None:
+            import os
+
+            env_name = _PROVIDER_KEY_ENV_FOR_CREATE.get(provider)
+            if env_name:
+                api_key = os.environ.get(env_name)
         config = LLMConfig(
             provider=provider, model=model, api_key=api_key, base_url=base_url, **kwargs
         )
@@ -87,7 +92,7 @@ class LLMClient(abc.ABC):
         provider = config.provider
         if config.base_url is None and provider in _DEFAULT_BASE_URL:
             config = config.model_copy(update={"base_url": _DEFAULT_BASE_URL[provider]})
-        if provider in ("openai", "deepseek", "ollama"):
+        if provider in ("openai", "deepseek", "ollama", "minimax"):
             from .openai_client import OpenAILLMClient
 
             return OpenAILLMClient(config)
@@ -112,10 +117,19 @@ class LLMClient(abc.ABC):
         return cls.from_config(load_config(path).llm)
 
 
+_PROVIDER_KEY_ENV_FOR_CREATE = {
+    "deepseek": "DEEPSEEK_API_KEY",
+    "openai": "OPENAI_API_KEY",
+    "anthropic": "ANTHROPIC_API_KEY",
+    "minimax": "MINIMAX_API_KEY",
+}
+
+
 def _default_model(provider: str) -> str:
     return {
         "deepseek": "deepseek-chat",
         "openai": "gpt-4o-mini",
         "ollama": "llama3",
         "anthropic": "claude-sonnet-4-6",
+        "minimax": "MiniMax-M3",
     }.get(provider, "deepseek-chat")
