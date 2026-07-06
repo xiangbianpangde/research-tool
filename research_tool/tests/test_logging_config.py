@@ -6,11 +6,8 @@ import json
 import logging
 from pathlib import Path
 
-import pytest
 
 from research_tool.common.logging_config import (
-    DEFAULT_LOG_DIR,
-    DEFAULT_RETENTION_DAYS,
     DailyRotatingHandler,
     JsonFormatter,
     configure_structured_logging,
@@ -186,9 +183,7 @@ class TestDailyRotatingHandler:
     """按日切分 Handler。"""
 
     def test_creates_log_file(self, tmp_path: Path):
-        handler = DailyRotatingHandler(
-            log_dir=tmp_path, retention_days=7
-        )
+        handler = DailyRotatingHandler(log_dir=tmp_path, retention_days=7)
         logger = logging.getLogger("test_rotating")
         logger.setLevel(logging.INFO)
         logger.addHandler(handler)

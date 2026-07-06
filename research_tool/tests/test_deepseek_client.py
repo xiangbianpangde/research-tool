@@ -9,7 +9,11 @@ import pytest
 
 from research_tool.domain.errors import LLMError
 from research_tool.domain.models import LLMConfig
-from research_tool.infrastructure.llm.deepseek_client import DeepseekClient, _parse_summary, _truncate_text
+from research_tool.infrastructure.llm.deepseek_client import (
+    DeepseekClient,
+    _parse_summary,
+    _truncate_text,
+)
 
 
 class TestDeepseekClientConstruction:
@@ -50,18 +54,14 @@ class TestDeepseekClientChat:
 
     @pytest.mark.asyncio
     async def test_chat_returns_text(self):
-        cfg = LLMConfig(
-            provider="deepseek", model="deepseek-v4-flash", api_key="sk-x"
-        )
+        cfg = LLMConfig(provider="deepseek", model="deepseek-v4-flash", api_key="sk-x")
         client = DeepseekClient(cfg)
 
         # Mock 内部 _client
         mock_response = MagicMock()
         mock_response.choices = [MagicMock(message=MagicMock(content="hello world"))]
         client._client = MagicMock()
-        client._client.chat.completions.create = AsyncMock(
-            return_value=mock_response
-        )
+        client._client.chat.completions.create = AsyncMock(return_value=mock_response)
 
         out = await client.chat("hi")
         assert out == "hello world"
@@ -69,14 +69,10 @@ class TestDeepseekClientChat:
 
     @pytest.mark.asyncio
     async def test_chat_api_error_wrapped(self):
-        cfg = LLMConfig(
-            provider="deepseek", model="deepseek-v4-flash", api_key="sk-x"
-        )
+        cfg = LLMConfig(provider="deepseek", model="deepseek-v4-flash", api_key="sk-x")
         client = DeepseekClient(cfg)
         client._client = MagicMock()
-        client._client.chat.completions.create = AsyncMock(
-            side_effect=Exception("API down")
-        )
+        client._client.chat.completions.create = AsyncMock(side_effect=Exception("API down"))
 
         with pytest.raises(LLMError, match="Deepseek chat 失败"):
             await client.chat("hi")
@@ -93,9 +89,7 @@ class TestDeepseekClientStructured:
             name: str
             score: int
 
-        cfg = LLMConfig(
-            provider="deepseek", model="deepseek-v4-flash", api_key="sk-x"
-        )
+        cfg = LLMConfig(provider="deepseek", model="deepseek-v4-flash", api_key="sk-x")
         client = DeepseekClient(cfg)
 
         mock_response = MagicMock()
@@ -103,9 +97,7 @@ class TestDeepseekClientStructured:
             MagicMock(message=MagicMock(content='{"name": "foo", "score": 42}'))
         ]
         client._client = MagicMock()
-        client._client.chat.completions.create = AsyncMock(
-            return_value=mock_response
-        )
+        client._client.chat.completions.create = AsyncMock(return_value=mock_response)
 
         out = await client.chat_structured("prompt", Output)
         assert out.name == "foo"
@@ -118,18 +110,14 @@ class TestDeepseekClientStructured:
         class Output(BaseModel):
             name: str
 
-        cfg = LLMConfig(
-            provider="deepseek", model="deepseek-v4-flash", api_key="sk-x"
-        )
+        cfg = LLMConfig(provider="deepseek", model="deepseek-v4-flash", api_key="sk-x")
         client = DeepseekClient(cfg)
         mock_response = MagicMock()
         mock_response.choices = [
             MagicMock(message=MagicMock(content='```json\n{"name": "bar"}\n```'))
         ]
         client._client = MagicMock()
-        client._client.chat.completions.create = AsyncMock(
-            return_value=mock_response
-        )
+        client._client.chat.completions.create = AsyncMock(return_value=mock_response)
 
         out = await client.chat_structured("p", Output)
         assert out.name == "bar"
@@ -140,9 +128,7 @@ class TestDeepseekSummarizeTranscript:
 
     @pytest.mark.asyncio
     async def test_summarize_chinese(self):
-        cfg = LLMConfig(
-            provider="deepseek", model="deepseek-v4-flash", api_key="sk-x"
-        )
+        cfg = LLMConfig(provider="deepseek", model="deepseek-v4-flash", api_key="sk-x")
         client = DeepseekClient(cfg)
         client._client = MagicMock()
 
@@ -154,9 +140,7 @@ video_duration: 600
 """
         mock_response = MagicMock()
         mock_response.choices = [MagicMock(message=MagicMock(content=llm_output))]
-        client._client.chat.completions.create = AsyncMock(
-            return_value=mock_response
-        )
+        client._client.chat.completions.create = AsyncMock(return_value=mock_response)
 
         result = await client.summarize_transcript("转写稿内容...")
         assert "video_title" in result["front_matter"]
@@ -166,16 +150,12 @@ video_duration: 600
 
     @pytest.mark.asyncio
     async def test_summarize_truncates_long_input(self):
-        cfg = LLMConfig(
-            provider="deepseek", model="deepseek-v4-flash", api_key="sk-x"
-        )
+        cfg = LLMConfig(provider="deepseek", model="deepseek-v4-flash", api_key="sk-x")
         client = DeepseekClient(cfg)
         client._client = MagicMock()
         mock_response = MagicMock()
         mock_response.choices = [MagicMock(message=MagicMock(content="正文"))]
-        client._client.chat.completions.create = AsyncMock(
-            return_value=mock_response
-        )
+        client._client.chat.completions.create = AsyncMock(return_value=mock_response)
 
         long_text = "x" * 50_000
         await client.summarize_transcript(long_text, max_chars=1000)
@@ -187,16 +167,12 @@ video_duration: 600
 
     @pytest.mark.asyncio
     async def test_summarize_no_yaml_returns_empty_fm(self):
-        cfg = LLMConfig(
-            provider="deepseek", model="deepseek-v4-flash", api_key="sk-x"
-        )
+        cfg = LLMConfig(provider="deepseek", model="deepseek-v4-flash", api_key="sk-x")
         client = DeepseekClient(cfg)
         client._client = MagicMock()
         mock_response = MagicMock()
         mock_response.choices = [MagicMock(message=MagicMock(content="纯 Markdown 输出"))]
-        client._client.chat.completions.create = AsyncMock(
-            return_value=mock_response
-        )
+        client._client.chat.completions.create = AsyncMock(return_value=mock_response)
 
         result = await client.summarize_transcript("短稿")
         assert result["front_matter"] == {}

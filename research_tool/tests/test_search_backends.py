@@ -144,20 +144,32 @@ async def test_openalex_mixes_relevant_and_recent(monkeypatch):
     async def fake(url, **kw):
         sort = (kw.get("params") or {}).get("sort")
         if sort == "publication_date:desc":
-            return {"results": [{
-                "id": "https://openalex.org/W2", "title": "Recent 2026 paper",
-                "publication_year": 2026, "cited_by_count": 1,
-                "authorships": [{"author": {"display_name": "Kang"}}],
-                "abstract_inverted_index": {"new": [0], "work": [1]},
-                "primary_location": {"landing_page_url": "https://x/recent"},
-            }]}
-        return {"results": [{
-            "id": "https://openalex.org/W1", "title": "Classic high-cite",
-            "publication_year": 2017, "cited_by_count": 99999,
-            "authorships": [{"author": {"display_name": "Vaswani"}}],
-            "abstract_inverted_index": {"attention": [0], "matters": [1]},
-            "best_oa_location": {"pdf_url": "https://x/classic.pdf"},
-        }]}
+            return {
+                "results": [
+                    {
+                        "id": "https://openalex.org/W2",
+                        "title": "Recent 2026 paper",
+                        "publication_year": 2026,
+                        "cited_by_count": 1,
+                        "authorships": [{"author": {"display_name": "Kang"}}],
+                        "abstract_inverted_index": {"new": [0], "work": [1]},
+                        "primary_location": {"landing_page_url": "https://x/recent"},
+                    }
+                ]
+            }
+        return {
+            "results": [
+                {
+                    "id": "https://openalex.org/W1",
+                    "title": "Classic high-cite",
+                    "publication_year": 2017,
+                    "cited_by_count": 99999,
+                    "authorships": [{"author": {"display_name": "Vaswani"}}],
+                    "abstract_inverted_index": {"attention": [0], "matters": [1]},
+                    "best_oa_location": {"pdf_url": "https://x/classic.pdf"},
+                }
+            ]
+        }
 
     monkeypatch.setattr("research_tool.infrastructure.search.openalex_backend.get_json", fake)
     hits = await OpenAlexBackend().search("transformer", 4)
@@ -173,16 +185,21 @@ async def test_crossref_filters_future_years(monkeypatch):
     from research_tool.infrastructure.search.crossref_backend import CrossrefBackend
 
     async def fake(url, **kw):
-        return {"message": {"items": [
-            {
-                "title": ["Bad date paper"], "DOI": "10.1/x",
-                "URL": "https://doi.org/10.1/x",
-                "published": {"date-parts": [[2115]]},  # 脏数据未来年份
-                "issued": {"date-parts": [[2019]]},      # 真实年份
-                "container-title": ["J. Test"],
-                "author": [{"given": "A", "family": "B"}],
+        return {
+            "message": {
+                "items": [
+                    {
+                        "title": ["Bad date paper"],
+                        "DOI": "10.1/x",
+                        "URL": "https://doi.org/10.1/x",
+                        "published": {"date-parts": [[2115]]},  # 脏数据未来年份
+                        "issued": {"date-parts": [[2019]]},  # 真实年份
+                        "container-title": ["J. Test"],
+                        "author": [{"given": "A", "family": "B"}],
+                    }
+                ]
             }
-        ]}}
+        }
 
     monkeypatch.setattr("research_tool.infrastructure.search.crossref_backend.get_json", fake)
     hits = await CrossrefBackend().search("x", 5)
@@ -243,7 +260,9 @@ async def test_x_backend_parses_twitter_cli_json(monkeypatch):
         stderr = ""
         stdout = '[{"id":"123","username":"alice","text":"medical mllm result"}]'
 
-    monkeypatch.setattr("research_tool.infrastructure.search.x_backend.subprocess.run", lambda *a, **k: R())
+    monkeypatch.setattr(
+        "research_tool.infrastructure.search.x_backend.subprocess.run", lambda *a, **k: R()
+    )
     hits = await XBackend(CollectorConfig(search_engines=["x"])).search("medical mllm", 5)
     assert hits[0].url == "https://x.com/alice/status/123"
     assert hits[0].source_engine == "x"

@@ -80,9 +80,7 @@ def _collect_pdfs(path: Path) -> list[Path]:
 
 
 class PdfIngestor:
-    def __init__(
-        self, config: PdfIngestConfig | None = None, llm: LLMClient | None = None
-    ) -> None:
+    def __init__(self, config: PdfIngestConfig | None = None, llm: LLMClient | None = None) -> None:
         self.config = config or PdfIngestConfig()
         self.llm = llm
         if self.config.translate and self.llm is None:
@@ -91,9 +89,13 @@ class PdfIngestor:
     def _run_mineru(self, pdf: Path, mineru: str, parse_root: Path) -> str:
         """调用 mineru 解析单个 PDF，返回其 Markdown 文本。"""
         return mineru_to_markdown(
-            pdf, mineru, parse_root,
-            backend=self.config.mineru_backend, lang=self.config.ocr_lang,
-            start=self.config.start_page, end=self.config.end_page,
+            pdf,
+            mineru,
+            parse_root,
+            backend=self.config.mineru_backend,
+            lang=self.config.ocr_lang,
+            start=self.config.start_page,
+            end=self.config.end_page,
         )
 
     async def run(self, pdf_path: Path, work_dir: Path) -> CollectResult:

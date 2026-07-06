@@ -34,15 +34,16 @@ class SearchCache:
 
     @staticmethod
     def _variant(
-        max_results: int, language: str,
-        from_year: int | None, to_year: int | None,
-        sort: str | None, offset: int,
+        max_results: int,
+        language: str,
+        from_year: int | None,
+        to_year: int | None,
+        sort: str | None,
+        offset: int,
     ) -> str:
         return f"{max_results}|{language}|{from_year}|{to_year}|{sort}|{offset}"
 
-    def get(
-        self, engine: str, query: str, variant: str
-    ) -> list[SearchHit] | None:
+    def get(self, engine: str, query: str, variant: str) -> list[SearchHit] | None:
         path = self._path(engine, query, variant)
         if not path.exists():
             return None
@@ -55,13 +56,15 @@ class SearchCache:
         return [SearchHit(**h) for h in blob.get("hits", [])]
 
     def set(
-        self, engine: str, query: str, variant: str, hits: list[SearchHit],
+        self,
+        engine: str,
+        query: str,
+        variant: str,
+        hits: list[SearchHit],
     ) -> None:
         path = self._path(engine, query, variant)
         blob = {"created": time.time(), "hits": [h.model_dump() for h in hits]}
-        path.write_text(
-            json.dumps(blob, ensure_ascii=False, indent=1), encoding="utf-8"
-        )
+        path.write_text(json.dumps(blob, ensure_ascii=False, indent=1), encoding="utf-8")
 
 
 class CachingBackend(SearchBackend):
@@ -83,15 +86,18 @@ class CachingBackend(SearchBackend):
         sort: str | None = None,
         offset: int = 0,
     ) -> list[SearchHit]:
-        variant = self.cache._variant(
-            max_results, language, from_year, to_year, sort, offset
-        )
+        variant = self.cache._variant(max_results, language, from_year, to_year, sort, offset)
         cached = self.cache.get(self.name, query, variant)
         if cached is not None:
             return cached
         hits = await self.inner.search(
-            query, max_results, language,
-            from_year=from_year, to_year=to_year, sort=sort, offset=offset,
+            query,
+            max_results,
+            language,
+            from_year=from_year,
+            to_year=to_year,
+            sort=sort,
+            offset=offset,
         )
         if hits:
             self.cache.set(self.name, query, variant, hits)

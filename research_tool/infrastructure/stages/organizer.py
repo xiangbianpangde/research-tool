@@ -28,8 +28,8 @@ logger = logging.getLogger(__name__)
 _SOURCE_REF = re.compile(r"来源\s*\d+")  # 节点正文里的证据引用，用于 P2-6 稀疏检测
 
 _ILLEGAL = re.compile(r'[\\/:*?"<>|\s]+')
-_DOC_CHUNK = 14000        # 单篇摘要时的分块大小（字符）
-_MAX_CHUNKS_PER_DOC = 8   # 单篇最多摘要的块数（兜底超大文件）
+_DOC_CHUNK = 14000  # 单篇摘要时的分块大小（字符）
+_MAX_CHUNKS_PER_DOC = 8  # 单篇最多摘要的块数（兜底超大文件）
 _META_SRC = re.compile(r"<!--\s*source:\s*(.*?)\s*-->")
 _META_TITLE = re.compile(r"<!--\s*title:\s*(.*?)\s*-->")
 
@@ -61,7 +61,7 @@ class _Points(BaseModel):
 
 @dataclass
 class _SourceDoc:
-    sid: str          # "01"
+    sid: str  # "01"
     title: str
     url: str
     text: str
@@ -112,9 +112,7 @@ class Organizer:
         topic: str = "",
     ) -> OrganizeResult:
         input_dir = Path(input_dir)
-        tree_dir = (
-            Path(work_dir) / "tree" if work_dir is not None else input_dir.parent / "tree"
-        )
+        tree_dir = Path(work_dir) / "tree" if work_dir is not None else input_dir.parent / "tree"
         ensure_dir(tree_dir)
 
         # 结构化路径（extracted/）：沿用三元组证据；否则走逐篇摘要
@@ -132,10 +130,7 @@ class Organizer:
         node_titles = [n.title for n in nodes]
 
         node_bodies = await asyncio.gather(
-            *[
-                self._node_body(i + 1, n, node_titles, evidence, llm)
-                for i, n in enumerate(nodes)
-            ]
+            *[self._node_body(i + 1, n, node_titles, evidence, llm) for i, n in enumerate(nodes)]
         )
 
         node_paths: list[Path] = []
@@ -155,9 +150,7 @@ class Organizer:
 
     # -- map：逐篇摘要 -------------------------------------------------- #
 
-    async def _summarize_all(
-        self, topic: str, sources: list[_SourceDoc], llm: LLMClient
-    ) -> None:
+    async def _summarize_all(self, topic: str, sources: list[_SourceDoc], llm: LLMClient) -> None:
         await asyncio.gather(*[self._summarize_doc(topic, s, llm) for s in sources])
 
     async def _summarize_doc(self, topic: str, s: _SourceDoc, llm: LLMClient) -> None:
@@ -247,8 +240,7 @@ class Organizer:
         llm: LLMClient,
     ) -> str:
         index = "\n".join(
-            f"- [N{i} {p.stem.split('-', 1)[-1]}]({p.name})"
-            for i, p in enumerate(node_paths, 1)
+            f"- [N{i} {p.stem.split('-', 1)[-1]}]({p.name})" for i, p in enumerate(node_paths, 1)
         )
         node_list = "\n".join(f"- {n.title}：{n.core_question}" for n in plan.nodes)
         prompt = (
@@ -264,11 +256,13 @@ class Organizer:
             )
         return f"# 知识体系总览\n\n## 节点索引\n{index}\n\n{body}\n{refs}\n"
 
-
     # -- 反向传播质量评估（P2-6）-------------------------------------- #
 
     async def assess_and_feedback(
-        self, result: OrganizeResult, llm: LLMClient, topic: str,
+        self,
+        result: OrganizeResult,
+        llm: LLMClient,
+        topic: str,
     ) -> FeedbackPlan:
         """扫描已生成的知识树：按 "来源NN" 引用数判稀疏节点；让 LLM 一次性给出
         稀疏补足/断层桥接/矛盾交叉验证的补充查询。
@@ -296,7 +290,8 @@ class Organizer:
         nodes_summary = "\n".join(f"- {t}" for t in node_titles)
         sparse_hint = (
             f"已检测出稀疏节点（证据 < {min_ev} 条）：{', '.join(sparse)}\n"
-            if sparse else "未检出明显稀疏节点。\n"
+            if sparse
+            else "未检出明显稀疏节点。\n"
         )
         prompt = (
             f"调研主题：「{topic}」。当前知识树节点：\n{nodes_summary}\n\n"
@@ -317,8 +312,6 @@ class Organizer:
         return FeedbackPlan(sparse_nodes=sparse, queries=queries, notes=list(fb.notes))
 
 
-async def organize(
-    extracted_dir: Path, config: OrganizerConfig, llm: LLMClient
-) -> OrganizeResult:
+async def organize(extracted_dir: Path, config: OrganizerConfig, llm: LLMClient) -> OrganizeResult:
     """模块级函数（01 §5.2 签名）。"""
     return await Organizer(config).run(extracted_dir, llm)

@@ -82,9 +82,7 @@ class _Queries(BaseModel):
 _QUERY_SYSTEM = "你是检索专家，擅长为调研主题设计互补、覆盖面广的搜索查询。"
 
 
-async def _llm_build_queries(
-    topic: str, rounds: int, language: str, llm: LLMClient
-) -> list[str]:
+async def _llm_build_queries(topic: str, rounds: int, language: str, llm: LLMClient) -> list[str]:
     """用 LLM 生成贴主题的多轮查询：核心→交叉/相关→应用/对比。"""
     n = rounds * 3
     lang_hint = {
@@ -128,18 +126,28 @@ def _url_hash(url: str) -> str:
 
 _TOKEN_RE = re.compile(r"[A-Za-z][A-Za-z0-9-]{2,}|[\u4e00-\u9fff]{2,}")
 _STOPWORDS = {
-    "the", "and", "for", "with", "from", "into", "using", "review", "survey",
-    "study", "paper", "application", "applications", "model", "models",
-    "large", "language",
+    "the",
+    "and",
+    "for",
+    "with",
+    "from",
+    "into",
+    "using",
+    "review",
+    "survey",
+    "study",
+    "paper",
+    "application",
+    "applications",
+    "model",
+    "models",
+    "large",
+    "language",
 }
 
 
 def _tokens(text: str) -> set[str]:
-    return {
-        t.lower()
-        for t in _TOKEN_RE.findall(text or "")
-        if t.lower() not in _STOPWORDS
-    }
+    return {t.lower() for t in _TOKEN_RE.findall(text or "") if t.lower() not in _STOPWORDS}
 
 
 def _hit_relevance(topic: str, hit: SearchHit) -> float:
@@ -154,9 +162,7 @@ def _hit_relevance(topic: str, hit: SearchHit) -> float:
 
 
 class Collector:
-    def __init__(
-        self, config: CollectorConfig | None = None, llm: LLMClient | None = None
-    ) -> None:
+    def __init__(self, config: CollectorConfig | None = None, llm: LLMClient | None = None) -> None:
         self.config = config or CollectorConfig()
         self.llm = llm
 
@@ -175,18 +181,14 @@ class Collector:
                 topic, self.config.search_rounds, self.config.language, self.llm
             )
         else:
-            queries = _build_queries(
-                topic, self.config.search_rounds, self.config.language
-            )
+            queries = _build_queries(topic, self.config.search_rounds, self.config.language)
         # 用户显式查询置顶（点名要找的论文/方法，仅 Phase1，修正 4），保序去重
         if self.config.extra_queries:
             queries = list(dict.fromkeys(self.config.extra_queries + queries))
         # Phase2（去锚）：core_keyword 或 facets 触发；core 缺省回退 topic
         if self.config.core_keyword or self.config.facets:
             core = self.config.core_keyword or topic
-            queries = list(
-                dict.fromkeys(queries + _facet_queries(core, self.config.facets))
-            )
+            queries = list(dict.fromkeys(queries + _facet_queries(core, self.config.facets)))
         return await self.search_queries(queries)
 
     def _deep_combos(self) -> list[tuple[str | None, int]]:
@@ -197,14 +199,11 @@ class Collector:
         """
         page_size = self.config.max_results_per_engine
         sorts = self.config.deep_sorts or ["relevance"]
-        return [
-            (s, p * page_size)
-            for p in range(self.config.deep_pages)
-            for s in sorts
-        ]
+        return [(s, p * page_size) for p in range(self.config.deep_pages) for s in sorts]
 
     async def search_queries(
-        self, queries: list[str],
+        self,
+        queries: list[str],
         *,
         from_year: int | None = None,
         to_year: int | None = None,
@@ -231,8 +230,13 @@ class Collector:
         async def _one(backend, query: str, s: str | None, off: int) -> list[SearchHit]:
             async with sem:
                 return await backend.search(
-                    query, self.config.max_results_per_engine, self.config.language,
-                    from_year=fy, to_year=ty, sort=s, offset=off,
+                    query,
+                    self.config.max_results_per_engine,
+                    self.config.language,
+                    from_year=fy,
+                    to_year=ty,
+                    sort=s,
+                    offset=off,
                 )
 
         tasks = []
@@ -255,9 +259,7 @@ class Collector:
             for hit in res:
                 threshold = self.config.search_relevance_min_overlap
                 if threshold > 0 and _hit_relevance(query, hit) < threshold:
-                    warnings.append(
-                        f"{engine} 低相关命中已跳过 query={query!r}: {hit.title[:80]}"
-                    )
+                    warnings.append(f"{engine} 低相关命中已跳过 query={query!r}: {hit.title[:80]}")
                     continue
                 if hit.url in seen:
                     continue
@@ -267,16 +269,12 @@ class Collector:
                     return SearchResult(hits=hits, warnings=warnings)
         return SearchResult(hits=hits, warnings=warnings)
 
-    async def run(
-        self, topic: str, work_dir: Path, *, dry_run: bool = False
-    ) -> CollectResult:
+    async def run(self, topic: str, work_dir: Path, *, dry_run: bool = False) -> CollectResult:
         raw_dir = ensure_dir(Path(work_dir) / "raw")
         sr = await self.search_only(topic)
 
         if dry_run:
-            return CollectResult(
-                files=[], sources=[], raw_dir=raw_dir, warnings=sr.warnings
-            )
+            return CollectResult(files=[], sources=[], raw_dir=raw_dir, warnings=sr.warnings)
 
         result = await self.fetch_and_store(topic, sr.hits, raw_dir)
         result.warnings = sr.warnings + result.warnings
@@ -413,8 +411,6 @@ class Collector:
         return list(await asyncio.gather(*[_f(u) for u in targets]))
 
 
-async def collect(
-    topic: str, config: CollectorConfig, work_dir: Path
-) -> CollectResult:
+async def collect(topic: str, config: CollectorConfig, work_dir: Path) -> CollectResult:
     """模块级函数（01 §2.2 签名）。"""
     return await Collector(config).run(topic, work_dir)

@@ -305,7 +305,11 @@ class TestOrchestratorResult:
 
     def test_fields(self):
         r = OrchestratorResult(
-            task_id="v-1", url="u1", status="failed", error="boom", duration_ms=123,
+            task_id="v-1",
+            url="u1",
+            status="failed",
+            error="boom",
+            duration_ms=123,
         )
         assert r.task_id == "v-1"
         assert r.url == "u1"

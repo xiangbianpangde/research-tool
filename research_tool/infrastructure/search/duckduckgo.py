@@ -22,9 +22,7 @@ class DuckDuckGoBackend(SearchBackend):
         try:
             from ddgs import DDGS
         except ImportError as e:  # pragma: no cover
-            raise SearchError(
-                "需要 ddgs 包：pip install ddgs（或 research-tool[search]）"
-            ) from e
+            raise SearchError("需要 ddgs 包：pip install ddgs（或 research-tool[search]）") from e
         region = _REGION.get(language, "wt-wt")
         hits: list[SearchHit] = []
         with DDGS() as ddgs:
@@ -47,9 +45,7 @@ class DuckDuckGoBackend(SearchBackend):
     ) -> list[SearchHit]:
         # **_kw 吸收 P2 的 from_year/to_year/sort/offset：web 搜索不支持，忽略
         try:
-            return await asyncio.to_thread(
-                self._search_sync, query, max_results, language
-            )
+            return await asyncio.to_thread(self._search_sync, query, max_results, language)
         except SearchError:
             raise
         except Exception as e:  # noqa: BLE001

@@ -94,9 +94,7 @@ class BilibiliBackend(SearchBackend):
         except httpx.HTTPError as e:
             raise SearchError(f"Bilibili 搜索 HTTP 失败: {e}") from e
         if resp.status_code != 200:
-            raise SearchError(
-                f"Bilibili 搜索 HTTP {resp.status_code}: {resp.text[:200]}"
-            )
+            raise SearchError(f"Bilibili 搜索 HTTP {resp.status_code}: {resp.text[:200]}")
         try:
             data = resp.json()
         except ValueError as e:
@@ -105,9 +103,7 @@ class BilibiliBackend(SearchBackend):
         code = data.get("code", -1)
         if code != 0:
             # code -412 = 反爬触发；code -101 = 未登录；都视为搜索失败
-            raise SearchError(
-                f"Bilibili 搜索业务码 {code}: {data.get('message')}"
-            )
+            raise SearchError(f"Bilibili 搜索业务码 {code}: {data.get('message')}")
 
         results = (data.get("data") or {}).get("result") or []
         hits: list[SearchHit] = []

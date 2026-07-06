@@ -29,7 +29,17 @@ class _Counter(SearchBackend):
     def __init__(self):
         self.calls = 0
 
-    async def search(self, query, max_results, language="both", *, from_year=None, to_year=None, sort=None, offset=0):
+    async def search(
+        self,
+        query,
+        max_results,
+        language="both",
+        *,
+        from_year=None,
+        to_year=None,
+        sort=None,
+        offset=0,
+    ):
         self.calls += 1
         return [SearchHit(url="https://x.com", source_engine="web")]
 

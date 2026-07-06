@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
-import sqlite3
 import time
 from pathlib import Path
 
@@ -57,23 +55,32 @@ class TestCacheEntry:
 
     def test_is_expired_false_when_fresh(self):
         e = CacheEntry(
-            url="u", url_sha256="h", etag="",
-            payload={}, created_at=time.time(),
+            url="u",
+            url_sha256="h",
+            etag="",
+            payload={},
+            created_at=time.time(),
         )
         assert e.is_expired() is False
 
     def test_is_expired_true_when_old(self):
         e = CacheEntry(
-            url="u", url_sha256="h", etag="",
-            payload={}, created_at=time.time() - 100 * 86400,
+            url="u",
+            url_sha256="h",
+            etag="",
+            payload={},
+            created_at=time.time() - 100 * 86400,
             ttl_days=1,
         )
         assert e.is_expired() is True
 
     def test_serialization_roundtrip(self):
         e = CacheEntry(
-            url="u", url_sha256="h", etag="e1",
-            payload={"k": [1, 2, 3]}, created_at=time.time(),
+            url="u",
+            url_sha256="h",
+            etag="e1",
+            payload={"k": [1, 2, 3]},
+            created_at=time.time(),
         )
         row = e.to_row()
         e2 = CacheEntry.from_row(row)
@@ -133,8 +140,11 @@ class TestCacheRepository:
         with repo:
             repo.init_schema()
             e = CacheEntry(
-                url="u", url_sha256="h", etag="",
-                payload={}, created_at=time.time(),
+                url="u",
+                url_sha256="h",
+                etag="",
+                payload={},
+                created_at=time.time(),
             )
             repo.put(e)
             assert repo.delete(e.url_sha256, e.etag) is True
@@ -147,14 +157,20 @@ class TestCacheRepository:
             repo.init_schema()
             # 老的
             old = CacheEntry(
-                url="u1", url_sha256="h1", etag="",
-                payload={}, created_at=time.time() - 100 * 86400,
+                url="u1",
+                url_sha256="h1",
+                etag="",
+                payload={},
+                created_at=time.time() - 100 * 86400,
                 ttl_days=1,
             )
             # 新的
             new = CacheEntry(
-                url="u2", url_sha256="h2", etag="",
-                payload={}, created_at=time.time(),
+                url="u2",
+                url_sha256="h2",
+                etag="",
+                payload={},
+                created_at=time.time(),
             )
             repo.put(old)
             repo.put(new)
@@ -170,10 +186,15 @@ class TestCacheRepository:
             repo.init_schema()
             assert repo.count() == 0
             for i in range(3):
-                repo.put(CacheEntry(
-                    url=f"u{i}", url_sha256=f"h{i}", etag="",
-                    payload={}, created_at=time.time(),
-                ))
+                repo.put(
+                    CacheEntry(
+                        url=f"u{i}",
+                        url_sha256=f"h{i}",
+                        etag="",
+                        payload={},
+                        created_at=time.time(),
+                    )
+                )
             assert repo.count() == 3
 
 

@@ -51,4 +51,5 @@ _xtasks/
 /*.err
 /*.stderr
 /*.stdout
-/run_research.bat
+# root-level .bat runners (personal scratch)
+/*.bat

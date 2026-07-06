@@ -44,8 +44,13 @@ class OpenAlexBackend(SearchBackend):
         return ",".join(parts) or None
 
     async def _query(
-        self, query: str, n: int, sort: str | None,
-        *, flt: str | None = None, offset: int = 0,
+        self,
+        query: str,
+        n: int,
+        sort: str | None,
+        *,
+        flt: str | None = None,
+        offset: int = 0,
     ) -> list[dict]:
         per_page = min(max(n, 1), 50)
         params: dict = {"search": query, "per-page": per_page}
@@ -76,48 +81,61 @@ class OpenAlexBackend(SearchBackend):
         if not url:
             return None
         authors = ", ".join(
-            a.get("author", {}).get("display_name", "")
-            for a in (work.get("authorships") or [])[:5]
+            a.get("author", {}).get("display_name", "") for a in (work.get("authorships") or [])[:5]
         )
         year = work.get("publication_year")
         cites = work.get("cited_by_count")
         meta = " | ".join(
-            p for p in (
+            p
+            for p in (
                 str(year) if year else "",
                 authors,
                 f"被引 {cites}" if cites is not None else "",
-            ) if p
+            )
+            if p
         )
         abstract = _reconstruct_abstract(work.get("abstract_inverted_index"))[:500]
         snippet = f"{meta}\n{abstract}".strip() if meta else abstract
         return SearchHit(
-            url=url, title=work.get("title") or "",
-            snippet=snippet, source_engine=self.name,
+            url=url,
+            title=work.get("title") or "",
+            snippet=snippet,
+            source_engine=self.name,
         )
 
     async def search(
-        self, query: str, max_results: int, language: str = "both",
-        *, from_year: int | None = None, to_year: int | None = None,
-        sort: str | None = None, offset: int = 0,
+        self,
+        query: str,
+        max_results: int,
+        language: str = "both",
+        *,
+        from_year: int | None = None,
+        to_year: int | None = None,
+        sort: str | None = None,
+        offset: int = 0,
     ) -> list[SearchHit]:
         flt = self._year_filter(from_year, to_year)
         try:
             if sort is None:
                 # P1 默认：混合检索（一半相关性 + 一半最新），叠加年份过滤+分页
                 half = max(1, max_results // 2)
-                relevant = await self._query(
-                    query, half, sort=None, flt=flt, offset=offset
-                )
+                relevant = await self._query(query, half, sort=None, flt=flt, offset=offset)
                 recent = await self._query(
-                    query, max_results - half, sort="publication_date:desc",
-                    flt=flt, offset=offset,
+                    query,
+                    max_results - half,
+                    sort="publication_date:desc",
+                    flt=flt,
+                    offset=offset,
                 )
                 works = relevant + recent
             else:
                 # deep-search：单一排序（relevance 传 None 用默认）
                 works = await self._query(
-                    query, max_results, sort=self._SORTS.get(sort),
-                    flt=flt, offset=offset,
+                    query,
+                    max_results,
+                    sort=self._SORTS.get(sort),
+                    flt=flt,
+                    offset=offset,
                 )
         except Exception as e:  # noqa: BLE001
             raise SearchError(f"openalex 搜索失败: {describe(e)}") from e

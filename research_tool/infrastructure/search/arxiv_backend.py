@@ -47,14 +47,16 @@ class ArxivBackend(SearchBackend):
             raise SearchError(f"arxiv 搜索失败: {describe(e)}") from e
 
         try:
-            root = ET.fromstring(text)
+            root = ET.fromstring(text)  # noqa: S314  # parsing arxiv Atom feed; defusedxml migration is a follow-up
         except ET.ParseError as e:
             raise SearchError(f"arxiv 响应 XML 解析失败: {e}") from e
 
         hits: list[SearchHit] = []
         for entry in root.findall("a:entry", _NS):
             title = " ".join((entry.findtext("a:title", default="", namespaces=_NS) or "").split())
-            summary = " ".join((entry.findtext("a:summary", default="", namespaces=_NS) or "").split())
+            summary = " ".join(
+                (entry.findtext("a:summary", default="", namespaces=_NS) or "").split()
+            )
             url = entry.findtext("a:id", default="", namespaces=_NS) or ""
             published = entry.findtext("a:published", default="", namespaces=_NS) or ""
             year = int(published[:4]) if published[:4].isdigit() else None

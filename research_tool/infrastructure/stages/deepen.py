@@ -50,25 +50,25 @@ class _Queries(BaseModel):
 class _TimelineNode(BaseModel):
     """画像中的一段经历（P2-4）。period_from/to 用于回溯搜索带时间窗口。"""
 
-    period_from: int | None = None    # 起始年（含），None=未知
-    period_to: int | None = None      # 截止年（含），None=至今/未知
+    period_from: int | None = None  # 起始年（含），None=未知
+    period_to: int | None = None  # 截止年（含），None=至今/未知
     institution: str = ""
-    role: str = ""                    # 博士/硕士/讲师/...
-    confidence: float = 0.0           # 该节点的置信度
+    role: str = ""  # 博士/硕士/讲师/...
+    confidence: float = 0.0  # 该节点的置信度
 
 
 class _Profile(BaseModel):
     """从 raw/ 摘要抽出的结构化画像。P1 用于生成去锚注入查询；
     P2-4 扩展 timeline + confidence 支持时间线回溯与迭代终止判定。"""
 
-    name: str = ""                                   # 主名（中文/原文）
-    name_en: str | None = None                       # 英文名（人物常被英文论文收录）
+    name: str = ""  # 主名（中文/原文）
+    name_en: str | None = None  # 英文名（人物常被英文论文收录）
     aliases: list[str] = Field(default_factory=list)  # 别名/曾用名
     institutions: list[str] = Field(default_factory=list)  # 关联机构
-    fields: list[str] = Field(default_factory=list)        # 研究领域/方向
-    keywords: list[str] = Field(default_factory=list)      # 代表关键词/方法名
+    fields: list[str] = Field(default_factory=list)  # 研究领域/方向
+    keywords: list[str] = Field(default_factory=list)  # 代表关键词/方法名
     timeline: list[_TimelineNode] = Field(default_factory=list)  # P2-4 时间线
-    confidence: float = 0.0                          # P2-4 整体置信度 0-1
+    confidence: float = 0.0  # P2-4 整体置信度 0-1
 
 
 class _OwnsBatch(BaseModel):
@@ -83,14 +83,12 @@ _SYSTEM = "你是严谨的调研规划专家，擅长拆解话题、发现信息
 class DeepenStage:
     """反偏差深挖阶段。复用同一个 Collector 实例做补充搜索+抓取。"""
 
-    def __init__(
-        self, config: DeepenConfig, collector: Collector, llm: LLMClient
-    ) -> None:
+    def __init__(self, config: DeepenConfig, collector: Collector, llm: LLMClient) -> None:
         self.config = config
         self.collector = collector
         self.llm = llm
 
-    async def run(
+    async def run(  # noqa: PLR0915  # deepen.run; split pending (P1 seed item 6)
         self, topic: str, raw_dir: Path, *, core_keyword: str | None = None
     ) -> DeepenResult:
         raw_dir = Path(raw_dir)
@@ -264,14 +262,22 @@ class DeepenStage:
             return None
         # 全空画像无价值
         if not any(
-            (profile.name_en, profile.aliases, profile.institutions,
-             profile.fields, profile.keywords)
+            (
+                profile.name_en,
+                profile.aliases,
+                profile.institutions,
+                profile.fields,
+                profile.keywords,
+            )
         ):
             return None
         return profile
 
     async def _timeline_search(
-        self, profile: _Profile, topic: str, raw_dir: Path,
+        self,
+        profile: _Profile,
+        topic: str,
+        raw_dir: Path,
     ) -> tuple[list[Path], list[str]]:
         """P2-4：对画像每段经历做带时间窗口的回溯搜索。
 
@@ -291,8 +297,10 @@ class DeepenStage:
             q = f"{anchor} {inst}"
             sr = await self.collector.search_queries(
                 [q],
-                from_year=node.period_from, to_year=node.period_to,
-                sort=None, offset=0,   # 显式触发单次模式
+                from_year=node.period_from,
+                to_year=node.period_to,
+                sort=None,
+                offset=0,  # 显式触发单次模式
             )
             warnings.extend(sr.warnings)
             res = await self.collector.fetch_and_store(topic, sr.hits, raw_dir)
@@ -301,7 +309,10 @@ class DeepenStage:
         return new_files, warnings
 
     async def _disambiguate(
-        self, raw_dir: Path, profile: _Profile, topic: str,
+        self,
+        raw_dir: Path,
+        profile: _Profile,
+        topic: str,
     ) -> int:
         """P2-4：同名消歧。LLM 按画像（机构+领域）判每份 raw 文件归属，
         他人的移到 raw/_disambig/。返回移走数量。
@@ -328,7 +339,7 @@ class DeepenStage:
 
         batch_size = max(self.config.breadth, 10)
         for start in range(0, len(items), batch_size):
-            batch = items[start: start + batch_size]
+            batch = items[start : start + batch_size]
             prompt = (
                 f"调研主题：「{topic}」，核心实体：「{anchor}」"
                 f"（关联机构：{inst_hint}；研究领域：{field_hint}）。\n"
@@ -420,9 +431,7 @@ class DeepenStage:
                 continue
             title_m = _TITLE_RE.search(text)
             title = title_m.group(1) if title_m else path.stem
-            body = "\n".join(
-                ln for ln in text.splitlines() if not _COMMENT_LINE.match(ln)
-            ).strip()
+            body = "\n".join(ln for ln in text.splitlines() if not _COMMENT_LINE.match(ln)).strip()
             excerpt = body[: self.config.per_file_chars]
             block = f"- 《{title}》：{excerpt}"
             if total + len(block) > self.config.max_input_chars:
@@ -433,10 +442,13 @@ class DeepenStage:
 
 
 async def deepen(
-    topic: str, config: DeepenConfig, collector: Collector, llm: LLMClient,
-    raw_dir: Path, *, core_keyword: str | None = None,
+    topic: str,
+    config: DeepenConfig,
+    collector: Collector,
+    llm: LLMClient,
+    raw_dir: Path,
+    *,
+    core_keyword: str | None = None,
 ) -> DeepenResult:
     """模块级便捷函数。"""
-    return await DeepenStage(config, collector, llm).run(
-        topic, raw_dir, core_keyword=core_keyword
-    )
+    return await DeepenStage(config, collector, llm).run(topic, raw_dir, core_keyword=core_keyword)

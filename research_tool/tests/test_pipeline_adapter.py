@@ -61,8 +61,10 @@ class TestMarkdownWriter:
     def test_write_creates_topic_slug_dir(self, tmp_path: Path):
         writer = MarkdownWriter()
         path = writer.write(
-            "---\nfoo: bar\n---\nbody", topic="Transformer 架构",
-            video_id="abc", work_dir=tmp_path,
+            "---\nfoo: bar\n---\nbody",
+            topic="Transformer 架构",
+            video_id="abc",
+            work_dir=tmp_path,
         )
         # topic 会被 slugify
         slug_name = path.parent.parent.name
@@ -77,10 +79,10 @@ class TestMarkdownWriter:
     def test_write_sanitizes_unsafe_video_id(self, tmp_path: Path):
         writer = MarkdownWriter()
         # 包含非法字符
-        path = writer.write("# test", topic="t", video_id="abc<>:\"/\\|?*xyz", work_dir=tmp_path)
+        path = writer.write("# test", topic="t", video_id='abc<>:"/\\|?*xyz', work_dir=tmp_path)
         assert path.exists()
         # 非法字符应被替换
-        assert "<>:\"/\\|?*" not in path.name
+        assert '<>:"/\\|?*' not in path.name
 
     def test_write_chmod_0o644(self, tmp_path: Path):
         import os
@@ -177,7 +179,9 @@ class TestPipelineTrigger:
         mock_cfg.work_dir = tmp_path
 
         with (
-            patch("research_tool.application.pipeline.ResearchPipeline", return_value=mock_pipeline),
+            patch(
+                "research_tool.application.pipeline.ResearchPipeline", return_value=mock_pipeline
+            ),
             patch("research_tool.domain.config.load_config", return_value=mock_cfg),
         ):
             result = await trigger.trigger("topic", work_dir=tmp_path)
@@ -205,7 +209,9 @@ class TestPipelineTrigger:
         mock_cfg.work_dir = tmp_path
 
         with (
-            patch("research_tool.application.pipeline.ResearchPipeline", return_value=mock_pipeline),
+            patch(
+                "research_tool.application.pipeline.ResearchPipeline", return_value=mock_pipeline
+            ),
             patch("research_tool.domain.config.load_config", return_value=mock_cfg),
         ):
             result = await trigger.trigger("topic", work_dir=tmp_path)
@@ -225,6 +231,7 @@ class TestPipelineTrigger:
     @pytest.mark.asyncio
     async def test_trigger_module_level(self, tmp_path: Path):
         """模块级便捷函数 trigger_pipeline 也能工作。"""
+
         async def fake_stream(topic):
             from research_tool.domain.models import StageEvent
 
@@ -238,7 +245,9 @@ class TestPipelineTrigger:
         mock_cfg.work_dir = tmp_path
 
         with (
-            patch("research_tool.application.pipeline.ResearchPipeline", return_value=mock_pipeline),
+            patch(
+                "research_tool.application.pipeline.ResearchPipeline", return_value=mock_pipeline
+            ),
             patch("research_tool.domain.config.load_config", return_value=mock_cfg),
         ):
             result = await trigger_pipeline("topic", work_dir=tmp_path, stages=["clean"])
@@ -322,6 +331,7 @@ class TestCollectConfigInjector:
         import research_tool.domain.models as models_mod
 
         original = getattr(models_mod, "CollectorConfig", None)
+
         # 用一个会抛错的属性
         class Boom:
             def __call__(self, *a, **kw):

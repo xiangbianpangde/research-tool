@@ -20,14 +20,24 @@ class PubMedBackend(SearchBackend):
     name = "pubmed"
 
     async def search(
-        self, query: str, max_results: int, language: str = "both",
-        *, from_year: int | None = None, to_year: int | None = None,
-        sort: str | None = None, offset: int = 0,
+        self,
+        query: str,
+        max_results: int,
+        language: str = "both",
+        *,
+        from_year: int | None = None,
+        to_year: int | None = None,
+        sort: str | None = None,
+        offset: int = 0,
     ) -> list[SearchHit]:
         try:
             ids = await self._esearch(
-                query, min(max_results, 20),
-                from_year=from_year, to_year=to_year, sort=sort, offset=offset,
+                query,
+                min(max_results, 20),
+                from_year=from_year,
+                to_year=to_year,
+                sort=sort,
+                offset=offset,
             )
             if not ids:
                 return []
@@ -38,20 +48,27 @@ class PubMedBackend(SearchBackend):
             raise SearchError(f"pubmed 搜索失败: {describe(e)}") from e
 
     async def _esearch(
-        self, query: str, retmax: int,
-        *, from_year: int | None = None, to_year: int | None = None,
-        sort: str | None = None, offset: int = 0,
+        self,
+        query: str,
+        retmax: int,
+        *,
+        from_year: int | None = None,
+        to_year: int | None = None,
+        sort: str | None = None,
+        offset: int = 0,
     ) -> list[str]:
         params = {
-            "db": "pubmed", "term": query,
-            "retmax": retmax, "retmode": "json",
+            "db": "pubmed",
+            "term": query,
+            "retmax": retmax,
+            "retmode": "json",
         }
         # 年份过滤（按出版日 pdat）
         if from_year is not None or to_year is not None:
             params["datetype"] = "pdat"
             params["mindate"] = str(from_year) if from_year is not None else "1500"
             params["maxdate"] = str(to_year) if to_year is not None else "3000"
-        if sort == "date":           # PubMed 仅支持按日期；citations 不支持
+        if sort == "date":  # PubMed 仅支持按日期；citations 不支持
             params["sort"] = "pub_date"
         if offset:
             params["retstart"] = offset
@@ -68,9 +85,7 @@ class PubMedBackend(SearchBackend):
         hits: list[SearchHit] = []
         for pmid in result.get("uids", []):
             doc = result.get(pmid, {})
-            authors = ", ".join(
-                a.get("name", "") for a in (doc.get("authors") or [])[:4]
-            )
+            authors = ", ".join(a.get("name", "") for a in (doc.get("authors") or [])[:4])
             journal = doc.get("fulljournalname") or doc.get("source") or ""
             date = doc.get("pubdate") or ""
             meta = " | ".join(p for p in (date, journal, authors) if p)

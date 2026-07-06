@@ -88,13 +88,9 @@ class DeepseekClient(LLMClient):
         try:
             from openai import AsyncOpenAI  # type: ignore
         except ImportError as e:  # pragma: no cover
-            raise LLMError(
-                "需要 openai 包：pip install openai"
-            ) from e
+            raise LLMError("需要 openai 包：pip install openai") from e
         if not config.api_key:
-            raise LLMError(
-                "Deepseek 缺少 api_key：请设置 DEEPSEEK_API_KEY 或 LLMConfig.api_key"
-            )
+            raise LLMError("Deepseek 缺少 api_key：请设置 DEEPSEEK_API_KEY 或 LLMConfig.api_key")
         self._client = AsyncOpenAI(
             api_key=config.api_key,
             base_url=config.base_url,
@@ -120,15 +116,11 @@ class DeepseekClient(LLMClient):
             resp = await self._client.chat.completions.create(
                 model=self.config.model,
                 messages=self._messages(prompt, system),
-                temperature=(
-                    self.config.temperature if temperature is None else temperature
-                ),
+                temperature=(self.config.temperature if temperature is None else temperature),
                 max_tokens=self.config.max_tokens,
             )
         except Exception as e:  # noqa: BLE001 - 统一包装为 LLMError
-            raise LLMError(
-                f"Deepseek chat 失败: model={self.config.model}, err={e}"
-            ) from e
+            raise LLMError(f"Deepseek chat 失败: model={self.config.model}, err={e}") from e
         return resp.choices[0].message.content or ""
 
     async def chat_structured(
@@ -138,12 +130,8 @@ class DeepseekClient(LLMClient):
         system: str | None = None,
     ) -> T:
         """结构化输出：JSON object → Pydantic 模型。"""
-        schema_json = json.dumps(
-            schema.model_json_schema(), ensure_ascii=False, indent=2
-        )
-        sys = (
-            (system + "\n\n") if system else ""
-        ) + (
+        schema_json = json.dumps(schema.model_json_schema(), ensure_ascii=False, indent=2)
+        sys = ((system + "\n\n") if system else "") + (
             "你必须只输出一个合法 JSON 对象，不要任何解释或 markdown 代码块。"
             f"JSON 必须符合以下 schema：\n{schema_json}"
         )
@@ -162,9 +150,7 @@ class DeepseekClient(LLMClient):
         content = resp.choices[0].message.content or "{}"
         return _parse_structured(content, schema)
 
-    async def stream(
-        self, prompt: str, system: str | None = None
-    ) -> AsyncIterator[str]:
+    async def stream(self, prompt: str, system: str | None = None) -> AsyncIterator[str]:
         """流式返回文本增量。"""
         try:
             stream = await self._client.chat.completions.create(
@@ -179,9 +165,7 @@ class DeepseekClient(LLMClient):
                 if delta:
                     yield delta
         except Exception as e:  # noqa: BLE001
-            raise LLMError(
-                f"Deepseek stream 失败: model={self.config.model}, err={e}"
-            ) from e
+            raise LLMError(f"Deepseek stream 失败: model={self.config.model}, err={e}") from e
 
     # ---- 视频场景便捷方法（V1.1 扩展） ---------------------------------- #
 
@@ -254,9 +238,7 @@ class DeepseekClient(LLMClient):
             f"每章节包含 ts（mm:ss 格式）和 title。\n\n{transcript[:20_000]}"
         )
         try:
-            result = await self.chat_structured(
-                prompt, _ChapterList, system=sys_prompt
-            )
+            result = await self.chat_structured(prompt, _ChapterList, system=sys_prompt)
             return result.chapters
         except LLMError:
             return []
@@ -278,9 +260,7 @@ def _parse_structured(content: str, schema: type[T]) -> T:
     try:
         data = json.loads(text)
     except json.JSONDecodeError as e:
-        raise LLMError(
-            f"Deepseek 结构化输出非合法 JSON: {e}\n原文: {content[:500]}"
-        ) from e
+        raise LLMError(f"Deepseek 结构化输出非合法 JSON: {e}\n原文: {content[:500]}") from e
     return schema.model_validate(data)
 
 
@@ -306,27 +286,23 @@ def _parse_summary(raw: str) -> tuple[dict[str, Any], str]:
     body = raw
 
     # 1) YAML front matter
-    yaml_match = re.search(
-        r"```(?:yaml|yml)\s*\n(.*?)\n```", raw, re.DOTALL
-    )
+    yaml_match = re.search(r"```(?:yaml|yml)\s*\n(.*?)\n```", raw, re.DOTALL)
     if yaml_match:
         try:
             import yaml  # type: ignore
 
             fm = yaml.safe_load(yaml_match.group(1)) or {}
-            body = raw[yaml_match.end():].strip()
+            body = raw[yaml_match.end() :].strip()
             return _filter_video_prefix(fm), body
         except ImportError:
             pass
 
     # 2) JSON front matter
-    json_match = re.search(
-        r"```(?:json)?\s*\n(\{.*?\})\n```", raw, re.DOTALL
-    )
+    json_match = re.search(r"```(?:json)?\s*\n(\{.*?\})\n```", raw, re.DOTALL)
     if json_match:
         try:
             fm = json.loads(json_match.group(1))
-            body = raw[json_match.end():].strip()
+            body = raw[json_match.end() :].strip()
             return _filter_video_prefix(fm), body
         except json.JSONDecodeError:
             pass

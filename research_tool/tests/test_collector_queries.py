@@ -45,7 +45,9 @@ async def test_collector_uses_template_without_llm(monkeypatch):
 
     captured = {}
 
-    async def fake_search(self, query, max_results, language, *, from_year=None, to_year=None, sort=None, offset=0):
+    async def fake_search(
+        self, query, max_results, language, *, from_year=None, to_year=None, sort=None, offset=0
+    ):
         captured.setdefault("queries", []).append(query)
         return []
 
@@ -63,10 +65,22 @@ async def test_search_relevance_prefilter_skips_offtopic(monkeypatch):
     cfg = CollectorConfig(search_relevance_min_overlap=0.5, search_cache=False)
     c = Collector(cfg)
 
-    async def fake_search(self, query, max_results, language, *, from_year=None, to_year=None, sort=None, offset=0):
+    async def fake_search(
+        self, query, max_results, language, *, from_year=None, to_year=None, sort=None, offset=0
+    ):
         return [
-            SearchHit(url="https://example.com/a", title="medical image diagnosis", snippet="multimodal model", source_engine="web"),
-            SearchHit(url="https://example.com/b", title="classroom reading practice", snippet="education", source_engine="web"),
+            SearchHit(
+                url="https://example.com/a",
+                title="medical image diagnosis",
+                snippet="multimodal model",
+                source_engine="web",
+            ),
+            SearchHit(
+                url="https://example.com/b",
+                title="classroom reading practice",
+                snippet="education",
+                source_engine="web",
+            ),
         ]
 
     monkeypatch.setattr(

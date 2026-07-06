@@ -35,9 +35,7 @@ def _wiki_langs(language: str) -> list[str]:
 class WikipediaBackend(SearchBackend):
     name = "wikipedia"
 
-    async def _search_lang(
-        self, lang: str, query: str, limit: int
-    ) -> list[SearchHit]:
+    async def _search_lang(self, lang: str, query: str, limit: int) -> list[SearchHit]:
         params = {"q": query, "limit": min(limit, 50)}
         data = await get_json(_endpoint(lang), params=params)
         pages = (data.get("pages") or []) if isinstance(data, dict) else []

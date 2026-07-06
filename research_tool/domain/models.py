@@ -17,11 +17,20 @@ from pydantic import BaseModel, Field, model_validator
 
 Provider = Literal["openai", "deepseek", "ollama", "anthropic", "minimax"]
 SearchEngine = Literal[
-    "web", "arxiv", "tavily", "scholar",
-    "semantic_scholar", "wikipedia", "github", "pubmed", "google_news",
-    "openalex", "crossref",
+    "web",
+    "arxiv",
+    "tavily",
+    "scholar",
+    "semantic_scholar",
+    "wikipedia",
+    "github",
+    "pubmed",
+    "google_news",
+    "openalex",
+    "crossref",
     "bilibili",  # V1.1 落地（GAP-V1）：通过 yt-dlp BiliSearch extractor 搜 B 站视频
-    "x", "twitter",
+    "x",
+    "twitter",
 ]
 ExtractTask = Literal["ner", "re", "triple"]
 StageName = Literal["collect", "deepen", "clean", "extract", "organize", "report"]
@@ -78,7 +87,7 @@ class CollectorConfig(BaseModel):
     # Deep-Search 深搜（P2）：多排序策略 × 多页翻页，突破"单次只取第1页相关性排序"
     # 的覆盖不足。每个 (engine, query) 展开为 deep_pages × deep_sorts 次搜索后去重。
     deep_search: bool = False
-    deep_pages: int = Field(default=3, ge=1, le=10)   # 翻页页数
+    deep_pages: int = Field(default=3, ge=1, le=10)  # 翻页页数
     deep_sorts: list[str] = Field(  # 排序策略，relevance=后端默认相关性
         default_factory=lambda: ["relevance", "date", "citations"]
     )
@@ -106,17 +115,20 @@ class PdfIngestConfig(BaseModel):
         "auto", "mineru", "custom", "paddleocr-vl", "unlimited-ocr", "vision-llm"
     ] = "mineru"
     mineru_backend: Literal[
-        "pipeline", "vlm-auto-engine", "hybrid-auto-engine",
-        "vlm-http-client", "hybrid-http-client",
+        "pipeline",
+        "vlm-auto-engine",
+        "hybrid-auto-engine",
+        "vlm-http-client",
+        "hybrid-http-client",
     ] = "pipeline"
-    ocr_lang: str = "en"            # MinerU OCR 语言提示
-    mineru_cmd: str | None = None   # 自定义 mineru 可执行路径（默认走 PATH）
-    ocr_cmd: str | None = None      # custom / model wrapper 命令；输出 Markdown 或写出 md
+    ocr_lang: str = "en"  # MinerU OCR 语言提示
+    mineru_cmd: str | None = None  # 自定义 mineru 可执行路径（默认走 PATH）
+    ocr_cmd: str | None = None  # custom / model wrapper 命令；输出 Markdown 或写出 md
     ocr_model_path: str | None = None  # 本地模型目录（如 PaddleOCR-VL / Unlimited-OCR）
     vision_prompt: str = "Extract the document text as clean Markdown."
     start_page: int | None = None
     end_page: int | None = None
-    translate: bool = False         # 是否把英文 MD 翻译成中文（可选）
+    translate: bool = False  # 是否把英文 MD 翻译成中文（可选）
     translate_chunk_size: int = Field(default=3000, gt=0)
     translate_concurrency: int = Field(default=8, gt=0)
 
@@ -162,9 +174,7 @@ class OrganizerConfig(BaseModel):
     @model_validator(mode="after")
     def _check_node_bounds(self) -> "OrganizerConfig":
         if self.min_nodes > self.max_nodes:
-            raise ValueError(
-                f"min_nodes ({self.min_nodes}) 不能大于 max_nodes ({self.max_nodes})"
-            )
+            raise ValueError(f"min_nodes ({self.min_nodes}) 不能大于 max_nodes ({self.max_nodes})")
         return self
 
 
@@ -179,22 +189,24 @@ class ReporterConfig(BaseModel):
 class DeepenConfig(BaseModel):
     """反偏差深挖配置（Phase 2）。依据升级计划 §4。"""
 
-    enabled: bool = True               # false 或 --skip deepen 跳过深挖
+    enabled: bool = True  # false 或 --skip deepen 跳过深挖
     # 画像提取（P1）：从 raw/ 摘要让 LLM 抽结构化画像（中英文名/机构/领域），
     # 再据此生成注入查询（如补"英文名 NTU"）。失败回退现行实体查询。
     profile_extract: bool = True
     # 画像迭代轮数（P2-4）：=1 仅 P1 单轮；≥2 启用 timeline 回溯 + 同名消歧 + 重抽画像循环
     profile_iterations: int = Field(default=1, ge=1, le=5)
-    min_new_files_per_iter: int = Field(default=2, ge=0)      # 本轮新增文件 <此 → 提前终止
+    min_new_files_per_iter: int = Field(default=2, ge=0)  # 本轮新增文件 <此 → 提前终止
     min_profile_confidence: float = Field(default=0.85, ge=0.0, le=1.0)  # 画像置信度达此 → 终止
-    timeline_backtrack: bool = True    # 对画像每段经历做带时间窗口的回溯搜索
-    disambiguation: bool = True        # 同名消歧：LLM 判每份资料是否属于核心实体，他人的移到 raw/_disambig/
-    depth: int = Field(default=2, ge=1, le=3)    # 深挖轮次
+    timeline_backtrack: bool = True  # 对画像每段经历做带时间窗口的回溯搜索
+    disambiguation: bool = (
+        True  # 同名消歧：LLM 判每份资料是否属于核心实体，他人的移到 raw/_disambig/
+    )
+    depth: int = Field(default=2, ge=1, le=3)  # 深挖轮次
     breadth: int = Field(default=4, ge=2, le=8)  # 每轮补充查询数上限
-    entity_split: bool = True          # 拆分多实体话题（人物/组织等）
+    entity_split: bool = True  # 拆分多实体话题（人物/组织等）
     max_entities: int = Field(default=5, ge=1, le=8)  # 实体拆分上限（风险 7）
-    gap_detection: bool = True         # 扫描已采内容识别缺失维度
-    contradiction_check: bool = True   # 检测矛盾并反向验证
+    gap_detection: bool = True  # 扫描已采内容识别缺失维度
+    contradiction_check: bool = True  # 检测矛盾并反向验证
     # 喂给 LLM 做缺口分析时的上下文截断（风险 4：每文件取标题+摘要，总量封顶）
     max_input_chars: int = Field(default=20000, gt=0)
     per_file_chars: int = Field(default=300, gt=0)
@@ -206,9 +218,7 @@ class PipelineConfig(BaseModel):
     topic: str = ""
     work_dir: Path = Path("./research-output")
     stages: list[StageName] = Field(
-        default_factory=lambda: [
-            "collect", "deepen", "clean", "extract", "organize", "report"
-        ]
+        default_factory=lambda: ["collect", "deepen", "clean", "extract", "organize", "report"]
     )
     collector: CollectorConfig = Field(default_factory=CollectorConfig)
     deepen: DeepenConfig = Field(default_factory=DeepenConfig)
@@ -254,8 +264,8 @@ class CollectResult(BaseModel):
 class DeepenResult(BaseModel):
     """深挖阶段产出统计。"""
 
-    entities: list[str] = Field(default_factory=list)   # 拆出的实体
-    queries: list[str] = Field(default_factory=list)    # 实际执行的补充查询
+    entities: list[str] = Field(default_factory=list)  # 拆出的实体
+    queries: list[str] = Field(default_factory=list)  # 实际执行的补充查询
     new_files: list[Path] = Field(default_factory=list)  # 新增 raw 文件
     warnings: list[str] = Field(default_factory=list)
 
@@ -317,8 +327,8 @@ class FeedbackPlan(BaseModel):
     """P2-6 反向传播：知识树质量评估后产出的修正查询计划。"""
 
     sparse_nodes: list[str] = Field(default_factory=list)  # 证据不足的节点标题
-    queries: list[str] = Field(default_factory=list)       # 用于回到 collect 的修正查询
-    notes: list[str] = Field(default_factory=list)         # 矛盾/断层等观察
+    queries: list[str] = Field(default_factory=list)  # 用于回到 collect 的修正查询
+    notes: list[str] = Field(default_factory=list)  # 矛盾/断层等观察
 
 
 class ReportResult(BaseModel):

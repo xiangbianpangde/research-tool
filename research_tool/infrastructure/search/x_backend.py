@@ -40,11 +40,13 @@ class XBackend(SearchBackend):
         return [self._twitter_command(), "search", query, "-n", str(max_results), "--json"]
 
     def _ensure_available(self) -> None:
-        cmd = self._opencli_command() if self.config.x_backend == "opencli" else self._twitter_command()
+        cmd = (
+            self._opencli_command()
+            if self.config.x_backend == "opencli"
+            else self._twitter_command()
+        )
         if shutil.which(cmd) is None and not Path(cmd).exists():
-            raise SearchError(
-                f"X 后端命令不可用: {cmd}。请安装/配置 twitter-cli 或改用 opencli。"
-            )
+            raise SearchError(f"X 后端命令不可用: {cmd}。请安装/配置 twitter-cli 或改用 opencli。")
 
     @staticmethod
     def _loads_json_output(output: str) -> Any:
@@ -52,7 +54,7 @@ class XBackend(SearchBackend):
         starts = [idx for idx in (text.find("["), text.find("{")) if idx >= 0]
         if not starts:
             raise json.JSONDecodeError("no JSON object found", text, 0)
-        data, _ = json.JSONDecoder().raw_decode(text[min(starts):])
+        data, _ = json.JSONDecoder().raw_decode(text[min(starts) :])
         return data
 
     @staticmethod

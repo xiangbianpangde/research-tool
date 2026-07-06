@@ -37,9 +37,15 @@ class CrossrefBackend(SearchBackend):
     }
 
     async def search(
-        self, query: str, max_results: int, language: str = "both",
-        *, from_year: int | None = None, to_year: int | None = None,
-        sort: str | None = None, offset: int = 0,
+        self,
+        query: str,
+        max_results: int,
+        language: str = "both",
+        *,
+        from_year: int | None = None,
+        to_year: int | None = None,
+        sort: str | None = None,
+        offset: int = 0,
     ) -> list[SearchHit]:
         params = {"query": query, "rows": min(max_results, 30)}
         if self.mailto:
@@ -61,15 +67,10 @@ class CrossrefBackend(SearchBackend):
         except Exception as e:  # noqa: BLE001
             raise SearchError(f"crossref 搜索失败: {describe(e)}") from e
 
-        items = (
-            data.get("message", {}).get("items", [])
-            if isinstance(data, dict) else []
-        )
+        items = data.get("message", {}).get("items", []) if isinstance(data, dict) else []
         hits: list[SearchHit] = []
         for item in items:
-            url = item.get("URL") or (
-                f"https://doi.org/{item['DOI']}" if item.get("DOI") else ""
-            )
+            url = item.get("URL") or (f"https://doi.org/{item['DOI']}" if item.get("DOI") else "")
             if not url:
                 continue
             title = (item.get("title") or [""])[0]
@@ -79,11 +80,7 @@ class CrossrefBackend(SearchBackend):
             )
             journal = (item.get("container-title") or [""])[0]
             meta = " | ".join(p for p in (_year(item), journal, authors) if p)
-            hits.append(
-                SearchHit(
-                    url=url, title=title, snippet=meta, source_engine=self.name
-                )
-            )
+            hits.append(SearchHit(url=url, title=title, snippet=meta, source_engine=self.name))
             if len(hits) >= max_results:
                 break
         return hits

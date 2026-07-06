@@ -20,8 +20,7 @@ from .base import ensure_dir, write_json
 _CONCURRENCY = 4
 
 _SYSTEM = (
-    "你是信息抽取专家。从给定文本中精确抽取知识，只依据文本本身，不臆造。"
-    "所有输出为合法 JSON。"
+    "你是信息抽取专家。从给定文本中精确抽取知识，只依据文本本身，不臆造。" "所有输出为合法 JSON。"
 )
 
 
@@ -205,8 +204,6 @@ class Extractor:
         )
 
 
-async def extract(
-    input_dir: Path, config: ExtractorConfig, llm: LLMClient
-) -> ExtractResult:
+async def extract(input_dir: Path, config: ExtractorConfig, llm: LLMClient) -> ExtractResult:
     """模块级函数（01 §4.2 签名）。"""
     return await Extractor(config).run(input_dir, llm)

@@ -110,9 +110,7 @@ class SemaphorePool:
     def release(self) -> None:
         """释放信号量。"""
         if self._in_use <= 0:
-            raise RuntimeError(
-                f"SemaphorePool.release without acquire (in_use={self._in_use})"
-            )
+            raise RuntimeError(f"SemaphorePool.release without acquire (in_use={self._in_use})")
         self._sem.release()
         self._in_use -= 1
 

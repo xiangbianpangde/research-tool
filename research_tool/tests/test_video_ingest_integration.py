@@ -23,7 +23,11 @@ from research_tool.domain.models import (
     TranscriptSegment,
     VideoMeta,
 )
-from research_tool.infrastructure.ingest.cache_manager import CacheEntry, CacheManager, compute_url_sha256
+from research_tool.infrastructure.ingest.cache_manager import (
+    CacheEntry,
+    CacheManager,
+    compute_url_sha256,
+)
 from research_tool.infrastructure.ingest.downloader import (
     BilibiliDownloader,
     DownloadResult,
@@ -221,7 +225,9 @@ class TestBilibiliPipelineIntegration:
             return expected_first
 
         with (
-            patch("research_tool.infrastructure.ingest.transcriber._run_engine", side_effect=fake_run),
+            patch(
+                "research_tool.infrastructure.ingest.transcriber._run_engine", side_effect=fake_run
+            ),
             patch(
                 "research_tool.infrastructure.ingest.transcriber.get_cache_manager",
                 AsyncMock(return_value=cm1),
@@ -260,7 +266,10 @@ class TestBilibiliPipelineIntegration:
             raise RuntimeError("cache hit should not call engine")
 
         with (
-            patch("research_tool.infrastructure.ingest.transcriber._run_engine", side_effect=should_not_run),
+            patch(
+                "research_tool.infrastructure.ingest.transcriber._run_engine",
+                side_effect=should_not_run,
+            ),
             patch(
                 "research_tool.infrastructure.ingest.transcriber.get_cache_manager",
                 AsyncMock(return_value=cm2),

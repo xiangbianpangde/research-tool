@@ -69,6 +69,7 @@ exclude_also = [
 [tool.ruff]
 line-length = 100
 target-version = "py311"
+extend-exclude = ["docs"]  # historical M-001..M-012 skeletons are design artifacts, not linted code
 
 [tool.ruff.lint]
 select = [
@@ -86,7 +87,8 @@ ignore = [
     "S403",    # pickle
 ]
 [tool.ruff.lint.per-file-ignores]
-"research_tool/tests/*" = ["S101", "T20"]
+"research_tool/tests/*" = ["S101", "T20", "S108", "N814", "E501"]
+"scripts/*" = ["T20"]
 
 [tool.ruff.lint.pylint]
 max-statements = 50

@@ -42,18 +42,14 @@ class AnthropicLLMClient(LLMClient):
                 model=self.config.model,
                 system=system or "",
                 messages=[{"role": "user", "content": prompt}],
-                temperature=(
-                    self.config.temperature if temperature is None else temperature
-                ),
+                temperature=(self.config.temperature if temperature is None else temperature),
                 max_tokens=self.config.max_tokens,
             )
         except Exception as e:  # noqa: BLE001
             raise LLMError(f"chat 调用失败: {e}") from e
         return "".join(b.text for b in resp.content if b.type == "text")
 
-    async def chat_structured(
-        self, prompt: str, schema: type[T], system: str | None = None
-    ) -> T:
+    async def chat_structured(self, prompt: str, schema: type[T], system: str | None = None) -> T:
         schema_json = json.dumps(schema.model_json_schema(), ensure_ascii=False)
         sys = (
             (system + "\n\n") if system else ""
@@ -61,9 +57,7 @@ class AnthropicLLMClient(LLMClient):
         content = await self.chat(prompt, system=sys)
         return _parse_structured(content, schema)
 
-    async def stream(
-        self, prompt: str, system: str | None = None
-    ) -> AsyncIterator[str]:
+    async def stream(self, prompt: str, system: str | None = None) -> AsyncIterator[str]:
         try:
             async with self._client.messages.stream(
                 model=self.config.model,

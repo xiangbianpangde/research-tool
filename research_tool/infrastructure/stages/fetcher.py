@@ -33,9 +33,7 @@ def _crawl4ai_available() -> bool:
         return False
 
 
-_SCRIPT_STYLE = re.compile(
-    r"<(script|style|noscript)[^>]*>.*?</\1>", re.DOTALL | re.IGNORECASE
-)
+_SCRIPT_STYLE = re.compile(r"<(script|style|noscript)[^>]*>.*?</\1>", re.DOTALL | re.IGNORECASE)
 _TAG = re.compile(r"<[^>]+>")
 _HREF = re.compile(r'href=["\'](https?://[^"\'#]+)["\']', re.IGNORECASE)
 _BLANKS = re.compile(r"\n{3,}")
@@ -81,7 +79,8 @@ class Fetcher:
             return FetchResult(url, "", ok=False, error="PDF 已跳过(parse_pdf=False)")
         try:
             async with httpx.AsyncClient(
-                follow_redirects=True, timeout=self.timeout_sec,
+                follow_redirects=True,
+                timeout=self.timeout_sec,
                 headers={"User-Agent": "Mozilla/5.0 (research-tool)"},
             ) as client:
                 resp = await client.get(url)
@@ -106,7 +105,9 @@ class Fetcher:
         mineru = find_mineru(self.mineru_cmd)
         if not mineru:
             return FetchResult(
-                url, "", ok=False,
+                url,
+                "",
+                ok=False,
                 error="抓到 PDF 但未找到 mineru，已跳过（用 --mineru-cmd 指定）",
             )
         try:
@@ -114,9 +115,7 @@ class Fetcher:
             root.mkdir(parents=True, exist_ok=True)
             pdf_path = root / f"{hashlib.sha256(url.encode()).hexdigest()[:16]}.pdf"
             pdf_path.write_bytes(data)
-            md = await asyncio.to_thread(
-                mineru_to_markdown, pdf_path, mineru, root, lang="ch"
-            )
+            md = await asyncio.to_thread(mineru_to_markdown, pdf_path, mineru, root, lang="ch")
             return FetchResult(url, md)
         except Exception as e:  # noqa: BLE001 - 单篇失败不中断整批
             return FetchResult(url, "", ok=False, error=f"PDF 解析失败: {e}")

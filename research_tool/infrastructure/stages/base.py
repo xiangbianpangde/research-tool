@@ -19,9 +19,7 @@ def ensure_dir(path: Path) -> Path:
 def write_json(path: Path, data) -> None:
     """UTF-8, indent=2, ensure_ascii=False（05 §6）。"""
     ensure_dir(path.parent)
-    path.write_text(
-        json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8"
-    )
+    path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
 def read_json(path: Path):

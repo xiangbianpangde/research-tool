@@ -113,7 +113,10 @@ class TestEndToEndMocked:
         """B 站 URL → mock download → mock transcribe → mock LLM → 落 raw/<topic>/video_<id>.md。"""
         # 1) mock 各阶段函数
         fake_dl_result = make_fake_download_result(
-            tmp_path, video_id="BV1xx411c7mD", platform="bilibili", title="AI 教程",
+            tmp_path,
+            video_id="BV1xx411c7mD",
+            platform="bilibili",
+            title="AI 教程",
         )
         fake_transcript = make_fake_transcript()
         fake_summary = make_fake_summary()
@@ -184,7 +187,10 @@ class TestEndToEndMocked:
     async def test_youtube_url_full_flow(self, tmp_path: Path):
         """YouTube URL → 同样端到端流程。"""
         fake_dl_result = make_fake_download_result(
-            tmp_path, video_id="dQw4w9WgXcQ", platform="youtube", title="YouTube Test",
+            tmp_path,
+            video_id="dQw4w9WgXcQ",
+            platform="youtube",
+            title="YouTube Test",
         )
 
         async def fake_download(url: VideoURL) -> DownloadResult:
@@ -235,7 +241,9 @@ class TestEndToEndMocked:
             call_count["n"] += 1
             await asyncio.sleep(0.05)  # 模拟 I/O
             return make_fake_download_result(
-                tmp_path, video_id=url.video_id or "unknown", platform=url.platform,
+                tmp_path,
+                video_id=url.video_id or "unknown",
+                platform=url.platform,
             )
 
         def fake_transcribe(audio_path: str, language: str) -> Transcript:
@@ -268,6 +276,7 @@ class TestEndToEndMocked:
     @pytest.mark.asyncio
     async def test_downstream_5_stage_pipeline_triggered(self, tmp_path: Path):
         """run_pipeline=True + 至少 1 成功 → 触发下游 5 阶段管道。"""
+
         async def fake_download(url: VideoURL) -> DownloadResult:
             return make_fake_download_result(tmp_path)
 
@@ -327,9 +336,11 @@ class TestCliVideoUrl:
         # typer.BadParameter 退出码 2
         assert result.exit_code != 0
         # 错误信息应提及 douyin / 不支持
-        assert "douyin" in (result.output + str(result.exception)).lower() or "不支持" in (
-            result.output + str(result.exception)
-        ) or "E_VID_URL_REJECTED" in (result.output + str(result.exception))
+        assert (
+            "douyin" in (result.output + str(result.exception)).lower()
+            or "不支持" in (result.output + str(result.exception))
+            or "E_VID_URL_REJECTED" in (result.output + str(result.exception))
+        )
 
     def test_cli_with_video_url_dispatches_to_video_ingest(self, tmp_path: Path):
         """--video-url → 走 VideoIngest 流程（不调真实 downloader）。"""
@@ -356,9 +367,12 @@ class TestCliVideoUrl:
             result = runner.invoke(
                 app,
                 [
-                    "run", "AI 教程",
-                    "--video-url", "https://www.bilibili.com/video/BV1xx411c7mD",
-                    "-o", str(tmp_path),
+                    "run",
+                    "AI 教程",
+                    "--video-url",
+                    "https://www.bilibili.com/video/BV1xx411c7mD",
+                    "-o",
+                    str(tmp_path),
                 ],
             )
 
@@ -390,10 +404,14 @@ class TestCliVideoUrl:
             result = runner.invoke(
                 app,
                 [
-                    "run", "topic",
-                    "--video-url", "https://www.bilibili.com/video/BV1aaa",
-                    "--video-url", "https://www.youtube.com/watch?v=video2",
-                    "-o", str(tmp_path),
+                    "run",
+                    "topic",
+                    "--video-url",
+                    "https://www.bilibili.com/video/BV1aaa",
+                    "--video-url",
+                    "https://www.youtube.com/watch?v=video2",
+                    "-o",
+                    str(tmp_path),
                 ],
             )
 

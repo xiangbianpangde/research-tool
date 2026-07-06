@@ -78,14 +78,21 @@ class MineruOCREngine(OCREngine):
                 "pdf_ingest.ocr_cmd 指定可执行路径。",
             )
         cmd = [
-            self._cmd(), "-p", str(pdf), "-o", str(parse_root),
-            "-b", self.config.mineru_backend, "-l", self.config.ocr_lang,
+            self._cmd(),
+            "-p",
+            str(pdf),
+            "-o",
+            str(parse_root),
+            "-b",
+            self.config.mineru_backend,
+            "-l",
+            self.config.ocr_lang,
         ]
         if self.config.start_page is not None:
             cmd += ["-s", str(self.config.start_page)]
         if self.config.end_page is not None:
             cmd += ["-e", str(self.config.end_page)]
-        result = subprocess.run(cmd, capture_output=True, text=True)
+        result = subprocess.run(cmd, capture_output=True, text=True)  # noqa: S603  # trusted external OCR/mineru subprocess
         if result.returncode != 0:
             raise StageError(
                 "ingest-pdf",
@@ -125,7 +132,7 @@ class CommandOCREngine(OCREngine):
     def parse(self, pdf: Path, parse_root: Path) -> str:
         if not self.config.ocr_cmd:
             raise StageError("ingest-pdf", "custom OCR 需要配置 pdf_ingest.ocr_cmd")
-        result = subprocess.run(self._argv(pdf, parse_root), capture_output=True, text=True)
+        result = subprocess.run(self._argv(pdf, parse_root), capture_output=True, text=True)  # noqa: S603  # trusted external OCR/mineru subprocess
         if result.returncode != 0:
             raise StageError(
                 "ingest-pdf",

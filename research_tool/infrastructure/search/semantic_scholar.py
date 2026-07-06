@@ -38,9 +38,15 @@ class SemanticScholarBackend(SearchBackend):
         return paper.get("url") or ""
 
     async def search(
-        self, query: str, max_results: int, language: str = "both",
-        *, from_year: int | None = None, to_year: int | None = None,
-        sort: str | None = None, offset: int = 0,
+        self,
+        query: str,
+        max_results: int,
+        language: str = "both",
+        *,
+        from_year: int | None = None,
+        to_year: int | None = None,
+        sort: str | None = None,
+        offset: int = 0,
     ) -> list[SearchHit]:
         headers = {"x-api-key": self.api_key} if self.api_key else None
         params = {
@@ -72,26 +78,24 @@ class SemanticScholarBackend(SearchBackend):
         if sort == "date":
             papers = sorted(papers, key=lambda p: p.get("year") or 0, reverse=True)
         elif sort == "citations":
-            papers = sorted(
-                papers, key=lambda p: p.get("citationCount") or 0, reverse=True
-            )
+            papers = sorted(papers, key=lambda p: p.get("citationCount") or 0, reverse=True)
 
         hits: list[SearchHit] = []
         for paper in papers:
             url = self._best_url(paper)
             if not url:
                 continue
-            authors = ", ".join(
-                a.get("name", "") for a in (paper.get("authors") or [])[:5]
-            )
+            authors = ", ".join(a.get("name", "") for a in (paper.get("authors") or [])[:5])
             cites = paper.get("citationCount")
             year = paper.get("year")
             meta = " | ".join(
-                p for p in (
+                p
+                for p in (
                     f"{year}" if year else "",
                     authors,
                     f"被引 {cites}" if cites is not None else "",
-                ) if p
+                )
+                if p
             )
             abstract = (paper.get("abstract") or "")[:500]
             snippet = f"{meta}\n{abstract}".strip() if meta else abstract

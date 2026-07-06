@@ -244,7 +244,8 @@ class TestTranscribeCacheHit:
         # 引擎选择：没装 faster_whisper；没 groq_api_key
         # 但缓存命中短路应跳过所有引擎
         with patch(
-            "research_tool.infrastructure.ingest.transcriber.get_cache_manager", AsyncMock(return_value=cm)
+            "research_tool.infrastructure.ingest.transcriber.get_cache_manager",
+            AsyncMock(return_value=cm),
         ):
             result = await transcribe(
                 str(audio),
@@ -327,7 +328,9 @@ class TestTranscribeFailureModes:
             return Transcript(language="zh", full_text="groq result", segments=[], engine="groq")
 
         with (
-            patch("research_tool.infrastructure.ingest.transcriber._run_engine", side_effect=fake_run),
+            patch(
+                "research_tool.infrastructure.ingest.transcriber._run_engine", side_effect=fake_run
+            ),
             patch(
                 "research_tool.infrastructure.ingest.transcriber.get_cache_manager",
                 AsyncMock(return_value=cm),
@@ -363,7 +366,10 @@ class TestTranscribeFailureModes:
             )
 
         with (
-            patch("research_tool.infrastructure.ingest.transcriber._run_engine", side_effect=always_fail),
+            patch(
+                "research_tool.infrastructure.ingest.transcriber._run_engine",
+                side_effect=always_fail,
+            ),
             patch(
                 "research_tool.infrastructure.ingest.transcriber.get_cache_manager",
                 AsyncMock(return_value=cm),
@@ -397,7 +403,10 @@ class TestTranscribeFailureModes:
             raise RuntimeError("unreachable")
 
         with (
-            patch("research_tool.infrastructure.ingest.transcriber._run_engine", side_effect=slow_engine),
+            patch(
+                "research_tool.infrastructure.ingest.transcriber._run_engine",
+                side_effect=slow_engine,
+            ),
             patch(
                 "research_tool.infrastructure.ingest.transcriber.get_cache_manager",
                 AsyncMock(return_value=cm),

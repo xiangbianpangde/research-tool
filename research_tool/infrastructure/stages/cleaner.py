@@ -26,9 +26,7 @@ _BLOCK_TAGS = re.compile(
 )
 _ANY_TAG = re.compile(r"<[^>]+>")
 # 广告关键词（01 §3.4 规则4）
-_AD = re.compile(
-    r"\b(advertisement|sponsored|promoted|ad[_\-]?block|adsbygoogle)\b", re.IGNORECASE
-)
+_AD = re.compile(r"\b(advertisement|sponsored|promoted|ad[_\-]?block|adsbygoogle)\b", re.IGNORECASE)
 # 尾部截断标题（01 §3.4 规则6）
 _TAIL = re.compile(
     r"^\s*#{1,6}\s*(Contributing|License|References|参考文献|致谢|License & Credits)\b",
@@ -39,9 +37,9 @@ _LINK_LINE = re.compile(r"^\s*[-*]?\s*\[[^\]]*\]\([^)]*\)\s*$")
 _URL_ONLY = re.compile(r"^\s*https?://\S+\s*$")
 _BLANKS = re.compile(r"\n{3,}")
 
-_SHORT_LEN = 40           # 01 §3.4 规则3：短行阈值
-_NAV_RUN_MIN = 3          # 连续 N 行
-_NAV_SHORT_RATIO = 0.7    # 70% 为短行
+_SHORT_LEN = 40  # 01 §3.4 规则3：短行阈值
+_NAV_RUN_MIN = 3  # 连续 N 行
+_NAV_SHORT_RATIO = 0.7  # 70% 为短行
 _CONTENT_START_MIN = 120  # 正文起点：首个达此长度的实质段落
 
 
@@ -52,10 +50,7 @@ def _looks_binary(text: str, sample: int = 4000) -> bool:
         return False
     if "%PDF" in s[:200] or "FlateDecode" in s or "/Filter" in s:
         return True
-    bad = sum(
-        1 for ch in s
-        if ch == "�" or (ord(ch) < 32 and ch not in "\n\r\t")
-    )
+    bad = sum(1 for ch in s if ch == "�" or (ord(ch) < 32 and ch not in "\n\r\t"))
     return bad / len(s) > 0.15
 
 
@@ -134,7 +129,7 @@ def _shingles(text: str) -> set[str]:
     s = _WS.sub(" ", text).strip().lower()
     if len(s) < _NGRAM:
         return {s} if s else set()
-    return {s[i: i + _NGRAM] for i in range(len(s) - _NGRAM + 1)}
+    return {s[i : i + _NGRAM] for i in range(len(s) - _NGRAM + 1)}
 
 
 def _jaccard(a: set[str], b: set[str]) -> float:
@@ -145,7 +140,8 @@ def _jaccard(a: set[str], b: set[str]) -> float:
 
 
 def _dedup_groups(
-    items: list[tuple[str, set[str], int]], threshold: float,
+    items: list[tuple[str, set[str], int]],
+    threshold: float,
 ) -> dict[str, str]:
     """items: [(name, shingles, length)]；返回 {被丢弃 name → 胜出 name}。
 
@@ -189,6 +185,7 @@ def _dedup_groups(
 
 # --- LLM 相关性过滤（P2-5）------------------------------------------------ #
 
+
 class _Scores(BaseModel):
     """LLM 批量评分返回结构，顺序对应输入条目。"""
 
@@ -206,9 +203,7 @@ def _read_title_excerpt(path: Path, excerpt_chars: int = 400) -> tuple[str, str]
         return path.stem, ""
     title_m = re.search(r"<!--\s*title:\s*(.*?)\s*-->", text)
     title = title_m.group(1) if title_m else path.stem
-    body = "\n".join(
-        ln for ln in text.splitlines() if not _META_LINE.match(ln)
-    ).strip()
+    body = "\n".join(ln for ln in text.splitlines() if not _META_LINE.match(ln)).strip()
     return title, body[:excerpt_chars]
 
 
@@ -223,8 +218,6 @@ class Cleaner:
         # 兜底：二进制/乱码（如未解析的 PDF）直接丢弃正文，只留来源头
         if _looks_binary(body):
             return header
-
-
 
         if cfg.strip_html:
             body = _strip_html(body)
@@ -309,7 +302,10 @@ class Cleaner:
         return CleanResult(files=files, quality_report=quality, clean_dir=clean_dir)
 
     async def filter_relevance(
-        self, clean_result: CleanResult, llm: LLMClient, topic: str,
+        self,
+        clean_result: CleanResult,
+        llm: LLMClient,
+        topic: str,
     ) -> CleanResult:
         """LLM 批量给 clean/*.md 打 0-1 相关性分；低于阈值的从 clean/ 删除
         （raw/ 保留以便溯源），quality.json 加 relevance_score 并标 low_relevance。
@@ -323,15 +319,13 @@ class Cleaner:
         quality = dict(clean_result.quality_report)
 
         for start in range(0, len(files), batch_size):
-            batch = files[start: start + batch_size]
+            batch = files[start : start + batch_size]
             entries = [_read_title_excerpt(p) for p in batch]
             prompt = (
                 f"调研主题：「{topic}」。\n"
                 f"下面是 {len(entries)} 份候选资料的标题与正文片段，请对每份判断"
                 f"与主题的**相关性**，返回 0-1 浮点分（0=完全无关，1=高度相关）：\n\n"
-                + "\n\n".join(
-                    f"[{i}] 《{t}》\n{e}" for i, (t, e) in enumerate(entries)
-                )
+                + "\n\n".join(f"[{i}] 《{t}》\n{e}" for i, (t, e) in enumerate(entries))
                 + f"\n\n返回 JSON：{{scores:[{len(entries)} 个浮点数，顺序对应]}}。"
             )
             try:
@@ -347,10 +341,8 @@ class Cleaner:
                     q = quality[stem]
                     quality[stem] = q.model_copy(
                         update={
-                            "issues": q.issues + (
-                                [f"relevance:{round(score,2)}"] if score < threshold
-                                else []
-                            ),
+                            "issues": q.issues
+                            + ([f"relevance:{round(score,2)}"] if score < threshold else []),
                         }
                     )
                 if score < threshold:
@@ -366,7 +358,9 @@ class Cleaner:
             {k: v.model_dump() for k, v in quality.items()},
         )
         return CleanResult(
-            files=kept, quality_report=quality, clean_dir=clean_result.clean_dir,
+            files=kept,
+            quality_report=quality,
+            clean_dir=clean_result.clean_dir,
         )
 
 

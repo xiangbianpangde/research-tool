@@ -16,11 +16,11 @@ def _structured(prompt, schema):
     """按 schema/prompt 分流：实体拆分 + 实体多视角 + 缺口 + 矛盾。"""
     if schema.__name__ == "_Entities":
         return schema(entities=["康怡琳", "中南民族大学"])
-    if "已识别实体" in prompt:                 # 实体多视角查询
+    if "已识别实体" in prompt:  # 实体多视角查询
         return schema(queries=["Yilin Kang", "康怡琳 博士"])
-    if "缺失哪些维度" in prompt:               # 缺口检测
+    if "缺失哪些维度" in prompt:  # 缺口检测
         return schema(queries=["康怡琳 获奖", "康怡琳 研究方向"])
-    return schema(queries=[])                  # 无矛盾
+    return schema(queries=[])  # 无矛盾
 
 
 @pytest.mark.asyncio
@@ -42,10 +42,7 @@ async def test_deepen_splits_entities_and_deepens(monkeypatch, tmp_path):
         captured.append(list(queries))
         # 每个查询给一个独立 URL，让 fetch_and_store 真正落盘
         return SearchResult(
-            hits=[
-                SearchHit(url=f"https://r/{q}", title=q, source_engine="web")
-                for q in queries
-            ]
+            hits=[SearchHit(url=f"https://r/{q}", title=q, source_engine="web") for q in queries]
         )
 
     monkeypatch.setattr(collector, "search_queries", fake_search_queries)
@@ -57,8 +54,8 @@ async def test_deepen_splits_entities_and_deepens(monkeypatch, tmp_path):
     # 实体拆分生效
     assert res.entities == ["康怡琳", "中南民族大学"]
     flat = [q for qs in captured for q in qs]
-    assert "Yilin Kang" in flat            # 机制 A：独立英文名查询（消偏差核心）
-    assert "康怡琳 获奖" in flat            # 机制 B：缺口轮跑了
+    assert "Yilin Kang" in flat  # 机制 A：独立英文名查询（消偏差核心）
+    assert "康怡琳 获奖" in flat  # 机制 B：缺口轮跑了
     # 完成标记写入（风险 5：resume 不会误跳）
     assert (raw / ".deepen_done").exists()
     # 新文件被追加（idx 续编，不覆盖 seed）
@@ -79,7 +76,7 @@ async def test_deepen_disabled_entity_split_single_entity(monkeypatch, tmp_path)
     monkeypatch.setattr(collector, "search_queries", fake_sq)
     cfg = DeepenConfig(entity_split=False, gap_detection=False, contradiction_check=False)
     res = await DeepenStage(cfg, collector, llm).run("X", raw)
-    assert res.entities == []               # 未拆分
+    assert res.entities == []  # 未拆分
     assert (raw / ".deepen_done").exists()
 
 
@@ -92,14 +89,10 @@ async def test_pipeline_deepen_stage_and_resume(monkeypatch, tmp_path):
     topic_dir = tmp_path / "out" / "x"
     raw = topic_dir / "raw"
     raw.mkdir(parents=True)
-    (raw / "01-seed-aaaaaa.md").write_text(
-        "<!-- title: seed -->\n\n" + _LONG, encoding="utf-8"
-    )
+    (raw / "01-seed-aaaaaa.md").write_text("<!-- title: seed -->\n\n" + _LONG, encoding="utf-8")
 
     async def fake_sq(self, queries):
-        return SearchResult(
-            hits=[SearchHit(url=f"https://r/{queries[0]}", source_engine="web")]
-        )
+        return SearchResult(hits=[SearchHit(url=f"https://r/{queries[0]}", source_engine="web")])
 
     monkeypatch.setattr(Collector, "search_queries", fake_sq)
     monkeypatch.setattr(Fetcher, "fetch", lambda self, url: _ok(url))
@@ -128,7 +121,9 @@ async def test_pipeline_deepen_disabled_skips(monkeypatch, tmp_path):
     topic_dir = tmp_path / "out" / "x"
     (topic_dir / "raw").mkdir(parents=True)
     cfg = PipelineConfig(
-        topic="x", work_dir=tmp_path / "out", stages=["deepen"],
+        topic="x",
+        work_dir=tmp_path / "out",
+        stages=["deepen"],
         deepen=_DC(enabled=False),
     )
     pipe = ResearchPipeline(cfg)
@@ -151,8 +146,8 @@ def test_read_digest_truncates(tmp_path):
         llm,
     )
     digest = stage._read_digest(raw)
-    assert "长文" in digest                  # 标题保留
-    assert digest.count("字") <= 20          # 每文件正文截断到 per_file_chars
+    assert "长文" in digest  # 标题保留
+    assert digest.count("字") <= 20  # 每文件正文截断到 per_file_chars
 
 
 async def _ok(url):

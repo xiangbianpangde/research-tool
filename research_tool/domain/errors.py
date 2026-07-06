@@ -197,11 +197,7 @@ class ErrorRecord:
         Returns:
             多行字符串，便于 CLI 打印或日志写入。
         """
-        return (
-            f"场景: {self.scene}\n"
-            f"原因: {self.cause}\n"
-            f"建议: {self.suggestion}"
-        )
+        return f"场景: {self.scene}\n" f"原因: {self.cause}\n" f"建议: {self.suggestion}"
 
 
 # --------------------------------------------------------------------------- #

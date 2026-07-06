@@ -358,13 +358,13 @@ class CacheManager:
             loop = asyncio.get_running_loop()
             for attempt in (1, 2):
                 try:
-                    ok: bool = await loop.run_in_executor(
-                        None, self.repo.put, entry
-                    )
+                    ok: bool = await loop.run_in_executor(None, self.repo.put, entry)
                     if ok:
                         logger.info(
                             "cache 写入: %s etag=%r (%d bytes)",
-                            entry.url_sha256[:12], entry.etag, len(json.dumps(entry.payload)),
+                            entry.url_sha256[:12],
+                            entry.etag,
+                            len(json.dumps(entry.payload)),
                         )
                         return True
                 except (sqlite3.Error, OSError) as e:
@@ -393,9 +393,7 @@ class CacheManager:
             await self.init()
         loop = asyncio.get_running_loop()
         try:
-            count: int = await loop.run_in_executor(
-                None, self.repo.cleanup_expired, ttl_days
-            )
+            count: int = await loop.run_in_executor(None, self.repo.cleanup_expired, ttl_days)
             if count > 0:
                 logger.info("cache 清理: 删除 %d 条过期条目（TTL=%d 天）", count, ttl_days)
             return count

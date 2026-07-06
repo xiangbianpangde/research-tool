@@ -85,13 +85,25 @@ def get_logger(name: str | None = None) -> logging.Logger:
 
 
 # 敏感字段名（不区分大小写，递归 redact 嵌套 dict，深度上限 5）
-_SENSITIVE_KEYS: ClassVar[frozenset[str]] = frozenset({
-    "api_key", "apikey", "api-key",
-    "cookie", "set-cookie", "set_cookie",
-    "prompt", "system_prompt",
-    "authorization", "auth", "token", "access_token", "refresh_token",
-    "password", "secret",
-})
+_SENSITIVE_KEYS: ClassVar[frozenset[str]] = frozenset(
+    {
+        "api_key",
+        "apikey",
+        "api-key",
+        "cookie",
+        "set-cookie",
+        "set_cookie",
+        "prompt",
+        "system_prompt",
+        "authorization",
+        "auth",
+        "token",
+        "access_token",
+        "refresh_token",
+        "password",
+        "secret",
+    }
+)
 
 # 嵌套递归最大深度（防止恶意输入导致栈溢出）
 _MAX_REDACT_DEPTH = 5
@@ -191,8 +203,15 @@ class JsonFormatter(logging.Formatter):
 
     # 字段顺序（与设计文档保持一致，便于 jq/grep 链式查询）
     _FIELD_ORDER: ClassVar[tuple[str, ...]] = (
-        "ts", "level", "module", "task_id", "url_sha256",
-        "step", "duration_ms", "code", "msg",
+        "ts",
+        "level",
+        "module",
+        "task_id",
+        "url_sha256",
+        "step",
+        "duration_ms",
+        "code",
+        "msg",
     )
 
     def format(self, record: logging.LogRecord) -> str:

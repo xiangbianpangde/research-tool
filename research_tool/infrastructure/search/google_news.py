@@ -33,7 +33,7 @@ class GoogleNewsBackend(SearchBackend):
         params = {"q": query, **_locale(language)}
         try:
             xml = await get_text(_ENDPOINT, params=params)
-            root = ET.fromstring(xml)
+            root = ET.fromstring(xml)  # noqa: S314  # parsing Google News RSS; defusedxml migration is a follow-up
         except SearchError:
             raise
         except Exception as e:  # noqa: BLE001

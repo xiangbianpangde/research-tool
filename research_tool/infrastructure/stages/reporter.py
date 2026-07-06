@@ -91,9 +91,7 @@ class Reporter:
             return []
         out = []
         for i, s in enumerate(data, 1):
-            out.append(
-                {"sid": f"{i:02d}", "title": s.get("title", ""), "url": s.get("url", "")}
-            )
+            out.append({"sid": f"{i:02d}", "title": s.get("title", ""), "url": s.get("url", "")})
         return out
 
     async def run(
@@ -147,14 +145,10 @@ class Reporter:
         if output_path is not None:
             out = Path(output_path)
         else:
-            out = tree_dir.parent / (
-                "report.html" if self.config.format == "html" else "report.md"
-            )
+            out = tree_dir.parent / ("report.html" if self.config.format == "html" else "report.md")
 
         content = (
-            _md_to_html(markdown, topic or "调研报告")
-            if self.config.format == "html"
-            else markdown
+            _md_to_html(markdown, topic or "调研报告") if self.config.format == "html" else markdown
         )
         write_text(out, content)
 
@@ -165,8 +159,6 @@ class Reporter:
         )
 
 
-async def report(
-    tree_dir: Path, config: ReporterConfig, llm: LLMClient
-) -> ReportResult:
+async def report(tree_dir: Path, config: ReporterConfig, llm: LLMClient) -> ReportResult:
     """模块级函数（01 §6.2 签名）。"""
     return await Reporter(config).run(tree_dir, llm)

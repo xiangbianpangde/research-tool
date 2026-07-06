@@ -34,9 +34,15 @@ _results: list[tuple[str, bool, str]] = []
 
 def _run(args: list[str], timeout: int = 600) -> subprocess.CompletedProcess:
     env = {**_env(), "PYTHONPATH": str(ROOT)}
-    return subprocess.run(
-        CLI + args, capture_output=True, text=True, encoding="utf-8",
-        errors="replace", timeout=timeout, cwd=ROOT, env=env,
+    return subprocess.run(  # noqa: S603  # trusted e2e subprocess
+        CLI + args,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        timeout=timeout,
+        cwd=ROOT,
+        env=env,
     )
 
 
@@ -51,6 +57,7 @@ _ENV_KEYS = {
 def _env() -> dict:
     """复制当前环境，并从 .env 补齐密钥（CLI 默认不读 .env，与 webui 一致）。"""
     import os
+
     env = dict(os.environ)
     for cand in [ROOT / ".env", ROOT.parent / ".env", Path.home() / ".env"]:
         if not cand.exists():
@@ -93,8 +100,19 @@ def scenario_skip_deepen() -> None:
 def scenario_multi_source_warnings() -> None:
     """测试1：多源采集 dry-run，搜索失败以 warning 可见（不静默）。"""
     r = _run(
-        ["collect", "Transformer 架构", "-s", "web", "-s", "wikipedia",
-         "-s", "semantic_scholar", "-s", "github", "--dry-run"],
+        [
+            "collect",
+            "Transformer 架构",
+            "-s",
+            "web",
+            "-s",
+            "wikipedia",
+            "-s",
+            "semantic_scholar",
+            "-s",
+            "github",
+            "--dry-run",
+        ],
         timeout=120,
     )
     out = r.stdout + r.stderr
@@ -102,8 +120,11 @@ def scenario_multi_source_warnings() -> None:
     # 有命中即算通过；若某源失败，应以「警告」呈现而非静默
     check("多源 dry-run 出结果", got_hits, _last_line(out))
     if "警告" in out:
-        check("失败源以 warning 呈现（可观测）", True,
-              [ln for ln in out.splitlines() if "警告" in ln][0][:80])
+        check(
+            "失败源以 warning 呈现（可观测）",
+            True,
+            [ln for ln in out.splitlines() if "警告" in ln][0][:80],
+        )
 
 
 # --------------------------------------------------------------------------- #
@@ -111,37 +132,66 @@ def scenario_multi_source_warnings() -> None:
 # --------------------------------------------------------------------------- #
 def scenario_deepen_resume(work: Path) -> None:
     """测试2：深挖跑通，且二次运行 resume 跳过 deepen。"""
-    args = ["run", "图神经网络", "-s", "web", "-s", "arxiv",
-            "--skip", "clean", "--skip", "extract",
-            "--skip", "organize", "--skip", "report",
-            "-o", str(work)]
+    args = [
+        "run",
+        "图神经网络",
+        "-s",
+        "web",
+        "-s",
+        "arxiv",
+        "--skip",
+        "clean",
+        "--skip",
+        "extract",
+        "--skip",
+        "organize",
+        "--skip",
+        "report",
+        "-o",
+        str(work),
+    ]
     r1 = _run(args, timeout=600)
     out1 = r1.stdout + r1.stderr
-    ran = "deepen" in out1 and "completed" in out1 or "完成" in out1
+    _ran = "deepen" in out1 and "completed" in out1 or "完成" in out1
     marker = next(work.rglob(".deepen_done"), None)
     check("deepen 真实跑通", marker is not None, f"marker={marker}")
 
     r2 = _run(args, timeout=120)
     out2 = r2.stdout + r2.stderr
-    check("二次运行 resume 跳过 deepen", "skipped" in out2 or "跳过" in out2,
-          _last_line(out2))
+    check("二次运行 resume 跳过 deepen", "skipped" in out2 or "跳过" in out2, _last_line(out2))
 
 
 def scenario_kang_bias(work: Path) -> None:
     """测试4：康怡琳偏差复测——深挖后 raw/ 应出现独立于中南民大的教育/学术线索。"""
-    args = ["run", "康怡琳", "-s", "web", "-s", "wikipedia", "-s", "semantic_scholar",
-            "--skip", "clean", "--skip", "extract",
-            "--skip", "organize", "--skip", "report",
-            "-o", str(work)]
-    r = _run(args, timeout=900)
+    args = [
+        "run",
+        "康怡琳",
+        "-s",
+        "web",
+        "-s",
+        "wikipedia",
+        "-s",
+        "semantic_scholar",
+        "--skip",
+        "clean",
+        "--skip",
+        "extract",
+        "--skip",
+        "organize",
+        "--skip",
+        "report",
+        "-o",
+        str(work),
+    ]
+    _r = _run(args, timeout=900)
     raw_files = list(work.rglob("raw/*.md"))
     blob = "\n".join(f.read_text(encoding="utf-8", errors="replace") for f in raw_files)
     # 软判据：是否出现"博士/PhD/英文名/独立院校"等超出单一机构锚点的线索
-    signals = [s for s in ("博士", "PhD", "Ph.D", "Kang", "南洋", "Nanyang", "本科", "硕士")
-               if s in blob]
+    signals = [
+        s for s in ("博士", "PhD", "Ph.D", "Kang", "南洋", "Nanyang", "本科", "硕士") if s in blob
+    ]
     check("康怡琳深挖产出资料", len(raw_files) > 0, f"{len(raw_files)} 个 raw 文件")
-    check("含独立教育/学术线索（消偏差）", len(signals) >= 1,
-          f"命中信号: {signals}")
+    check("含独立教育/学术线索（消偏差）", len(signals) >= 1, f"命中信号: {signals}")
 
 
 def _last_line(text: str) -> str:

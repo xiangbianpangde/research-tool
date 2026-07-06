@@ -152,7 +152,9 @@ class TestKeyframeCapture:
             # 假装按 pattern 写出 3 个文件
             pattern = args[-1]
             for i in range(1, 4):
-                Path(pattern.replace("%03d", f"{i:03d}")).write_bytes(b"\xff\xd8\xff")  # JPEG header
+                Path(pattern.replace("%03d", f"{i:03d}")).write_bytes(
+                    b"\xff\xd8\xff"
+                )  # JPEG header
             return mock_result
 
         inv.run = fake_run

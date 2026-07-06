@@ -37,31 +37,46 @@ class TestPreflightReport:
 
     def test_is_blocking_only_ytdlp_matters(self):
         r = PreflightReport(
-            ytdlp_ok=False, ytdlp_version=None,
-            ffmpeg_ok=True, ffmpeg_version="6.0",
-            whisper_ok=True, whisper_model_size="medium",
-            cache_writable=True, cache_dir="/tmp/c",
-            timestamp="", ttl_seconds=60,
+            ytdlp_ok=False,
+            ytdlp_version=None,
+            ffmpeg_ok=True,
+            ffmpeg_version="6.0",
+            whisper_ok=True,
+            whisper_model_size="medium",
+            cache_writable=True,
+            cache_dir="/tmp/c",
+            timestamp="",
+            ttl_seconds=60,
         )
         assert r.is_blocking() is True
 
         r2 = PreflightReport(
-            ytdlp_ok=True, ytdlp_version="2024",
-            ffmpeg_ok=False, ffmpeg_version=None,
-            whisper_ok=False, whisper_model_size=None,
-            cache_writable=True, cache_dir="/tmp/c",
-            timestamp="", ttl_seconds=60,
+            ytdlp_ok=True,
+            ytdlp_version="2024",
+            ffmpeg_ok=False,
+            ffmpeg_version=None,
+            whisper_ok=False,
+            whisper_model_size=None,
+            cache_writable=True,
+            cache_dir="/tmp/c",
+            timestamp="",
+            ttl_seconds=60,
         )
         # ffmpeg/whisper 缺失不阻塞（FAIL_SOFT）
         assert r2.is_blocking() is False
 
     def test_to_dict_roundtrip(self):
         r = PreflightReport(
-            ytdlp_ok=True, ytdlp_version="2024",
-            ffmpeg_ok=True, ffmpeg_version="6.0",
-            whisper_ok=True, whisper_model_size="medium",
-            cache_writable=True, cache_dir="/tmp/c",
-            timestamp="2026-06-01T12:00:00Z", ttl_seconds=60,
+            ytdlp_ok=True,
+            ytdlp_version="2024",
+            ffmpeg_ok=True,
+            ffmpeg_version="6.0",
+            whisper_ok=True,
+            whisper_model_size="medium",
+            cache_writable=True,
+            cache_dir="/tmp/c",
+            timestamp="2026-06-01T12:00:00Z",
+            ttl_seconds=60,
         )
         d = r.to_dict()
         r2 = PreflightReport.from_dict(d)

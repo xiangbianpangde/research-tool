@@ -49,9 +49,9 @@ class SearchBackend(abc.ABC):
         max_results: int,
         language: str = "both",
         *,
-        from_year: int | None = None,   # 起始年（含），None=不限
-        to_year: int | None = None,     # 截止年（含），None=不限
-        sort: str | None = None,        # 排序键："relevance"|"date"|"citations"，None=后端默认
-        offset: int = 0,                # 分页偏移（deep-search 翻页）
+        from_year: int | None = None,  # 起始年（含），None=不限
+        to_year: int | None = None,  # 截止年（含），None=不限
+        sort: str | None = None,  # 排序键："relevance"|"date"|"citations"，None=后端默认
+        offset: int = 0,  # 分页偏移（deep-search 翻页）
     ) -> list[SearchHit]:
         """返回至多 max_results 条命中。"""

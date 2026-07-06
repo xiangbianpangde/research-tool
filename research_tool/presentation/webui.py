@@ -78,20 +78,25 @@ def _run_threaded_video_notes(
         from ..infrastructure.ingest.pipeline_adapter import trigger_pipeline
 
         q.put(("log", f"▶ 启动视频摄入（共 {len(urls)} 个 URL）"))
-        q.put(("log", f"  风格：{note_style} | 截图：{'开' if include_screenshots else '关'} | "
-                     f"转写语言：{transcribe_lang}"))
+        q.put(
+            (
+                "log",
+                f"  风格：{note_style} | 截图：{'开' if include_screenshots else '关'} | "
+                f"转写语言：{transcribe_lang}",
+            )
+        )
 
         pipe = VideoPipeline(
-            topic=topic, work_dir=work_dir, run_pipeline=False,
+            topic=topic,
+            work_dir=work_dir,
+            run_pipeline=False,
         )
         result = await pipe.process_urls(urls)
         for r in result.results:
             icon = "✓" if r.status == "success" else "✗"
             tail = f" → {r.markdown_path.name}" if r.markdown_path else f"（{r.error}）"
             q.put(("log", f"  {icon} {r.url}{tail}"))
-        q.put(
-            ("log", f"✓ 视频摄入：{result.success_count} 成功 / {result.failed_count} 失败")
-        )
+        q.put(("log", f"✓ 视频摄入：{result.success_count} 成功 / {result.failed_count} 失败"))
 
         # 收集 raw/video_*.md → 拼成单个笔记预览
         topic_dir = Path(work_dir) / slugify(topic)
@@ -99,9 +104,7 @@ def _run_threaded_video_notes(
         notes = sorted(raw_dir.glob("video_*.md")) if raw_dir.exists() else []
         if not notes:
             q.put(("log", "⚠ 没有生成视频笔记文件"))
-        note_md = "\n\n---\n\n".join(
-            p.read_text(encoding="utf-8") for p in notes
-        ) if notes else ""
+        note_md = "\n\n---\n\n".join(p.read_text(encoding="utf-8") for p in notes) if notes else ""
 
         # 可选：跑 4 阶段调研管道
         files: list[str] = [str(p) for p in notes]
@@ -109,7 +112,8 @@ def _run_threaded_video_notes(
             q.put(("log", "▶ 启动 4 阶段调研管道..."))
             try:
                 stages = await trigger_pipeline(
-                    topic, work_dir=work_dir,
+                    topic,
+                    work_dir=work_dir,
                     stages=["clean", "extract", "organize", "report"],
                 )
                 run_list = ", ".join(stages.stages_run) or "（无）"
@@ -174,8 +178,7 @@ def run_video_note(  # noqa: PLR0915 - Gradio 流式生成器，单函数承载�
     log: list[str] = [
         f"主题：{topic}",
         f"模式：视频笔记（共 {len(urls)} 个 URL）",
-        "流程：下载 → 转写 → AI 笔记 → 落盘" +
-        (" → 4 阶段调研报告" if also_make_report else ""),
+        "流程：下载 → 转写 → AI 笔记 → 落盘" + (" → 4 阶段调研报告" if also_make_report else ""),
         "—" * 20,
     ]
     yield "\n".join(log), "", None, out_dir
@@ -184,8 +187,14 @@ def run_video_note(  # noqa: PLR0915 - Gradio 流式生成器，单函数承载�
     threading.Thread(
         target=_run_threaded_video_notes,
         args=(
-            topic, urls, work_dir, note_style,
-            include_screenshots, transcribe_lang, also_make_report, q,
+            topic,
+            urls,
+            work_dir,
+            note_style,
+            include_screenshots,
+            transcribe_lang,
+            also_make_report,
+            q,
         ),
         daemon=True,
     ).start()
@@ -209,12 +218,20 @@ def run_video_note(  # noqa: PLR0915 - Gradio 流式生成器，单函数承载�
 
 
 _STAGE_CN = {
-    "collect": "采集", "deepen": "反偏差深挖", "clean": "清洗", "extract": "抽取",
-    "organize": "构建知识树", "report": "生成报告",
-    "backward": "反向传播",   # P2-6：评估知识树质量 → 修正查询 → 回到 collect
+    "collect": "采集",
+    "deepen": "反偏差深挖",
+    "clean": "清洗",
+    "extract": "抽取",
+    "organize": "构建知识树",
+    "report": "生成报告",
+    "backward": "反向传播",  # P2-6：评估知识树质量 → 修正查询 → 回到 collect
 }
 _STATUS_ICON = {
-    "started": "▶", "completed": "✓", "skipped": "⏭", "failed": "✗", "progress": "…",
+    "started": "▶",
+    "completed": "✓",
+    "skipped": "⏭",
+    "failed": "✗",
+    "progress": "…",
 }
 
 
@@ -223,13 +240,32 @@ def _csv(s: str | None) -> list[str]:
 
 
 def run_web(  # noqa: PLR0915 - Gradio 事件处理，单函数承载多模式分支
-    mode, topic, engines, rounds, style, max_nodes, min_nodes, do_extract,
-    pdf_path, mineru_cmd, translate, provider, model, base_url, api_key, work_dir,
+    mode,
+    topic,
+    engines,
+    rounds,
+    style,
+    max_nodes,
+    min_nodes,
+    do_extract,
+    pdf_path,
+    mineru_cmd,
+    translate,
+    provider,
+    model,
+    base_url,
+    api_key,
+    work_dir,
     do_deepen=True,
     # P1/P2 新增
-    core_kw="", facets_csv="", from_year=None, to_year=None,
-    deep_search=False, profile_iterations=1,
-    relevance_filter=False, backward_rounds=0,
+    core_kw="",
+    facets_csv="",
+    from_year=None,
+    to_year=None,
+    deep_search=False,
+    profile_iterations=1,
+    relevance_filter=False,
+    backward_rounds=0,
 ):
     """Gradio 事件处理：流式产出 (日志, 报告markdown, 文件列表, 输出目录)。"""
     topic = (topic or "").strip()
@@ -384,12 +420,26 @@ def build_ui():  # noqa: PLR0915 - Gradio 布局 + 事件绑定，单函数承�
 
                         with gr.Group(visible=True) as web_group:
                             engines = gr.CheckboxGroup(
-                                ["web", "arxiv", "openalex", "crossref", "tavily",
-                                 "semantic_scholar", "wikipedia", "github",
-                                 "pubmed", "google_news", "bilibili", "x"],
-                                value=["web", "openalex"], label="搜索来源（可多选）",
+                                [
+                                    "web",
+                                    "arxiv",
+                                    "openalex",
+                                    "crossref",
+                                    "tavily",
+                                    "semantic_scholar",
+                                    "wikipedia",
+                                    "github",
+                                    "pubmed",
+                                    "google_news",
+                                    "bilibili",
+                                    "x",
+                                ],
+                                value=["web", "openalex"],
+                                label="搜索来源（可多选）",
                             )
-                            rounds = gr.Slider(1, 3, value=2, step=1, label="搜索轮次（多轮关键词）")  # noqa: E501
+                            rounds = gr.Slider(
+                                1, 3, value=2, step=1, label="搜索轮次（多轮关键词）"
+                            )  # noqa: E501
                             do_deepen = gr.Checkbox(
                                 label="反偏差深挖（实体拆分 + 缺口补搜，更慢更全）", value=True
                             )
@@ -403,13 +453,18 @@ def build_ui():  # noqa: PLR0915 - Gradio 布局 + 事件绑定，单函数承�
                             )
                             with gr.Row():
                                 from_year = gr.Number(
-                                    label="发表年≥", value=None, precision=0,
+                                    label="发表年≥",
+                                    value=None,
+                                    precision=0,
                                 )
                                 to_year = gr.Number(
-                                    label="发表年≤", value=None, precision=0,
+                                    label="发表年≤",
+                                    value=None,
+                                    precision=0,
                                 )
                             deep_search = gr.Checkbox(
-                                label="深搜（多排序 × 多页翻页，更全但更慢）", value=False,
+                                label="深搜（多排序 × 多页翻页，更全但更慢）",
+                                value=False,
                             )
 
                         with gr.Group(visible=False) as pdf_group:
@@ -426,7 +481,8 @@ def build_ui():  # noqa: PLR0915 - Gradio 布局 + 事件绑定，单函数承�
                         gr.Markdown("### 2) 输出设置")
                         style = gr.Dropdown(
                             ["report", "feasibility", "review", "article"],
-                            value="report", label="报告风格",
+                            value="report",
+                            label="报告风格",
                         )
                         with gr.Row():
                             min_nodes = gr.Slider(2, 7, value=4, step=1, label="最少节点")
@@ -437,7 +493,10 @@ def build_ui():  # noqa: PLR0915 - Gradio 布局 + 事件绑定，单函数承�
 
                         with gr.Accordion("反偏差与质量（高级）", open=False):
                             profile_iterations = gr.Slider(
-                                1, 4, value=1, step=1,
+                                1,
+                                4,
+                                value=1,
+                                step=1,
                                 label="画像迭代轮数（≥2 启用同名消歧 + 时间线回溯）",
                             )
                             relevance_filter = gr.Checkbox(
@@ -445,23 +504,25 @@ def build_ui():  # noqa: PLR0915 - Gradio 布局 + 事件绑定，单函数承�
                                 value=False,
                             )
                             backward_rounds = gr.Slider(
-                                0, 3, value=0, step=1,
+                                0,
+                                3,
+                                value=0,
+                                step=1,
                                 label="反向传播轮数（>0 启用知识树质量评估循环，每轮重跑后续阶段）",
                             )
 
                         with gr.Accordion("LLM 设置（默认读环境变量）", open=False):
                             provider = gr.Dropdown(
                                 ["deepseek", "openai", "ollama", "anthropic"],
-                                value="deepseek", label="provider",
+                                value="deepseek",
+                                label="provider",
                             )
                             model = gr.Textbox(value="deepseek-chat", label="模型")
                             base_url = gr.Textbox(
                                 label="base_url（留空用默认）",
                                 placeholder="https://api.deepseek.com/v1",
                             )
-                            api_key = gr.Textbox(
-                                label="API Key（留空读环境变量）", type="password"
-                            )
+                            api_key = gr.Textbox(label="API Key（留空读环境变量）", type="password")
                         work_dir_tab1 = gr.Textbox(value="./research-output", label="输出目录")
 
                         run_btn = gr.Button("▶ 开始调研", variant="primary", size="lg")
@@ -488,12 +549,31 @@ def build_ui():  # noqa: PLR0915 - Gradio 布局 + 事件绑定，单函数承�
                 run_btn.click(
                     run_web,
                     inputs=[
-                        mode, topic, engines, rounds, style, max_nodes, min_nodes, do_extract,
-                        pdf_path, mineru_cmd, translate, provider, model, base_url, api_key,
-                        work_dir_tab1, do_deepen,
-                        core_kw, facets_csv, from_year, to_year,
-                        deep_search, profile_iterations,
-                        relevance_filter, backward_rounds,
+                        mode,
+                        topic,
+                        engines,
+                        rounds,
+                        style,
+                        max_nodes,
+                        min_nodes,
+                        do_extract,
+                        pdf_path,
+                        mineru_cmd,
+                        translate,
+                        provider,
+                        model,
+                        base_url,
+                        api_key,
+                        work_dir_tab1,
+                        do_deepen,
+                        core_kw,
+                        facets_csv,
+                        from_year,
+                        to_year,
+                        deep_search,
+                        profile_iterations,
+                        relevance_filter,
+                        backward_rounds,
                     ],
                     outputs=[log_box, report_md, files, out_dir_box],
                     api_name="run",
@@ -520,7 +600,8 @@ def build_ui():  # noqa: PLR0915 - Gradio 布局 + 事件绑定，单函数承�
                             placeholder="如：扩散模型 / 离散数学典型代数系统",
                         )
                         v_work_dir = gr.Textbox(
-                            value="./research-output", label="输出根目录",
+                            value="./research-output",
+                            label="输出根目录",
                         )
 
                         with gr.Accordion("📝 笔记配置", open=True):
@@ -548,7 +629,9 @@ def build_ui():  # noqa: PLR0915 - Gradio 布局 + 事件绑定，单函数承�
                             )
 
                         v_run_btn = gr.Button(
-                            "🎬 生成视频笔记", variant="primary", size="lg",
+                            "🎬 生成视频笔记",
+                            variant="primary",
+                            size="lg",
                         )
 
                         gr.Markdown("### 📚 历史视频笔记")
@@ -562,21 +645,29 @@ def build_ui():  # noqa: PLR0915 - Gradio 布局 + 事件绑定，单函数承�
                     with gr.Column(scale=2, min_width=520):
                         gr.Markdown("### ⏱ 进度")
                         v_log = gr.Textbox(
-                            label="运行日志", lines=14, max_lines=24, interactive=False,
+                            label="运行日志",
+                            lines=14,
+                            max_lines=24,
+                            interactive=False,
                         )
                         v_out_dir = gr.Textbox(label="输出目录", interactive=False)
                         gr.Markdown("### 📄 笔记预览")
                         v_note_md = gr.Markdown(label="视频笔记 (Markdown)")
                         v_files = gr.File(
-                            label="下载（视频笔记 + 可选报告）", file_count="multiple",
+                            label="下载（视频笔记 + 可选报告）",
+                            file_count="multiple",
                         )
 
                 v_run_btn.click(
                     run_video_note,
                     inputs=[
-                        v_urls, v_topic, v_work_dir,
-                        v_note_style, v_include_screenshots,
-                        v_transcribe_lang, v_also_report,
+                        v_urls,
+                        v_topic,
+                        v_work_dir,
+                        v_note_style,
+                        v_include_screenshots,
+                        v_transcribe_lang,
+                        v_also_report,
                     ],
                     outputs=[v_log, v_note_md, v_files, v_out_dir],
                 )

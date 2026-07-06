@@ -249,7 +249,10 @@ class PreflightFacade:
         cache_task = asyncio.to_thread(_check_cache_writable_sync, self.cache_dir)
 
         results = await asyncio.gather(
-            ytdlp_task, ffmpeg_task, whisper_task, cache_task,
+            ytdlp_task,
+            ffmpeg_task,
+            whisper_task,
+            cache_task,
             return_exceptions=True,
         )
 
@@ -346,6 +349,7 @@ def _safe_unpack(
 def _now_iso() -> str:
     """UTC ISO8601 时间戳。"""
     from datetime import datetime, timezone
+
     return datetime.now(tz=timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 

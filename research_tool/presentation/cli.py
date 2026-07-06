@@ -128,9 +128,7 @@ def collect(
     from_year: Optional[int] = typer.Option(
         None, "--from-year", help="发表年份下限（含），openalex/s2/crossref/pubmed 原生过滤"
     ),
-    to_year: Optional[int] = typer.Option(
-        None, "--to-year", help="发表年份上限（含）"
-    ),
+    to_year: Optional[int] = typer.Option(None, "--to-year", help="发表年份上限（含）"),
     deep_search: bool = typer.Option(
         False, "--deep-search", help="深搜模式：多排序×多页翻页，突破单次第1页覆盖不足"
     ),
@@ -138,19 +136,23 @@ def collect(
         3, "--deep-pages", help="深搜翻页页数 1-10（仅 --deep-search 生效）"
     ),
     deep_sorts: str = typer.Option(
-        "relevance,date,citations", "--deep-sorts",
+        "relevance,date,citations",
+        "--deep-sorts",
         help="深搜排序策略，逗号分隔：relevance/date/citations",
     ),
     search_relevance_min_overlap: float = typer.Option(
-        0.12, "--search-relevance-min-overlap",
+        0.12,
+        "--search-relevance-min-overlap",
         help="抓取前轻量相关性阈值，0=关闭",
     ),
     x_backend: str = typer.Option(
-        "opencli", "--x-backend",
+        "opencli",
+        "--x-backend",
         help="X/Twitter 后端：opencli 或 twitter-cli",
     ),
     x_cmd: str = typer.Option(
-        "twitter", "--x-cmd",
+        "twitter",
+        "--x-cmd",
         help="twitter-cli 命令名或路径（仅 --x-backend twitter-cli 时使用）",
     ),
     output: Path = typer.Option(Path("./research-output"), "-o", "--output"),
@@ -206,7 +208,8 @@ def ingest_pdf(
     output: Path = typer.Option(Path("./research-output"), "-o", "--output"),
     backend: str = typer.Option("pipeline", "-b", "--backend", help="MinerU 后端"),
     ocr_engine: str = typer.Option(
-        "mineru", "--ocr-engine",
+        "mineru",
+        "--ocr-engine",
         help="OCR 引擎：auto/mineru/custom/paddleocr-vl/unlimited-ocr/vision-llm",
     ),
     lang: str = typer.Option("en", "-l", "--lang", help="OCR 语言提示"),
@@ -215,7 +218,9 @@ def ingest_pdf(
     ocr_cmd: Optional[str] = typer.Option(
         None, "--ocr-cmd", help="自定义 OCR 命令，可用 {pdf}/{out}/{lang}/{model} 占位"
     ),
-    ocr_model_path: Optional[str] = typer.Option(None, "--ocr-model-path", help="本地 OCR 模型目录"),
+    ocr_model_path: Optional[str] = typer.Option(
+        None, "--ocr-model-path", help="本地 OCR 模型目录"
+    ),
     model: Optional[str] = typer.Option(None, "--model", help="翻译用 LLM 模型"),
 ) -> None:
     """用 MinerU 把本地 PDF 转为 raw/ Markdown（可选翻译），供后续阶段接力。"""
@@ -244,8 +249,12 @@ def ingest_pdf(
 
 @app.command(name="ocr-engines")
 def ocr_engines(
-    ocr_cmd: Optional[str] = typer.Option(None, "--ocr-cmd", help="用于扫描 custom/model OCR 的命令"),
-    ocr_model_path: Optional[str] = typer.Option(None, "--ocr-model-path", help="本地 OCR 模型目录"),
+    ocr_cmd: Optional[str] = typer.Option(
+        None, "--ocr-cmd", help="用于扫描 custom/model OCR 的命令"
+    ),
+    ocr_model_path: Optional[str] = typer.Option(
+        None, "--ocr-model-path", help="本地 OCR 模型目录"
+    ),
 ) -> None:
     """扫描当前可用 OCR 引擎。"""
     from ..infrastructure.ingest.ocr import scan_ocr_engines
@@ -312,7 +321,10 @@ def extract(
         res = await Extractor(cfg).run(input_dir, _make_llm(model), work_dir)
         logger.info(
             "抽取完成：%d 实体 / %d 关系 / %d 三元组 → %s",
-            len(res.entities), len(res.relations), len(res.triples), res.output_dir,
+            len(res.entities),
+            len(res.relations),
+            len(res.triples),
+            res.output_dir,
         )
 
     _run(_go())
@@ -336,9 +348,7 @@ def organize(
     topic_hint = topic or input_topic_from_dir(extracted_dir)
 
     async def _go():
-        res = await Organizer(cfg).run(
-            extracted_dir, _make_llm(model), work_dir, topic=topic_hint
-        )
+        res = await Organizer(cfg).run(extracted_dir, _make_llm(model), work_dir, topic=topic_hint)
         logger.info("组织完成：%d 个节点 → %s", len(res.nodes), res.tree_dir)
 
     _run(_go())
@@ -391,20 +401,14 @@ def _validate_video_urls(urls: list[str]) -> list[str]:
         try:
             vu = validate_video_url(u)
             if vu is None:
-                raise typer.BadParameter(
-                    f"不支持的 URL（仅 bilibili / youtube 一期 P0）: {u[:60]}"
-                )
+                raise typer.BadParameter(f"不支持的 URL（仅 bilibili / youtube 一期 P0）: {u[:60]}")
             cleaned.append(u)
         except VideoIngestError as e:
-            raise typer.BadParameter(
-                f"URL 校验失败: {u[:60]}\n  {e}"
-            ) from e
+            raise typer.BadParameter(f"URL 校验失败: {u[:60]}\n  {e}") from e
     if not cleaned:
         raise typer.BadParameter("至少需要 1 个有效 --video-url")
     if len(cleaned) > 10:
-        raise typer.BadParameter(
-            f"--video-url 数量 {len(cleaned)} 超过上限 10"
-        )
+        raise typer.BadParameter(f"--video-url 数量 {len(cleaned)} 超过上限 10")
     return cleaned
 
 
@@ -426,7 +430,10 @@ def _run_video_ingest(
     topic_dir = work_dir / slugify(topic)
     logger.info(
         "VideoIngest 启动: topic=%r, urls=%d, work_dir=%s, no_cache=%s",
-        topic, len(valid_urls), topic_dir, no_cache,
+        topic,
+        len(valid_urls),
+        topic_dir,
+        no_cache,
     )
 
     async def _go():
@@ -440,7 +447,9 @@ def _run_video_ingest(
         # 报告汇总
         logger.info(
             "VideoIngest 完成: 成功 %d / 失败 %d（总耗时 %.1fs）",
-            report.success_count, report.failed_count, report.total_duration_ms / 1000,
+            report.success_count,
+            report.failed_count,
+            report.total_duration_ms / 1000,
         )
         for r in report.results:
             if r.status == "success":
@@ -452,20 +461,20 @@ def _run_video_ingest(
             if sr.success:
                 logger.info(
                     "✓ 5 阶段管道完成: %s (%.1fs)",
-                    ",".join(sr.stages_run), sr.duration_ms / 1000,
+                    ",".join(sr.stages_run),
+                    sr.duration_ms / 1000,
                 )
             else:
                 logger.warning(
                     "5 阶段管道部分失败: stages=%s err=%s",
-                    sr.stages_run, sr.error,
+                    sr.stages_run,
+                    sr.error,
                 )
         # 全部失败 → 退出码非 0
         if report.success_count == 0 and report.failed_count > 0:
             raise VideoIngestError("E_VID_PIPELINE_FAIL", "所有视频 URL 处理失败")
 
     _run(_go())
-
-
 
 
 def _build_run_overrides(
@@ -561,7 +570,9 @@ def run(
     # --- 常用 5 项（问题 5：run 主面板只留最常用，调优归 config.yaml）--- #
     source: list[str] = typer.Option(["web"], "-s", "--source", help="搜索来源（可多次）"),
     output: Optional[Path] = typer.Option(
-        None, "-o", "--output",
+        None,
+        "-o",
+        "--output",
         help="输出目录（不传则取 config.yaml 的 pipeline.work_dir，默认 ./research-output）",
     ),
     skip: list[str] = typer.Option([], "--skip", help="跳过阶段，如 --skip deepen"),
@@ -569,13 +580,24 @@ def run(
     dry_run: bool = typer.Option(False, "--dry-run", help="仅打印将执行的步骤"),
     # --- 高级项：低频，等价配置项见 config.yaml ---------------------- #
     max_results: int = typer.Option(
-        8, "-n", "--max-results", rich_help_panel=_ADVANCED, help="每源最多结果（=collector.max_results_per_engine）"
+        8,
+        "-n",
+        "--max-results",
+        rich_help_panel=_ADVANCED,
+        help="每源最多结果（=collector.max_results_per_engine）",
     ),
     rounds: int = typer.Option(
-        1, "-r", "--rounds", rich_help_panel=_ADVANCED, help="搜索轮次 1-3（=collector.search_rounds）"
+        1,
+        "-r",
+        "--rounds",
+        rich_help_panel=_ADVANCED,
+        help="搜索轮次 1-3（=collector.search_rounds）",
     ),
     llm_expand: bool = typer.Option(
-        False, "--llm-expand", rich_help_panel=_ADVANCED, help="用 LLM 生成多轮查询（=collector.llm_query_expansion）"
+        False,
+        "--llm-expand",
+        rich_help_panel=_ADVANCED,
+        help="用 LLM 生成多轮查询（=collector.llm_query_expansion）",
     ),
     query: list[str] = typer.Option(
         [], "-q", "--query", rich_help_panel=_ADVANCED, help="额外查询（点名要找的论文/方法）"
@@ -593,53 +615,78 @@ def run(
         None, "--to-year", rich_help_panel=_ADVANCED, help="发表年份上限（=collector.to_year）"
     ),
     deep_search: bool = typer.Option(
-        False, "--deep-search", rich_help_panel=_ADVANCED,
+        False,
+        "--deep-search",
+        rich_help_panel=_ADVANCED,
         help="深搜：多排序×多页翻页（=collector.deep_search）",
     ),
     deep_pages: Optional[int] = typer.Option(
-        None, "--deep-pages", rich_help_panel=_ADVANCED,
+        None,
+        "--deep-pages",
+        rich_help_panel=_ADVANCED,
         help="深搜页数（=collector.deep_pages，默认 3）",
     ),
     deep_sorts: Optional[str] = typer.Option(
-        None, "--deep-sorts", rich_help_panel=_ADVANCED,
+        None,
+        "--deep-sorts",
+        rich_help_panel=_ADVANCED,
         help="深搜排序逗号分隔（=collector.deep_sorts，默认 relevance,date,citations）",
     ),
     search_relevance_min_overlap: Optional[float] = typer.Option(
-        None, "--search-relevance-min-overlap", rich_help_panel=_ADVANCED,
+        None,
+        "--search-relevance-min-overlap",
+        rich_help_panel=_ADVANCED,
         help="抓取前轻量相关性阈值，0=关闭（=collector.search_relevance_min_overlap）",
     ),
     x_backend: Optional[str] = typer.Option(
-        None, "--x-backend", rich_help_panel=_ADVANCED,
+        None,
+        "--x-backend",
+        rich_help_panel=_ADVANCED,
         help="X/Twitter 后端：opencli 或 twitter-cli（=collector.x_backend）",
     ),
     x_cmd: Optional[str] = typer.Option(
-        None, "--x-cmd", rich_help_panel=_ADVANCED,
+        None,
+        "--x-cmd",
+        rich_help_panel=_ADVANCED,
         help="twitter-cli 命令名或路径（=collector.x_cmd）",
     ),
     relevance_filter: bool = typer.Option(
-        False, "--relevance-filter", rich_help_panel=_ADVANCED,
+        False,
+        "--relevance-filter",
+        rich_help_panel=_ADVANCED,
         help="LLM 按主题给清洗后文档评 0-1 分，剔低分（=cleaner.relevance_filter）",
     ),
     profile_iterations: Optional[int] = typer.Option(
-        None, "--profile-iterations", rich_help_panel=_ADVANCED,
+        None,
+        "--profile-iterations",
+        rich_help_panel=_ADVANCED,
         help="画像迭代轮数 1-5，≥2 启用时间线回溯+同名消歧（=deepen.profile_iterations）",
     ),
     max_backward_rounds: Optional[int] = typer.Option(
-        None, "--max-backward-rounds", rich_help_panel=_ADVANCED,
+        None,
+        "--max-backward-rounds",
+        rich_help_panel=_ADVANCED,
         help="反向传播轮数 0-3，>0 启用知识树质量评估循环（=pipeline.max_backward_rounds）",
     ),
     pdf_dir: Optional[Path] = typer.Option(
         None, "--pdf-dir", rich_help_panel=_ADVANCED, help="改用本地 PDF 文件夹作为数据源"
     ),
     mineru_cmd: Optional[str] = typer.Option(
-        None, "--mineru-cmd", rich_help_panel=_ADVANCED, help="mineru 路径（Web 抓到的 PDF 也用它解析）"
+        None,
+        "--mineru-cmd",
+        rich_help_panel=_ADVANCED,
+        help="mineru 路径（Web 抓到的 PDF 也用它解析）",
     ),
     ocr_engine: Optional[str] = typer.Option(
-        None, "--ocr-engine", rich_help_panel=_ADVANCED,
+        None,
+        "--ocr-engine",
+        rich_help_panel=_ADVANCED,
         help="PDF OCR 引擎：auto/mineru/custom/paddleocr-vl/unlimited-ocr/vision-llm",
     ),
     ocr_cmd: Optional[str] = typer.Option(
-        None, "--ocr-cmd", rich_help_panel=_ADVANCED,
+        None,
+        "--ocr-cmd",
+        rich_help_panel=_ADVANCED,
         help="PDF OCR 命令，可用 {pdf}/{out}/{lang}/{model} 占位",
     ),
     ocr_model_path: Optional[str] = typer.Option(
@@ -652,14 +699,18 @@ def run(
         None, "--model", rich_help_panel=_ADVANCED, help="覆盖 LLM 模型（=llm.model）"
     ),
     video_url: list[str] = typer.Option(
-        [], "--video-url", rich_help_panel=_ADVANCED,
+        [],
+        "--video-url",
+        rich_help_panel=_ADVANCED,
         help=(
             "V1.1 VideoIngest：视频 URL（可多次）。一期 P0 仅支持 bilibili.com / b23.tv / "
             "youtube.com / youtu.be。多个 URL 默认 3 并发。"
         ),
     ),
     no_cache: bool = typer.Option(
-        False, "--no-cache", rich_help_panel=_ADVANCED,
+        False,
+        "--no-cache",
+        rich_help_panel=_ADVANCED,
         help="V1.1 VideoIngest：跳过 M-004 转写缓存（强制重转）。",
     ),
 ) -> None:
@@ -686,19 +737,35 @@ def run(
         raise typer.Exit()
 
     overrides = _build_run_overrides(
-        topic=topic, output=output, stages=stages, resume=resume,
-        source=source, max_results=max_results, rounds=rounds,
-        llm_expand=llm_expand, query=query, core=core, facets=facets,
-        from_year=from_year, to_year=to_year, deep_search=deep_search,
-        deep_pages=deep_pages, deep_sorts=deep_sorts,
+        topic=topic,
+        output=output,
+        stages=stages,
+        resume=resume,
+        source=source,
+        max_results=max_results,
+        rounds=rounds,
+        llm_expand=llm_expand,
+        query=query,
+        core=core,
+        facets=facets,
+        from_year=from_year,
+        to_year=to_year,
+        deep_search=deep_search,
+        deep_pages=deep_pages,
+        deep_sorts=deep_sorts,
         search_relevance_min_overlap=search_relevance_min_overlap,
-        x_backend=x_backend, x_cmd=x_cmd,
+        x_backend=x_backend,
+        x_cmd=x_cmd,
         relevance_filter=relevance_filter,
         profile_iterations=profile_iterations,
         max_backward_rounds=max_backward_rounds,
-        pdf_dir=pdf_dir, mineru_cmd=mineru_cmd,
-        ocr_engine=ocr_engine, ocr_cmd=ocr_cmd, ocr_model_path=ocr_model_path,
-        translate=translate, model=model,
+        pdf_dir=pdf_dir,
+        mineru_cmd=mineru_cmd,
+        ocr_engine=ocr_engine,
+        ocr_cmd=ocr_cmd,
+        ocr_model_path=ocr_model_path,
+        translate=translate,
+        model=model,
     )
 
     async def _go():
@@ -764,7 +831,7 @@ def ui(
     try:
         from ..presentation.webui import main as ui_main
     except ImportError:
-        _fail("未安装 Web 界面依赖，请先：pip install \"research-tool[ui]\"（或 pip install gradio）")
+        _fail('未安装 Web 界面依赖，请先：pip install "research-tool[ui]"（或 pip install gradio）')
         return
     ui_main(server_port=port, inbrowser=not no_browser)
 

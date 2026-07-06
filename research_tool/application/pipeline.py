@@ -82,42 +82,52 @@ class ResearchPipeline:
             if result.organize_result is None:
                 break
             yield StageEvent(
-                stage="backward", status="started",
+                stage="backward",
+                status="started",
                 message=f"第 {round_n + 1} 轮反向：评估知识树质量",
             )
             try:
                 fb = await Organizer(self.config.organizer).assess_and_feedback(
-                    result.organize_result, self._get_llm(), topic,
+                    result.organize_result,
+                    self._get_llm(),
+                    topic,
                 )
             except Exception as e:  # noqa: BLE001
                 yield StageEvent(
-                    stage="backward", status="failed",
+                    stage="backward",
+                    status="failed",
                     message=f"反向评估失败: {e}",
                 )
                 break
             if not fb.queries:
                 yield StageEvent(
-                    stage="backward", status="completed",
+                    stage="backward",
+                    status="completed",
                     message="无修正查询，反向终止",
                     data={"sparse_nodes": fb.sparse_nodes},
                 )
                 break
             yield StageEvent(
-                stage="backward", status="progress",
+                stage="backward",
+                status="progress",
                 message=f"{len(fb.queries)} 条修正查询，开始重采",
                 data={"queries": fb.queries, "sparse_nodes": fb.sparse_nodes},
             )
             await self._recollect(topic, topic_dir, fb.queries)
             self._invalidate_after_collect(topic_dir)
             yield StageEvent(
-                stage="backward", status="completed",
+                stage="backward",
+                status="completed",
                 message=f"第 {round_n + 1} 轮反向完成，进入下一轮正向",
             )
 
         result.elapsed_sec = time.monotonic() - start
 
     async def _stream_forward(
-        self, topic: str, topic_dir: Path, result: PipelineResult,
+        self,
+        topic: str,
+        topic_dir: Path,
+        result: PipelineResult,
     ) -> AsyncIterator[StageEvent]:
         """一次完整正向：按 self.config.stages 顺序跑 collect→…→report。"""
         for stage in self.config.stages:
@@ -125,7 +135,9 @@ class ResearchPipeline:
             if stage == "extract" and not self.config.extractor.enabled:
                 result.stages_skipped.append(stage)
                 yield StageEvent(
-                    stage=stage, status="skipped", progress=1.0,
+                    stage=stage,
+                    status="skipped",
+                    progress=1.0,
                     message="extractor.enabled=false，跳过",
                 )
                 continue
@@ -133,7 +145,9 @@ class ResearchPipeline:
             if stage == "deepen" and not self.config.deepen.enabled:
                 result.stages_skipped.append(stage)
                 yield StageEvent(
-                    stage=stage, status="skipped", progress=1.0,
+                    stage=stage,
+                    status="skipped",
+                    progress=1.0,
                     message="deepen.enabled=false，跳过",
                 )
                 continue
@@ -141,7 +155,9 @@ class ResearchPipeline:
             if stage == "deepen" and self.config.pdf_dir:
                 result.stages_skipped.append(stage)
                 yield StageEvent(
-                    stage=stage, status="skipped", progress=1.0,
+                    stage=stage,
+                    status="skipped",
+                    progress=1.0,
                     message="PDF 数据源，跳过深挖",
                 )
                 continue
@@ -150,7 +166,9 @@ class ResearchPipeline:
             if self.config.resume and has_output(out_dir, patterns):
                 result.stages_skipped.append(stage)
                 yield StageEvent(
-                    stage=stage, status="skipped", progress=1.0,
+                    stage=stage,
+                    status="skipped",
+                    progress=1.0,
                     message="已有输出，跳过",
                 )
                 continue
@@ -160,23 +178,20 @@ class ResearchPipeline:
                 await self._exec(stage, topic, topic_dir, result)
             except Exception as e:  # noqa: BLE001 - 记录失败并中断，保留已有输出
                 result.failed_stage = stage
-                yield StageEvent(
-                    stage=stage, status="failed", message=f"{stage} 失败: {e}"
-                )
+                yield StageEvent(stage=stage, status="failed", message=f"{stage} 失败: {e}")
                 return  # 外层 stream 见 failed_stage 后会停止反向循环
 
             result.stages_completed.append(stage)
-            yield StageEvent(
-                stage=stage, status="completed", progress=1.0, message=f"{stage} 完成"
-            )
+            yield StageEvent(stage=stage, status="completed", progress=1.0, message=f"{stage} 完成")
 
     async def _recollect(
-        self, topic: str, topic_dir: Path, queries: list[str],
+        self,
+        topic: str,
+        topic_dir: Path,
+        queries: list[str],
     ) -> None:
         """P2-6 反向：用修正查询追加资料到 raw/。复用 collector 现有去重逻辑。"""
-        llm = (
-            self._get_llm() if self.config.collector.llm_query_expansion else None
-        )
+        llm = self._get_llm() if self.config.collector.llm_query_expansion else None
         collector = Collector(self.config.collector, llm)
         sr = await collector.search_queries(queries)
         await collector.fetch_and_store(topic, sr.hits, topic_dir / "raw")
@@ -197,9 +212,7 @@ class ResearchPipeline:
             if f.exists():
                 f.unlink()
 
-    async def _exec(
-        self, stage: str, topic: str, topic_dir: Path, result: PipelineResult
-    ) -> None:
+    async def _exec(self, stage: str, topic: str, topic_dir: Path, result: PipelineResult) -> None:
         if stage == "collect":
             if self.config.pdf_dir:
                 # PDF 数据源：摄取本地 PDF 文件夹替代 Web 采集
@@ -211,11 +224,7 @@ class ResearchPipeline:
                     self.config.pdf_dir, topic_dir
                 )
             else:
-                llm = (
-                    self._get_llm()
-                    if self.config.collector.llm_query_expansion
-                    else None
-                )
+                llm = self._get_llm() if self.config.collector.llm_query_expansion else None
                 result.collect_result = await Collector(self.config.collector, llm).run(
                     topic, topic_dir
                 )
@@ -224,7 +233,8 @@ class ResearchPipeline:
             result.deepen_result = await DeepenStage(
                 self.config.deepen, collector, self._get_llm()
             ).run(
-                topic, topic_dir / "raw",
+                topic,
+                topic_dir / "raw",
                 core_keyword=self.config.collector.core_keyword,
             )
         elif stage == "clean":
@@ -239,10 +249,7 @@ class ResearchPipeline:
             )
         elif stage == "organize":
             extracted = topic_dir / "extracted"
-            org_input = (
-                extracted if (extracted / "entities.json").exists()
-                else topic_dir / "clean"
-            )
+            org_input = extracted if (extracted / "entities.json").exists() else topic_dir / "clean"
             result.organize_result = await Organizer(self.config.organizer).run(
                 org_input, self._get_llm(), topic_dir, topic=topic
             )
