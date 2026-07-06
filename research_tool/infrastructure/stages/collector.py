@@ -28,6 +28,11 @@ from .base import (
     write_text,
 )
 from .fetcher import FetchResult, Fetcher
+from ...common.logging_config import get_logger, hash_url
+from ...common.url_guard import assert_safe_url
+from ...domain.errors import UrlBlockedError
+
+logger = get_logger(__name__)
 
 
 # 多轮搜索关键词扩展模板（方法论 1.1：由宽泛到精确、中英文并行、学术+通俗）
@@ -401,6 +406,12 @@ class Collector:
                     targets.append(link)
 
         async def _f(url: str):
+            # SSRF: skip private hrefs before fetch (never call fetcher.fetch on them)
+            try:
+                assert_safe_url(url)
+            except UrlBlockedError:
+                logger.warning("SSRF guard skipped secondary link: %s", hash_url(url))
+                return None
             async with sem:
                 fr = await fetcher.fetch(url)
                 hit = SearchHit(url=url, title="", source_engine="secondary")
@@ -408,7 +419,8 @@ class Collector:
 
         if not targets:
             return []
-        return list(await asyncio.gather(*[_f(u) for u in targets]))
+        results = await asyncio.gather(*[_f(u) for u in targets])
+        return [r for r in results if r is not None]
 
 
 async def collect(topic: str, config: CollectorConfig, work_dir: Path) -> CollectResult:

@@ -53,3 +53,6 @@ _xtasks/
 /*.stdout
 # root-level .bat runners (personal scratch)
 /*.bat
+# root-level .py runner scripts (personal scratch)
+/run_*.py
+*.flag

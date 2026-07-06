@@ -54,6 +54,10 @@ class CollectError(StageError):
         super().__init__("collect", message)
 
 
+class UrlBlockedError(ResearchToolError):
+    """URL rejected by SSRF guard (internal/private/link-local/cloud-metadata)。"""
+
+
 # --------------------------------------------------------------------------- #
 # V1.1 新增：异常子类（按 12 个错误码家族）
 # --------------------------------------------------------------------------- #
@@ -438,6 +442,7 @@ __all__ = [
     "LLMError",
     "SearchError",
     "CollectError",
+    "UrlBlockedError",
     # V1.1 新增
     "VideoIngestError",
     "DownloadError",

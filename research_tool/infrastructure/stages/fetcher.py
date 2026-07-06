@@ -14,6 +14,17 @@ from pathlib import Path
 
 import httpx
 
+from ...common.logging_config import get_logger, hash_url
+from ...common.url_guard import assert_safe_url
+from ...domain.errors import UrlBlockedError
+
+logger = get_logger(__name__)
+
+
+async def _guard_request(request: httpx.Request) -> None:
+    """httpx event hook: re-validate every request URL (covers redirect targets)."""
+    assert_safe_url(str(request.url))
+
 
 @dataclass
 class FetchResult:
@@ -59,14 +70,22 @@ class Fetcher:
         parse_pdf: bool = True,
         mineru_cmd: str | None = None,
         pdf_dir: "Path | None" = None,
+        _transport: httpx.AsyncBaseTransport | None = None,
     ) -> None:
         self.timeout_sec = timeout_sec
         self.use_crawl4ai = prefer_crawl4ai and _crawl4ai_available()
         self.parse_pdf = parse_pdf
         self.mineru_cmd = mineru_cmd
         self.pdf_dir = pdf_dir
+        self._transport = _transport  # test seam; None in production
 
     async def fetch(self, url: str) -> FetchResult:
+        # SSRF entry guard (covers pdf/crawl4ai/httpx). Never log the raw URL.
+        try:
+            assert_safe_url(url)
+        except UrlBlockedError as e:
+            logger.warning("SSRF guard blocked fetch: %s", hash_url(url))
+            return FetchResult(url, "", ok=False, error=f"SSRF guard: {e}")
         if url.lower().split("?")[0].endswith(".pdf"):
             return await self._fetch_pdf(url)
         if self.use_crawl4ai:
@@ -82,10 +101,15 @@ class Fetcher:
                 follow_redirects=True,
                 timeout=self.timeout_sec,
                 headers={"User-Agent": "Mozilla/5.0 (research-tool)"},
+                event_hooks={"request": [_guard_request]},
+                transport=self._transport,
             ) as client:
                 resp = await client.get(url)
                 resp.raise_for_status()
                 data = resp.content
+        except UrlBlockedError as e:
+            logger.warning("SSRF guard blocked PDF redirect: %s", hash_url(url))
+            return FetchResult(url, "", ok=False, error=f"SSRF guard: {e}")
         except Exception as e:  # noqa: BLE001
             return FetchResult(url, "", ok=False, error=f"PDF 下载失败: {e}")
         if not data[:5].startswith(b"%PDF"):
@@ -148,6 +172,8 @@ class Fetcher:
                 follow_redirects=True,
                 timeout=self.timeout_sec,
                 headers={"User-Agent": "Mozilla/5.0 (research-tool)"},
+                event_hooks={"request": [_guard_request]},
+                transport=self._transport,
             ) as client:
                 resp = await client.get(url)
                 resp.raise_for_status()
@@ -158,5 +184,8 @@ class Fetcher:
             md = _html_to_markdown(html)
             links = list(dict.fromkeys(_HREF.findall(html)))[:50]
             return FetchResult(url, md, links=links)
+        except UrlBlockedError as e:
+            logger.warning("SSRF guard blocked redirect: %s", hash_url(url))
+            return FetchResult(url, "", ok=False, error=f"SSRF guard: {e}")
         except Exception as e:  # noqa: BLE001
             return FetchResult(url, "", ok=False, error=str(e))
