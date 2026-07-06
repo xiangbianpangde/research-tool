@@ -529,6 +529,7 @@ async def transcribe(
     preferred_engine: EngineType = EngineType.WHISPER,
     groq_api_key: str | None = None,
     write_cache: bool = True,
+    read_cache: bool = True,
 ) -> Transcript:
     """转写主入口（带 NFR4 缓存命中短路 + 引擎 fallback + 超时）。
 
@@ -543,6 +544,7 @@ async def transcribe(
         preferred_engine: EngineSelector 偏好（groq/whisper）
         groq_api_key: Groq API key
         write_cache: 是否写入 M-004 缓存（默认 True）
+        read_cache: 是否读取 M-004 缓存（默认 True；False=强制重转，对应 CLI --no-cache）
 
     Returns:
         Transcript
@@ -563,14 +565,22 @@ async def transcribe(
     # 2) M-004 缓存命中短路（NFR4：同 URL 二次运行跳过转写）
     cm = cache_manager or await get_cache_manager()
     cache_key = compute_url_sha256(audio_fingerprint)
-    try:
-        cached = await cm.query(audio_fingerprint, etag="")
-    except Exception as e:
-        logger.warning("缓存查询失败（降级到无缓存模式）: %s", e)
-        cached = None
-    if cached is not None and cached.payload:
-        emit_log("info", "转写缓存命中（NFR4 跳过）", step="transcribe", url=audio_fingerprint)
-        return _payload_to_transcript(cached.payload)
+    if read_cache:
+        try:
+            cached = await cm.query(audio_fingerprint, etag="")
+        except Exception as e:
+            logger.warning("缓存查询失败（降级到无缓存模式）: %s", e)
+            cached = None
+        if cached is not None and cached.payload:
+            emit_log("info", "转写缓存命中（NFR4 跳过）", step="transcribe", url=audio_fingerprint)
+            return _payload_to_transcript(cached.payload)
+    else:
+        emit_log(
+            "info",
+            "跳过转写缓存读取（--no-cache 强制重转）",
+            step="transcribe",
+            url=audio_fingerprint,
+        )
 
     # 3) EngineSelector 选主引擎 + 降级链
     selector = EngineSelector(

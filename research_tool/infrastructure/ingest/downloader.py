@@ -53,7 +53,23 @@ PLATFORM_LOCAL: str = "local"
 
 LOCAL_SUPPORTED_EXTS: tuple[str, ...] = (".mp4", ".webm", ".mkv", ".m4a", ".mp3", ".wav")
 COOKIE_REQUIRED_PERMS: int = 0o600
-DEFAULT_YT_DLP_FORMAT: str = "bestaudio[ext=m4a]/bestaudio/best"
+# V1.1：默认想拉一份"低画质视频+最佳音频"——视频流给关键帧截图用，音频给转写。
+# 旧设置（仅音频）截不出帧，断了图文笔记里"图"的来源。可用 VIDEO_FORMAT 环境变量覆盖。
+DEFAULT_YT_DLP_FORMAT: str = os.environ.get(
+    "VIDEO_FORMAT",
+    "bestvideo[height<=480]+bestaudio/best[height<=480]/bestaudio[ext=m4a]/bestaudio/best",
+)
+
+
+def _inject_ffmpeg_location(opts: dict[str, Any]) -> None:
+    """给 yt-dlp opts 注入 ffmpeg_location（用 FFMPEG_PATH 环境变量），
+    解决 Claude/CI 子进程 PATH 没刷新看不到 ffmpeg 的问题。"""
+    ff = os.environ.get("FFMPEG_PATH")
+    if ff and "ffmpeg_location" not in opts:
+        # yt-dlp 接受 ffmpeg 二进制路径或其所在目录；用目录更通用（同时找 ffprobe）。
+        opts["ffmpeg_location"] = str(Path(ff).parent) if Path(ff).suffix else ff
+
+
 DEFAULT_OUTPUT_TEMPLATE: str = "%(id)s.%(ext)s"
 DEFAULT_DOWNLOAD_TIMEOUT_SEC: int = 600  # 10 分钟
 
@@ -408,6 +424,7 @@ class YouTubeDownloader:
             opts["skip_download"] = True
         if self.cookie_path:
             opts["cookiefile"] = str(self.cookie_path)
+        _inject_ffmpeg_location(opts)
         return opts
 
     async def _extract_info_async(
@@ -576,6 +593,7 @@ class BilibiliDownloader:
             opts["skip_download"] = True
         if self.cookie_path:
             opts["cookiefile"] = str(self.cookie_path)
+        _inject_ffmpeg_location(opts)
         return opts
 
     @staticmethod

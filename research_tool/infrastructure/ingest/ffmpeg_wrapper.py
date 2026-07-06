@@ -77,11 +77,10 @@ class FFmpegInvoker:
     ) -> None:
         self.ffmpeg_path = ffmpeg_path or DEFAULT_FFMPEG
         # ffprobe 默认同前缀（ffmpeg -> ffprobe）
-        self.ffprobe_path = (
-            ffprobe_path
-            or (str(Path(self.ffmpeg_path).with_name("ffprobe"))
-                if Path(self.ffmpeg_path).parent != Path("")
-                else "ffprobe")
+        self.ffprobe_path = ffprobe_path or (
+            str(Path(self.ffmpeg_path).with_name("ffprobe"))
+            if Path(self.ffmpeg_path).parent != Path("")
+            else "ffprobe"
         )
         self.timeout_sec = timeout_sec
 
@@ -175,9 +174,12 @@ class FFmpegInvoker:
             result = subprocess.run(  # noqa: S603 - trusted ffprobe path
                 [
                     self.ffprobe_path,
-                    "-v", "error",
-                    "-show_entries", "format=duration",
-                    "-of", "json",
+                    "-v",
+                    "error",
+                    "-show_entries",
+                    "format=duration",
+                    "-of",
+                    "json",
                     str(video_path),
                 ],
                 capture_output=True,
@@ -232,11 +234,15 @@ class AudioExtractor:
         # 强制覆盖输出（-y），单音轨（-vn），指定采样率与编码
         args = [
             "-y",
-            "-i", video_path,
+            "-i",
+            video_path,
             "-vn",
-            "-ar", str(sample_rate),
-            "-ac", "1",  # 单声道
-            "-c:a", "libmp3lame" if format == "mp3" else "pcm_s16le",
+            "-ar",
+            str(sample_rate),
+            "-ac",
+            "1",  # 单声道
+            "-c:a",
+            "libmp3lame" if format == "mp3" else "pcm_s16le",
             str(output_path),
         ]
         result = await self.invoker.run(args)
@@ -258,7 +264,9 @@ class AudioExtractor:
         size_bytes = output_path.stat().st_size if output_path.exists() else 0
         logger.info(
             "抽音轨成功: %s (%.1fs, %d bytes)",
-            output_path.name, duration, size_bytes,
+            output_path.name,
+            duration,
+            size_bytes,
         )
         return AudioExtractResult(
             audio_path=output_path,
@@ -324,13 +332,19 @@ class KeyframeCapture:
         pattern = str(output_dir / f"{vid}_%03d.jpg")
 
         # ffmpeg 命令：抽帧 + 缩放（最长边 1280）+ 质量 85
-        vf = f"fps=1/{interval:g},scale='min(1280,iw)':-2"
+        # 注意：filter graph 用 ',' 分隔多个 filter（不转义）；scale 内 'min(1280,iw)'
+        # 的参数逗号必须转义为 '\,'，否则会被当作 filter 分隔符吃掉。
+        vf = f"fps=1/{interval:g},scale='min(1280\\,iw)':-2"
         args = [
             "-y",
-            "-i", video_path,
-            "-vf", vf.replace(",", r"\,"),
-            "-q:v", "2",  # JPEG 质量（2=高质量）
-            "-frames:v", str(count),
+            "-i",
+            video_path,
+            "-vf",
+            vf,
+            "-q:v",
+            "2",  # JPEG 质量（2=高质量）
+            "-frames:v",
+            str(count),
             pattern,
         ]
         result = await self.invoker.run(args, timeout_sec=max(60, count * 10))
@@ -368,7 +382,9 @@ class KeyframeCapture:
             )
         logger.info(
             "关键帧截图成功: %d/%d 帧 (%s)",
-            len(frames), count, output_dir.name,
+            len(frames),
+            count,
+            output_dir.name,
         )
         return frames
 

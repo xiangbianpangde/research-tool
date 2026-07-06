@@ -182,11 +182,13 @@ def build_video_task_func(  # noqa: PLR0915 - many statements OK for orchestrato
     topic: str,
     work_dir: Path,
     language: str = DEFAULT_LANGUAGE,
+    use_cache: bool = True,
     downloader: Any | None = None,
     transcriber_fn: Callable[[str, str], Any] | None = None,
     summarizer_fn: Callable[[str, VideoMeta, str], LLMSummary] | None = None,
     notes_assembler_fn: Callable[[VideoMeta, LLMSummary, list, Any], str] | None = None,
     audio_extractor_fn: Callable[[Path, Path], Awaitable[Path]] | None = None,
+    screenshot_count: int = 5,
 ) -> Callable[[str], Awaitable[Path]]:
     """构造单 URL 任务函数（便于 mock 注入；默认走真实 track-core 模块）。
 
@@ -207,12 +209,20 @@ def build_video_task_func(  # noqa: PLR0915 - many statements OK for orchestrato
         from ..infrastructure.ingest.transcriber import transcribe as _transcribe
 
         def _default_transcribe(audio_path: str, lang: str) -> Any:
-            return asyncio.run(_transcribe(audio_path, language=lang))
+            return asyncio.run(
+                _transcribe(
+                    audio_path,
+                    language=lang,
+                    read_cache=use_cache,
+                    write_cache=use_cache,
+                )
+            )
 
         transcriber_fn = _default_transcribe
 
     # 默认 assembler：notes_schema.assemble_markdown
     if notes_assembler_fn is None:
+
         def _default_assemble(meta, summary, screenshots, transcript) -> str:
             return _assemble(
                 meta=meta,
@@ -223,7 +233,7 @@ def build_video_task_func(  # noqa: PLR0915 - many statements OK for orchestrato
 
         notes_assembler_fn = _default_assemble
 
-    async def _task(url: str) -> Path:
+    async def _task(url: str) -> Path:  # noqa: PLR0915  # WIP: nested pipeline, split pending (P1)
         """单 URL 任务：download → extract_audio → transcribe → summarize → assemble → 落盘。"""
         # 1) URL 校验
         video_url = validate_video_url(url)
@@ -248,16 +258,22 @@ def build_video_task_func(  # noqa: PLR0915 - many statements OK for orchestrato
             AudioExtractor,
         )
 
-        audio_path = Path(download_result.file_path)
+        # 原始下载文件（可能是 mp4 也可能是 m4a）
+        original_path = Path(download_result.file_path)
+        audio_path = original_path
         # 默认：faster-whisper 支持 m4a/mp3/wav/flac 等；保留 m4a 即可
         if audio_extractor_fn is None:
             # 依据后缀判断：mp4/mkv/webm 是视频容器，需要抽音；m4a/mp3/wav 已是音频
             suffix = audio_path.suffix.lower().lstrip(".")
             if suffix in ("mp4", "mkv", "webm"):
-                # 抽音
+                # 抽音（用 env-aware invoker：FFMPEG_PATH 环境变量优先）
+                from ..infrastructure.ingest.ffmpeg_wrapper import (
+                    get_ffmpeg_invoker,
+                )
+
                 extracted_path = audio_path.with_suffix(".audio.wav")
                 try:
-                    extractor = AudioExtractor()
+                    extractor = AudioExtractor(invoker=get_ffmpeg_invoker())
                     ar: AudioExtractResult = await extractor.extract(audio_path, extracted_path)
                     audio_path = Path(ar.audio_path)
                 except Exception:
@@ -266,6 +282,49 @@ def build_video_task_func(  # noqa: PLR0915 - many statements OK for orchestrato
         else:
             extracted_path = audio_path.with_suffix(".audio.wav")
             audio_path = Path(await audio_extractor_fn(audio_path, extracted_path))
+
+        # 3.5) 关键帧截图（GAP-V3 闭合：从原始视频抽帧，注入 assembler）
+        # 仅当原始下载文件是视频容器时尝试；音频文件没法截图。
+        screenshots: list = []
+        if screenshot_count > 0 and original_path.suffix.lower().lstrip(".") in (
+            "mp4",
+            "mkv",
+            "webm",
+            "flv",
+            "mov",
+        ):
+            from ..infrastructure.ingest.ffmpeg_wrapper import (
+                KeyframeCapture,
+                get_ffmpeg_invoker,
+            )
+            from ..domain.models import ScreenshotFrame
+
+            try:
+                kf = KeyframeCapture(invoker=get_ffmpeg_invoker())
+                frames = await kf.capture(
+                    original_path,
+                    work_dir / "screenshots",
+                    count=screenshot_count,
+                    video_id=video_url.video_id or download_result.video_id or None,
+                )
+                # 路径用相对 work_dir 的形式，便于 markdown 跨目录引用
+                for fr in frames:
+                    rel = fr.path
+                    try:
+                        rel = fr.path.relative_to(work_dir)
+                    except ValueError:
+                        rel = fr.path
+                    ts = fr.timestamp_sec
+                    screenshots.append(
+                        ScreenshotFrame(
+                            timestamp_sec=ts,
+                            path=str(rel),
+                            caption=f"@ {int(ts // 60)}:{int(ts % 60):02d}",
+                        )
+                    )
+                logger.info("关键帧截图 %d 张 → %s", len(screenshots), work_dir / "screenshots")
+            except Exception as e:  # noqa: BLE001
+                logger.warning("关键帧截图失败（继续，不阻断笔记生成）: %s", e)
 
         # 4) 转写
         try:
@@ -283,9 +342,7 @@ def build_video_task_func(  # noqa: PLR0915 - many statements OK for orchestrato
             summary = LLMSummary(
                 video_summary=f"视频 {title} 的自动总结（默认占位）",
                 video_chapters=(
-                    degrader.degrade(transcript)
-                    if transcript and transcript.segments
-                    else []
+                    degrader.degrade(transcript) if transcript and transcript.segments else []
                 ),
                 video_takeaways=[
                     "请在测试中注入 summarizer_fn 以启用 LLM 总结",
@@ -293,7 +350,10 @@ def build_video_task_func(  # noqa: PLR0915 - many statements OK for orchestrato
                 model="default-stub",
             )
         else:
-            summary = summarizer_fn(
+            # summarizer_fn 是同步签名；可能内部用 asyncio.run 调云端 LLM。
+            # 放进线程池避免与当前事件循环冲突。
+            summary = await asyncio.to_thread(
+                summarizer_fn,
                 transcript.full_text if transcript else "",
                 _make_meta(download_result, video_url),
                 transcript.full_text if transcript else "",
@@ -304,7 +364,7 @@ def build_video_task_func(  # noqa: PLR0915 - many statements OK for orchestrato
         markdown_text = notes_assembler_fn(
             meta,
             summary,
-            [],  # screenshots
+            screenshots,  # GAP-V3：真实截图列表（可能为空，assembler 会自动跳过）
             transcript,
         )
 
@@ -357,12 +417,18 @@ class VideoPipeline:
         language: str = DEFAULT_LANGUAGE,
         run_pipeline: bool = False,
         max_concurrency: int | None = None,
+        use_cache: bool = True,
+        summarizer_fn: Callable[[str, VideoMeta, str], LLMSummary] | None = None,
+        screenshot_count: int = 5,
     ) -> None:
         self.topic = topic
         self.work_dir = Path(work_dir)
         self.language = language
         self.run_pipeline = run_pipeline
         self.max_concurrency = max_concurrency
+        self.use_cache = use_cache
+        self.summarizer_fn = summarizer_fn
+        self.screenshot_count = screenshot_count
         self._results_so_far: list[VideoProcessResult] = []
 
     async def process_urls(
@@ -410,6 +476,9 @@ class VideoPipeline:
                     topic=self.topic,
                     work_dir=self.work_dir,
                     language=self.language,
+                    use_cache=self.use_cache,
+                    summarizer_fn=self.summarizer_fn,
+                    screenshot_count=self.screenshot_count,
                 )
 
             # 复用 M-012 gather_tasks
@@ -424,9 +493,7 @@ class VideoPipeline:
             for orch in orch_results:
                 if orch.status == "success" and orch.output is not None:
                     out_path = (
-                        Path(orch.output)
-                        if not isinstance(orch.output, Path)
-                        else orch.output
+                        Path(orch.output) if not isinstance(orch.output, Path) else orch.output
                     )
                     results_by_url[orch.url] = VideoProcessResult(
                         url=orch.url,
@@ -486,6 +553,9 @@ async def process_videos(
     language: str = DEFAULT_LANGUAGE,
     run_pipeline: bool = False,
     max_concurrency: int | None = None,
+    use_cache: bool = True,
+    summarizer_fn: Callable[[str, VideoMeta, str], LLMSummary] | None = None,
+    screenshot_count: int = 5,
 ) -> VideoPipelineReport:
     """模块级便捷函数。"""
     pipeline = VideoPipeline(
@@ -494,6 +564,9 @@ async def process_videos(
         language=language,
         run_pipeline=run_pipeline,
         max_concurrency=max_concurrency,
+        use_cache=use_cache,
+        summarizer_fn=summarizer_fn,
+        screenshot_count=screenshot_count,
     )
     return await pipeline.process_urls(urls)
 

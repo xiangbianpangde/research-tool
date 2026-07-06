@@ -452,11 +452,12 @@ def _sanitize_filename(s: str) -> str:
     """清洗 video_id 为文件名合法字符（保留字母数字 + 短横线下划线点）。"""
     if not s:
         return ""
-    # Windows / POSIX 文件名非法字符
-    bad = '<>:"/\\|?*\x00-\x1f'
+    # Windows / POSIX 文件名保留字符（注意：短横线 '-' 是合法字符，YouTube ID 常含 '-'/'_'）
+    bad = set('<>:"/\\|?*')
     out = []
     for ch in s:
-        if ch in bad or ch.isspace():
+        # 控制字符（0x00-0x1f）+ 保留字符 + 空白 → 替换为下划线
+        if ord(ch) < 0x20 or ch in bad or ch.isspace():
             out.append("_")
         else:
             out.append(ch)
