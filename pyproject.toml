@@ -24,7 +24,7 @@ dependencies = [
 # 重量级抓取：Crawl4AI（按架构设计 07）。安装后需执行 `crawl4ai-setup` 装浏览器。
 crawl = ["crawl4ai>=0.4"]
 # 搜索后端
-search = ["ddgs>=6.0", "arxiv>=2.1", "tavily-python>=0.5"]
+search = ["ddgs>=6.0", "tavily-python>=0.5"]
 # PDF 摄取（pdf2zh / MinerU 集成）—— 重依赖（~7GB 含模型）
 pdf = ["mineru>=2.0"]
 # 可视化 Web 界面
@@ -37,7 +37,6 @@ video = ["yt-dlp>=2024.5", "faster-whisper>=1.0"]
 all = [
     "crawl4ai>=0.4",
     "ddgs>=6.0",
-    "arxiv>=2.1",
     "tavily-python>=0.5",
     "yt-dlp>=2024.5",
     "faster-whisper>=1.0",
