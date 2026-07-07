@@ -3,7 +3,7 @@
 依据 03-Python库接口设计.md §7 + DD-001 M-010 错误处理器。
 
 扩展点（V1.1 VideoIngest）：
-- 12 个 E_* 错误码常量（download/transcribe/ffmpeg/llm/cache/preflight/...）
+- 13 个 E_* 错误码常量（download/transcribe/ffmpeg/llm/cache/preflight/...）
 - ErrorRecord 数据类（DE-010）：错误码 + 场景/原因/建议 + 触发时间
 - register_error / format_error / resolve_exit_code / lookup_code 公共 API
 - 进程退出码仲裁：403 > 401 > 500 > 0（DD-001 M-010 状态机）
@@ -97,12 +97,12 @@ class ConfigError(VideoIngestError):
 
 
 # --------------------------------------------------------------------------- #
-# V1.1 新增：12 个错误码常量（DD-001 M-010 错误码字典）
+# V1.1 新增：13 个错误码常量（DD-001 M-010 错误码字典）
 # --------------------------------------------------------------------------- #
 
 
 class ErrorCode(str, Enum):
-    """12 个 VideoIngest 错误码（V1.1 范围）。
+    """13 个 VideoIngest 错误码（V1.1 范围）。
 
     命名规则：[E_]_[CATEGORY]_[NUMBER]_[DETAIL]
     - E_VID_* = 视频相关
@@ -116,9 +116,10 @@ class ErrorCode(str, Enum):
     - E_SYS_* = 系统级
     """
 
-    # 视频（2）
+    # 视频（3）
     E_VID_001_VIDEO_NOT_FOUND = "E_VID_001_VIDEO_NOT_FOUND"
     E_VID_002_INVALID_URL = "E_VID_002_INVALID_URL"
+    E_VID_003_PIPELINE_FAIL = "E_VID_003_PIPELINE_FAIL"
 
     # 下载（2）
     E_DL_001_NETWORK_TIMEOUT = "E_DL_001_NETWORK_TIMEOUT"
@@ -209,7 +210,7 @@ class ErrorRecord:
 # --------------------------------------------------------------------------- #
 
 
-# 默认错误码字典（V1.1 全部 12 个；扩展时往 _ERROR_REGISTRY 追加）
+# 默认错误码字典（V1.1 全部 13 个；扩展时往 _ERROR_REGISTRY 追加）
 _ERROR_REGISTRY: dict[str, ErrorInfo] = {
     # 视频
     ErrorCode.E_VID_001_VIDEO_NOT_FOUND.value: ErrorInfo(
@@ -227,6 +228,14 @@ _ERROR_REGISTRY: dict[str, ErrorInfo] = {
         default_scene="URL 格式非法",
         default_cause="输入字符串不是支持的平台 URL（Bilibili/YouTube/X 等）",
         default_suggestion="复制浏览器地址栏的完整 URL 重新输入",
+    ),
+    ErrorCode.E_VID_003_PIPELINE_FAIL.value: ErrorInfo(
+        code=ErrorCode.E_VID_003_PIPELINE_FAIL.value,
+        category="VID",
+        exit_code_hint=500,
+        default_scene="视频管道处理失败",
+        default_cause="所有视频 URL 处理失败（下载/转写/总结均未成功）",
+        default_suggestion="检查上游错误；或减少 URL 数量重试",
     ),
     # 下载
     ErrorCode.E_DL_001_NETWORK_TIMEOUT.value: ErrorInfo(

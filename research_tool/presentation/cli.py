@@ -17,7 +17,7 @@ from rich.table import Table
 
 from .. import __version__
 from ..domain.config import load_config
-from ..domain.errors import ResearchToolError
+from ..domain.errors import ErrorCode, ResearchToolError, VideoIngestError
 from ..infrastructure.llm.base import LLMClient
 from ..common.logging_config import get_logger, setup_logging
 from ..domain.models import (
@@ -72,6 +72,26 @@ def _fail(msg: str) -> typer.Exit:
     """输出错误信息到 stderr 并退出。"""
     logger.error("错误 %s", msg)
     raise typer.Exit(code=1)
+
+
+def _fail_video_ingest(exc: VideoIngestError) -> None:
+    """VideoIngestError 失败路径：渲染 M-010 3 段式 + 仲裁退出码。
+
+     已注册错误码 → format_error 三段式输出 + resolve_exit_code 仲裁退出码
+    （403/401/404/400/500）；未注册错误码 → 降级为通用 _fail（exit 1），
+     不让处理器自身崩溃。
+    """
+    from ..domain.errors import ConfigError, format_error, register_error, resolve_exit_code
+
+    try:
+        record = register_error(exc.code, context={"message": str(exc)})
+    except ConfigError:
+        # 未注册错误码 — 降级通用路径，不崩溃处理器。
+        _fail(f"[{exc.code}] {exc}")
+        return  # _fail 已 raise typer.Exit；此行不可达，保类型完整
+    logger.error("[%s] %s", exc.code, exc)
+    typer.echo(format_error(record), err=True)
+    raise typer.Exit(code=resolve_exit_code([record]))
 
 
 def _split_csv(value: str | None) -> list[str]:
@@ -391,7 +411,6 @@ def _validate_video_urls(urls: list[str]) -> list[str]:
         typer.BadParameter: 含非法 URL
     """
     from ..application.video_pipeline import validate_video_url  # 延迟 import
-    from ..domain.errors import VideoIngestError
 
     cleaned: list[str] = []
     for u in urls:
@@ -423,7 +442,6 @@ def _run_video_ingest(
     """V1.1 VideoIngest 入口（CLI 薄封装）。"""
     from ..application.video_pipeline import process_videos
     from ..common.slug import slugify
-    from ..domain.errors import VideoIngestError
 
     valid_urls = _validate_video_urls(video_urls)
     work_dir = output or Path("./research-output")
@@ -472,7 +490,7 @@ def _run_video_ingest(
                 )
         # 全部失败 → 退出码非 0
         if report.success_count == 0 and report.failed_count > 0:
-            raise VideoIngestError("E_VID_PIPELINE_FAIL", "所有视频 URL 处理失败")
+            raise VideoIngestError(ErrorCode.E_VID_003_PIPELINE_FAIL.value, "所有视频 URL 处理失败")
 
     _run(_go())
 
@@ -854,6 +872,8 @@ def _run(coro) -> None:
     """统一跑 async + 异常 → stderr。"""
     try:
         asyncio.run(coro)
+    except VideoIngestError as e:
+        _fail_video_ingest(e)
     except ResearchToolError as e:
         _fail(str(e))
     except KeyboardInterrupt:  # pragma: no cover

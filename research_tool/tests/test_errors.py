@@ -23,13 +23,14 @@ from research_tool.domain.errors import (
 
 
 class TestErrorCodeEnum:
-    """12 个错误码常量。"""
+    """13 个错误码常量。"""
 
-    def test_all_12_codes_present(self):
-        assert len(list(ErrorCode)) == 12
+    def test_all_13_codes_present(self):
+        assert len(list(ErrorCode)) == 13
 
     def test_code_string_values(self):
         assert ErrorCode.E_VID_001_VIDEO_NOT_FOUND.value == "E_VID_001_VIDEO_NOT_FOUND"
+        assert ErrorCode.E_VID_003_PIPELINE_FAIL.value == "E_VID_003_PIPELINE_FAIL"
         assert ErrorCode.E_DL_001_NETWORK_TIMEOUT.value == "E_DL_001_NETWORK_TIMEOUT"
         assert ErrorCode.E_LLM_001_LLM_CALL_FAILED.value == "E_LLM_001_LLM_CALL_FAILED"
         assert ErrorCode.E_SYS_001_UNKNOWN_ERROR_CODE.value == "E_SYS_001_UNKNOWN_ERROR_CODE"
@@ -37,6 +38,13 @@ class TestErrorCodeEnum:
     def test_codes_unique(self):
         values = [c.value for c in ErrorCode]
         assert len(values) == len(set(values))
+
+    def test_e_vid_003_registered(self):
+        """E_VID_003_PIPELINE_FAIL 已注册（R9：原 cli.py:475 E_VID_PIPELINE_FAIL）。"""
+        info = lookup_code(ErrorCode.E_VID_003_PIPELINE_FAIL.value)
+        assert info.exit_code_hint == 500
+        assert info.category == "VID"
+        assert "视频管道处理失败" in info.default_scene
 
 
 class TestErrorInfo:

@@ -25,7 +25,7 @@ from research_tool.application.video_pipeline import (
     VideoPipeline,
     validate_video_url,
 )
-from research_tool.domain.errors import VideoIngestError
+from research_tool.domain.errors import ErrorCode, ResearchToolError, VideoIngestError
 from research_tool.domain.models import (
     LLMSummary,
     Transcript,
@@ -536,3 +536,109 @@ class TestDownstreamConsumption:
             out_dir, patterns = _stage_output(stage, topic_dir)
             # 初始状态：除 collect 外都没有输出
             assert has_output(out_dir, patterns) is False
+
+
+# --------------------------------------------------------------------------- #
+# M-010 错误系统 CLI 接线（R9）：VideoIngestError → 3 段式 + 仲裁退出码
+# --------------------------------------------------------------------------- #
+
+
+class TestCliM010ErrorWiring:
+    """VideoIngestError 经 _run → _fail_video_ingest 渲染 3 段式 + 仲裁退出码。
+
+    覆盖 5 个退出码（403/401/404/400/500）+ 通用 ResearchToolError（exit 1）
+    + 未注册错误码降级（exit 1，不崩溃处理器）。
+    """
+
+    _BILI_URL = "https://www.bilibili.com/video/BV1xx411c7mD"
+
+    @staticmethod
+    def _make_raise(exc: Exception):
+        async def _raise(*args, **kwargs):
+            raise exc
+
+        return _raise
+
+    def test_invalid_url_exits_400(self):
+        """E_VID_002_INVALID_URL → exit 400 + 3 段式输出。"""
+        runner = CliRunner()
+        exc = VideoIngestError(ErrorCode.E_VID_002_INVALID_URL.value, "坏 URL")
+        with patch(
+            "research_tool.application.video_pipeline.process_videos",
+            self._make_raise(exc),
+        ):
+            result = runner.invoke(app, ["run", "topic", "--video-url", self._BILI_URL])
+        assert result.exit_code == 400
+        assert "场景" in result.output
+        assert "原因" in result.output
+        assert "建议" in result.output
+        assert "E_VID_002_INVALID_URL" in result.output
+
+    def test_tool_missing_exits_403(self):
+        """E_PF_001_TOOL_MISSING → exit 403。"""
+        runner = CliRunner()
+        exc = VideoIngestError(ErrorCode.E_PF_001_TOOL_MISSING.value, "缺 yt-dlp")
+        with patch(
+            "research_tool.application.video_pipeline.process_videos",
+            self._make_raise(exc),
+        ):
+            result = runner.invoke(app, ["run", "topic", "--video-url", self._BILI_URL])
+        assert result.exit_code == 403
+
+    def test_config_missing_exits_401(self):
+        """E_CFG_001_CONFIG_MISSING → exit 401。"""
+        runner = CliRunner()
+        exc = VideoIngestError(ErrorCode.E_CFG_001_CONFIG_MISSING.value, "缺 API key")
+        with patch(
+            "research_tool.application.video_pipeline.process_videos",
+            self._make_raise(exc),
+        ):
+            result = runner.invoke(app, ["run", "topic", "--video-url", self._BILI_URL])
+        assert result.exit_code == 401
+
+    def test_network_timeout_exits_500(self):
+        """E_DL_001_NETWORK_TIMEOUT → exit 500。"""
+        runner = CliRunner()
+        exc = VideoIngestError(ErrorCode.E_DL_001_NETWORK_TIMEOUT.value, "超时")
+        with patch(
+            "research_tool.application.video_pipeline.process_videos",
+            self._make_raise(exc),
+        ):
+            result = runner.invoke(app, ["run", "topic", "--video-url", self._BILI_URL])
+        assert result.exit_code == 500
+
+    def test_video_not_found_exits_404(self):
+        """E_VID_001_VIDEO_NOT_FOUND → exit 404。"""
+        runner = CliRunner()
+        exc = VideoIngestError(ErrorCode.E_VID_001_VIDEO_NOT_FOUND.value, "视频没了")
+        with patch(
+            "research_tool.application.video_pipeline.process_videos",
+            self._make_raise(exc),
+        ):
+            result = runner.invoke(app, ["run", "topic", "--video-url", self._BILI_URL])
+        assert result.exit_code == 404
+
+    def test_generic_research_error_exits_1(self):
+        """非 VideoIngestError 的 ResearchToolError → exit 1（路径不变）。"""
+        runner = CliRunner()
+        exc = ResearchToolError("普通研究错误")
+        with patch(
+            "research_tool.application.video_pipeline.process_videos",
+            self._make_raise(exc),
+        ):
+            result = runner.invoke(app, ["run", "topic", "--video-url", self._BILI_URL])
+        assert result.exit_code == 1
+
+    def test_unregistered_code_fallback_exits_1(self):
+        """未注册错误码 → 降级通用路径（exit 1），处理器不崩溃。"""
+        runner = CliRunner()
+        exc = VideoIngestError("E_NOT_REGISTERED_999", "未知码")
+        with patch(
+            "research_tool.application.video_pipeline.process_videos",
+            self._make_raise(exc),
+        ):
+            result = runner.invoke(app, ["run", "topic", "--video-url", self._BILI_URL])
+        assert result.exit_code == 1
+        assert "E_NOT_REGISTERED_999" in result.output
+        # 降级路径不走 3 段式（无 "场景:"）
+        assert "场景" not in result.output
