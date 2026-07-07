@@ -14,7 +14,7 @@ topic ─→ Collect ─→ Deepen ─→ Clean ─→ Extract ─→ Organize �
 
 | 阶段 | 职责 | 输出 |
 |------|------|------|
-| Collect | 搜索 10 源（见下方）+ 抓取（Crawl4AI，回退 httpx）。**P1 两阶段锚定/去锚** + **P2 时间窗口 + deep-search 多排序翻页** | `raw/*.md` + `sources.json` |
+| Collect | 搜索 12 源（见下方）+ 抓取（Crawl4AI，回退 httpx）。**P1 两阶段锚定/去锚** + **P2 时间窗口 + deep-search 多排序翻页** | `raw/*.md` + `sources.json` |
 | Deepen | 反偏差深挖：实体拆分→多视角搜索 + 缺口/矛盾补搜。**P1 LLM 结构化画像注入英文名去锚** + **P2 时间线回溯 + 同名消歧 + 多轮迭代**（可选，默认开） | 追加 `raw/*.md` + `raw/_disambig/` + `.deepen_done` |
 | Clean | 去 HTML/导航/广告噪音，定位正文。**P2 MinHash 去重 + LLM 相关性过滤** | `clean/*.md` + `quality.json` |
 | Extract | LLM 抽取实体/关系/三元组（可选） | `extracted/*.json` |
@@ -512,6 +512,6 @@ pytest -q
 ## 架构要点（详见 ../架构设计/06-关键设计决策.md）
 
 - **仅文件系统通信**：每个 Stage 输入/输出都是文件，可独立重跑、可检查中间产物。
-- **LLM 抽象**：所有 Stage 依赖 `LLMClient`，不直接绑定 SDK；支持 deepseek/openai/ollama/anthropic。
+- **LLM 抽象**：所有 Stage 依赖 `LLMClient`，不直接绑定 SDK；支持 deepseek/openai/ollama/anthropic/minimax。
 - **Extractor 可选**：`--skip extract` 或 `extractor.enabled: false` 时，Organizer 直接吃 `clean/` 文本。
 - **幂等恢复**：已有输出的 Stage 自动跳过（`--no-resume` 关闭）。

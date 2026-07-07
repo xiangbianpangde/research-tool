@@ -3,21 +3,26 @@
 | 功能点 | 状态 | 备注 |
 |--------|------|------|
 | FP01: 六阶段管道 | ✅ | Collect→Deepen→Clean→Extract→Organize→Report |
-| FP02: 10 搜索源 | ✅ | DDG/OpenAlex/Crossref/arXiv/S2/PubMed/Wikipedia/GitHub/GoogleNews/Tavily |
-| FP03: LLM 抽象 | ✅ | DeepSeek/OpenAI/Anthropic/Ollama |
-| FP04: CLI 接口 | ✅ | 7 个命令（collect/ingest-pdf/clean/extract/organize/report/run/status/ui/config） |
+| FP02: 12 搜索源 | ✅ | DDG/OpenAlex/Crossref/arXiv/S2/PubMed/Wikipedia/GitHub/GoogleNews/Tavily/Bilibili/X（SearchEngine Literal 含 14 名：scholar→arxiv、x/twitter→x_backend 为别名） |
+| FP03: LLM 抽象 | ✅ | 5 provider：DeepSeek/OpenAI/Anthropic/Ollama/MiniMax；from_config 把 openai/deepseek/ollama/minimax 路由到 OpenAILLMClient，anthropic 走 AnthropicLLMClient（DeepseekClient 已导出但未接入 from_config） |
+| FP04: CLI 接口 | ✅ | 11 个命令（collect/ingest-pdf/ocr-engines/clean/extract/organize/report/run/status/ui/config） |
 | FP05: Python SDK | ✅ | `research()` / `quick_collect()` 便捷函数 |
 | FP06: Web UI | ✅ | Gradio 可视化界面 |
-| FP07: PDF 摄取 | ✅ | MinerU 集成 |
+| FP07: PDF 摄取 | ✅ | MinerU 集成（+ custom/paddleocr-vl/unlimited-ocr/vision-llm 可插拔引擎） |
 | FP08: 反偏差深挖 | ✅ | 实体拆分 + 画像注入 + 缺口检测 + 同名消歧 |
 | FP09: 反向传播 | ✅ | 知识树质量评估循环 |
 | FP10: 收束节点 v0.1.1 | ✅ | 密钥/日志/异常/死代码/架构/文档全面整改 |
+| FP11: 持续优化（2026-07） | ✅ | 包名 src→research_tool；MiniMax provider；SSRF 防护（common/url_guard.py）；gitleaks CI + ADR 0002；ruff 全仓清扫 |
 
 ## 技术债
 
 | 问题 | 优先级 | 发现节点 |
 |------|--------|---------|
-| 覆盖率报告 | 🟡 中 | v0.1.1 收束 |
-| Git commit-msg 钩子 | 🟡 中 | v0.1.1 收束 |
-| deepen.run 函数过长 (52 行) | 🟢 低 | v0.1.1 收束 |
-| webui.run_web 函数过长 (94 行) | 🟢 低 | v0.1.1 收束 |
+| 覆盖率报告（pytest-cov 未安装） | 🟡 中 | v0.1.1 收束 |
+| Git commit-msg 钩子（commitlint 配置已就位，pre-commit/CI 强制未落地） | 🟡 中 | v0.1.1 收束 |
+| deepen.run 函数过长（已 noqa PLR0915，拆分仍 P1） | 🟢 低 | v0.1.1 收束 |
+| webui 长函数（run_video_note/run_web/build_ui 已 noqa PLR0915） | 🟢 低 | v0.1.1 收束 |
+| defusedxml 迁移（S314：arxiv/google_news 现用 xml.etree，已 noqa） | 🟡 中 | 2026-07 ruff 清扫 |
+| SSRF 封禁表可配置（198.18.0.0/15 当前豁免以兼容本机 DNS 代理） | 🟢 低 | 2026-07 SSRF |
+| resolve_exit_code 仅认 403/401/500（404/400 解析为 0） | 🟢 低 | 2026-07 SSRF |
+| config.py 错误提示指向仓库根 config.example.yaml，实位于 docs/ | 🟢 低 | 2026-07 文档对齐 |

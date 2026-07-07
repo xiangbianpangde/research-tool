@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "research-tool"
-version = "0.1.0"
+version = "0.1.1"
 description = "一个 Python 核心引擎 + 多接口层的调研工具：给定主题 → 产出知识树/报告"
 readme = "README.md"
 requires-python = ">=3.11"

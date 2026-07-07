@@ -61,7 +61,7 @@ from .application.pipeline import ResearchPipeline, create_pipeline
 from .infrastructure.stages import Cleaner, Collector, Extractor, Organizer, Reporter
 from .common.translate import translate_markdown
 
-__version__ = "0.1.0"
+__version__ = "0.1.1"
 
 __all__ = [
     "ResearchPipeline",
