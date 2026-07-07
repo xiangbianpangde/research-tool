@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-import xml.etree.ElementTree as ET
+from defusedxml import ElementTree as ET  # noqa: N817  # conventional ET alias
+from defusedxml.common import DefusedXmlException
 
 import httpx
 
@@ -47,8 +48,8 @@ class ArxivBackend(SearchBackend):
             raise SearchError(f"arxiv 搜索失败: {describe(e)}") from e
 
         try:
-            root = ET.fromstring(text)  # noqa: S314  # parsing arxiv Atom feed; defusedxml migration is a follow-up
-        except ET.ParseError as e:
+            root = ET.fromstring(text)
+        except (ET.ParseError, DefusedXmlException) as e:
             raise SearchError(f"arxiv 响应 XML 解析失败: {e}") from e
 
         hits: list[SearchHit] = []

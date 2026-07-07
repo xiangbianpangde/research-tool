@@ -250,6 +250,45 @@ async def test_arxiv_atom_parses_and_filters_year(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_arxiv_rejects_entity_bomb(monkeypatch):
+    """defusedxml 拦截实体扩展攻击（billion laughs）；arxiv 包装为 SearchError。"""
+    from research_tool.domain.errors import SearchError
+    from research_tool.infrastructure.search.arxiv_backend import ArxivBackend
+
+    entity_bomb = (
+        '<?xml version="1.0"?>'
+        '<!DOCTYPE lolz [<!ENTITY lol "lol">'
+        '<!ENTITY lol2 "&lol;&lol;&lol;&lol;&lol;">]>'
+        "<lolz>&lol2;</lolz>"
+    )
+
+    async def fake(url, **kw):
+        return entity_bomb
+
+    monkeypatch.setattr("research_tool.infrastructure.search.arxiv_backend.get_text", fake)
+    with pytest.raises(SearchError):
+        await ArxivBackend().search("x", 5)
+
+
+@pytest.mark.asyncio
+async def test_google_news_rejects_entity_bomb(monkeypatch):
+    """defusedxml 拦截实体扩展攻击；google_news 的 except Exception 包装为 SearchError。"""
+    from research_tool.domain.errors import SearchError
+    from research_tool.infrastructure.search.google_news import GoogleNewsBackend
+
+    entity_bomb = (
+        '<?xml version="1.0"?>' '<!DOCTYPE lolz [<!ENTITY lol "lol">]>' "<lolz>&lol;</lolz>"
+    )
+
+    async def fake(url, **kw):
+        return entity_bomb
+
+    monkeypatch.setattr("research_tool.infrastructure.search.google_news.get_text", fake)
+    with pytest.raises(SearchError):
+        await GoogleNewsBackend().search("x", 5)
+
+
+@pytest.mark.asyncio
 async def test_x_backend_parses_twitter_cli_json(monkeypatch):
     from research_tool.infrastructure.search.x_backend import XBackend
 

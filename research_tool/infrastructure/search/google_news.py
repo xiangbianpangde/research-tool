@@ -7,7 +7,7 @@ link 是 Google 跳转链接，Fetcher（follow_redirects）会落到原文。
 from __future__ import annotations
 
 import re
-from xml.etree import ElementTree as ET
+from defusedxml import ElementTree as ET  # noqa: N817  # conventional ET alias
 
 from ...domain.errors import SearchError
 from ._http import describe, get_text
@@ -33,7 +33,7 @@ class GoogleNewsBackend(SearchBackend):
         params = {"q": query, **_locale(language)}
         try:
             xml = await get_text(_ENDPOINT, params=params)
-            root = ET.fromstring(xml)  # noqa: S314  # parsing Google News RSS; defusedxml migration is a follow-up
+            root = ET.fromstring(xml)
         except SearchError:
             raise
         except Exception as e:  # noqa: BLE001
