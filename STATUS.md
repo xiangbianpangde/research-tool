@@ -12,7 +12,7 @@
 | FP08: 反偏差深挖 | ✅ | 实体拆分 + 画像注入 + 缺口检测 + 同名消歧 |
 | FP09: 反向传播 | ✅ | 知识树质量评估循环 |
 | FP10: 收束节点 v0.1.1 | ✅ | 密钥/日志/异常/死代码/架构/文档全面整改 |
-| FP11: 持续优化（2026-07） | ✅ | 包名 src→research_tool；MiniMax 永久视频总结器（ADR 0003）；DeepseekClient 移除（M-006）；defusedxml 迁移（S314）；resolve_exit_code 404/400 + config 路径修正；SSRF 防护（common/url_guard.py）；gitleaks CI + ADR 0002；ruff 全仓清扫 |
+| FP11: 持续优化（2026-07） | ✅ | 包名 src→research_tool；MiniMax 永久视频总结器（ADR 0003，--video-url 默认接入）；DeepseekClient 移除（M-006）；defusedxml 迁移（S314）；resolve_exit_code 404/400 + config 路径修正；移除死依赖 arxiv>=2.1；SSRF 防护（common/url_guard.py）；gitleaks CI + ADR 0002；ruff 全仓清扫 |
 
 ## 技术债
 
@@ -24,3 +24,4 @@
 | deepen.run 函数过长（已 noqa PLR0915，拆分仍 P1） | 🟢 低 | v0.1.1 收束 |
 | webui 长函数（run_video_note/run_web/build_ui 已 noqa PLR0915） | 🟢 低 | v0.1.1 收束 |
 | SSRF 封禁表可配置（198.18.0.0/15 当前豁免以兼容本机 DNS 代理） | 🟢 低 | 2026-07 SSRF |
+| 桥接脚本 --use-minimax-summary 标志冗余（MiniMax 已是核心默认，R8） | 🟢 低 | 2026-07 Round 8 |

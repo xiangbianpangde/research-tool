@@ -317,6 +317,9 @@ pip install -e ".[video]"
 
 # 可选：Groq 云端转写（更快的 fallback 引擎，需 API key）
 export GROQ_API_KEY=gsk_xxx
+
+# MiniMax：--video-url 默认 LLM 总结器（缺 key 启动期报错；SDK 可注入 summarizer_fn 替代）
+export MINIMAX_API_KEY=<your_key>
 ```
 
 `[video]` extra 含 `yt-dlp>=2024.5` 和 `faster-whisper>=1.0`，**不污染核心 dependencies**。
