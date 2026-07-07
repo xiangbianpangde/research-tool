@@ -20,7 +20,7 @@
 |------|--------|---------|
 | 覆盖率报告（pytest-cov 未安装） | 🟡 中 | v0.1.1 收束 |
 | Git commit-msg 钩子（commitlint 配置已就位，pre-commit/CI 强制未落地） | 🟡 中 | v0.1.1 收束 |
-| 5 个遗留 VideoIngestError 错误码未注册（E_VID_URL_REJECTED/E_LIM_001/E_LIM_002/E_PIPE_001/E_PIPE_DISK_FULL；raise 站点走 _fail_video_ingest 降级 exit 1，不经 3 段式；ingest 模块 register_error 与 raise code 不一致） | 🟡 中 | 2026-07 Round 9 |
+| VideoIngest 错误码字典与 raise 站点脱节（56 个 raise 站点中仅 cli.py:493 用已注册码 E_VID_003；~15 个遗留未注册码散落 downloader/transcriber/ffmpeg_wrapper/notes_schema/pipeline_adapter/orchestrator，如 E_DL_001/E_DL_004_YT_DLP_FAILED/E_DL_BILI_403/E_TR_001/E_PIPE_001/E_NS_001 等；均走 _fail_video_ingest 降级 exit 1，不经 3 段式；ingest 模块 register_error 与 raise code 还存在跨码不一致） | 🔴 高 | 2026-07 Round 9 |
 | deepen.run 函数过长（已 noqa PLR0915，拆分仍 P1） | 🟢 低 | v0.1.1 收束 |
 | webui 长函数（run_video_note/run_web/build_ui 已 noqa PLR0915） | 🟢 低 | v0.1.1 收束 |
 | SSRF 封禁表可配置（198.18.0.0/15 当前豁免以兼容本机 DNS 代理） | 🟢 低 | 2026-07 SSRF |
