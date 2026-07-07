@@ -81,11 +81,11 @@ research_tool/common/         公共工具 ← logging_config.py / slug.py / tra
 
 | 规范 | 状态 | 备注 |
 |------|------|------|
-| 01-架构 | 🟡 | 分层总体 OK；3 处有意简化：`cli._make_llm` 跨层、`ingest/pipeline_adapter` 懒上引 application、`common/translate` 引用 infra/llm |
+| 01-架构 | 🟡 | 分层总体 OK；3 处有意简化：`cli._make_llm` 跨层、`ingest/pipeline_adapter` 懒上引 application、`common/translate` 引用 infra/llm。P3-1 待扩展：`cli.py:33`、`webui.py:78` 的 presentation→infrastructure 导入 |
 | 02-代码 | ✅ | print()→logging 完成；配置 ruff；异常加 as exc+日志 |
-| 03-Git | 🟡 | gitleaks CI 已生效；Conventional Commits 钩子/CI 强制待落地（`meta/commitlint.config.js` 已就位） |
+| 03-Git | 🟡 | gitleaks CI 已生效；commitlint 配置已就位（`meta/commitlint.config.js`），pre-commit/CI 强制待落地 |
 | 04-API | N/A | 无 HTTP API（CLI + Gradio 本地工具） |
-| 05-测试 | ✅ | 417 passed / 5 skipped；覆盖率待测（pytest-cov 待安装） |
+| 05-测试 | ✅ | 454 passed / 5 skipped；FP09 反向循环已覆盖（R11，test_pipeline_backward.py，8 用例）；覆盖率待测（pytest-cov 待安装） |
 | 06-文档 | ✅ | README + CLAUDE.md + STATUS.md；本轮对齐代码现状；docstring 覆盖公共 API |
 | 08-图谱 | N/A | 中小项目，未达启用门槛（< 5 万行, < 10 模块） |
 
@@ -106,7 +106,9 @@ research_tool/common/         公共工具 ← logging_config.py / slug.py / tra
 ## 当前状态
 
 - **版本**: 0.1.1
-- **测试**: 417 passed / 5 skipped
+- **测试**: 454 passed / 5 skipped
 - **Python**: >=3.11
 - **LLM**: 5 provider（DeepSeek / OpenAI / Anthropic / Ollama / MiniMax）；`from_config` 把 openai/deepseek/ollama/minimax 路由到 `OpenAILLMClient`（OpenAI 兼容），anthropic 走 `AnthropicLLMClient`
 - **搜索源**: 12 个后端（DDG/OpenAlex/Crossref/arXiv/S2/PubMed/Wikipedia/GitHub/GoogleNews/Tavily/Bilibili/X）；`SearchEngine` Literal 含 14 名（`scholar`→arxiv、`x`/`twitter`→x_backend 为别名）
+- **错误码（M-010）**: 26 个 VideoIngest 错误码，全功能（3 段式 format_error + 仲裁退出码 resolve_exit_code；R9 CLI 接线 + R10 注册遗留码 + 对齐 register/raise）
+- **反向循环（FP09）**: 已覆盖（R11，test_pipeline_backward.py，8 用例）
