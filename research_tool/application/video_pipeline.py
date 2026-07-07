@@ -177,6 +177,58 @@ def _extract_youtube_id(url: str) -> str:
 # --------------------------------------------------------------------------- #
 
 
+_DEFAULT_SUMMARIZER_SYSTEM = """你是一名严谨的视频内容分析师。
+给定一段视频转写文本（可能含 ASR 噪声），按 JSON schema 输出结构化笔记：
+- video_summary：3-6 句总览，点出本视频核心主题与关键结论；
+- video_chapters：3-8 个章节，按内容自然分段，每章给 title + summary（2-4 句）+ 起止秒数估算；
+- video_takeaways：5-10 条核心要点，每条是可独立成立的知识点陈述；
+- model：固定写 "MiniMax-M3"。
+要求：
+1. 不要复述 ASR 噪声；
+2. start_sec/end_sec 按章节占比估算（总时长按转写最后一个时间戳）；
+3. 输出必须是合法 JSON，不要加 markdown 代码块包裹。"""
+
+
+def _build_default_summarizer() -> Callable[[str, VideoMeta, str], LLMSummary]:
+    """构造默认 MiniMax summarizer（summarizer_fn 未注入时兜底）。
+
+    镜像 transcriber_fn 的默认构造模式：CLI/SDK 用户无需手写 summarizer_fn 即可获得
+    真实 LLM 总结。MINIMAX_API_KEY 缺失时在此处（构建期）即抛 LLMError，避免下载/转写
+    完一条视频后才发现无法总结。
+    """
+    from ..infrastructure.llm import LLMClient
+
+    client = LLMClient.create(provider="minimax")
+
+    def _fn(transcript_text: str, meta: VideoMeta, video_text: str) -> LLMSummary:
+        text = transcript_text or video_text or ""
+        if not text.strip():
+            return LLMSummary(
+                video_summary="转写为空，无法总结",
+                video_chapters=[],
+                video_takeaways=[],
+                model="MiniMax-M3",
+            )
+        if len(text) > 8000:
+            text = text[:8000] + "\n[... 转写截断 ...]"
+        prompt = (
+            f"视频标题：{meta.title}\n"
+            f"作者：{meta.author}\n"
+            f"时长：{meta.duration_sec} 秒\n"
+            f"平台：{meta.platform}\n\n"
+            f"转写：\n{text}"
+        )
+        # summarizer_fn 是同步签名；build_video_task_func 用 asyncio.to_thread 调用，
+        # 此处用 asyncio.run 起独立 loop 调云端 LLM。
+        summary = asyncio.run(
+            client.chat_structured(prompt, LLMSummary, system=_DEFAULT_SUMMARIZER_SYSTEM)
+        )
+        summary.model = "MiniMax-M3"  # 防御：确保记录真实模型名（不被 LLM 自填值覆盖）
+        return summary
+
+    return _fn
+
+
 def build_video_task_func(  # noqa: PLR0915 - many statements OK for orchestrator
     *,
     topic: str,
@@ -219,6 +271,10 @@ def build_video_task_func(  # noqa: PLR0915 - many statements OK for orchestrato
             )
 
         transcriber_fn = _default_transcribe
+
+    # 默认 summarizer：MiniMax（镜像 transcriber 默认构造；缺 key 在此即抛 LLMError）
+    if summarizer_fn is None:
+        summarizer_fn = _build_default_summarizer()
 
     # 默认 assembler：notes_schema.assemble_markdown
     if notes_assembler_fn is None:
@@ -332,32 +388,13 @@ def build_video_task_func(  # noqa: PLR0915 - many statements OK for orchestrato
         except TranscribeError:
             raise
 
-        # 5) LLM 总结
-        if summarizer_fn is None:
-            # 默认 stub（生产环境由 M-006 提供；V1.1 track-integration 不实现 M-006）
-            from ..infrastructure.ingest.notes_schema import ChapterDegrader
-
-            degrader = ChapterDegrader()
-            title = download_result.title or video_url.video_id or "未知"
-            summary = LLMSummary(
-                video_summary=f"视频 {title} 的自动总结（默认占位）",
-                video_chapters=(
-                    degrader.degrade(transcript) if transcript and transcript.segments else []
-                ),
-                video_takeaways=[
-                    "请在测试中注入 summarizer_fn 以启用 LLM 总结",
-                ],
-                model="default-stub",
-            )
-        else:
-            # summarizer_fn 是同步签名；可能内部用 asyncio.run 调云端 LLM。
-            # 放进线程池避免与当前事件循环冲突。
-            summary = await asyncio.to_thread(
-                summarizer_fn,
-                transcript.full_text if transcript else "",
-                _make_meta(download_result, video_url),
-                transcript.full_text if transcript else "",
-            )
+        # 5) LLM 总结（summarizer_fn 已在构建期默认构造为 MiniMax；同步签名，放线程池）
+        summary = await asyncio.to_thread(
+            summarizer_fn,
+            transcript.full_text if transcript else "",
+            _make_meta(download_result, video_url),
+            transcript.full_text if transcript else "",
+        )
 
         # 6) 拼装 Markdown
         meta = _make_meta(download_result, video_url)

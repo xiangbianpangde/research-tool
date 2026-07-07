@@ -19,14 +19,15 @@ from research_tool.application.video_pipeline import (
     VideoPipeline,
     VideoPipelineReport,
     VideoProcessResult,
+    _build_default_summarizer,
     _extract_bilibili_id,
     _extract_youtube_id,
     _make_meta,
     process_videos,
     validate_video_url,
 )
-from research_tool.domain.errors import VideoIngestError
-from research_tool.domain.models import VideoURL
+from research_tool.domain.errors import LLMError, VideoIngestError
+from research_tool.domain.models import LLMSummary, VideoMeta, VideoURL
 
 
 # --------------------------------------------------------------------------- #
@@ -348,15 +349,59 @@ class TestModuleEntry:
     @pytest.mark.asyncio
     async def test_process_videos_module_level(self, tmp_path: Path):
         """模块级 process_videos 也可用（用真实任务但有 URL 校验短路）。"""
+
         # 全部 URL 非法 → 全部失败 → 不抛错（异常隔离）
+        # 注入 mock summarizer 避免默认构造 MiniMax 客户端（需 MINIMAX_API_KEY）。
+        def fake_summarize(text: str, meta: VideoMeta, video_text: str) -> LLMSummary:
+            return LLMSummary(
+                video_summary="s", video_chapters=[], video_takeaways=[], model="mock"
+            )
+
         report = await process_videos(
             topic="t",
             urls=["https://www.douyin.com/video/123"],
             work_dir=tmp_path,
             run_pipeline=False,
+            summarizer_fn=fake_summarize,
         )
         assert report.failed_count == 1
         assert report.success_count == 0
+
+
+class TestDefaultSummarizer:
+    """默认 MiniMax summarizer 构造（P1-1 回归）。"""
+
+    def test_uses_minimax_provider(self, monkeypatch):
+        """summarizer_fn=None 时默认构造 MiniMax 客户端（不依赖真实 key）。"""
+        from research_tool.infrastructure.llm import MockLLMClient
+
+        captured: dict = {}
+
+        def fake_create(*args, **kwargs):
+            captured["provider"] = kwargs.get("provider") or (args[0] if args else None)
+            return MockLLMClient(
+                structured_response=LLMSummary(
+                    video_summary="s",
+                    video_chapters=[],
+                    video_takeaways=["t"],
+                    model="MiniMax-M3",
+                )
+            )
+
+        monkeypatch.setattr("research_tool.infrastructure.llm.LLMClient.create", fake_create)
+        fn = _build_default_summarizer()
+        assert captured["provider"] == "minimax"
+
+        meta = VideoMeta(video_id="x", platform="bilibili", title="t", author="a", duration_sec=60)
+        result = fn("some transcript", meta, "some transcript")
+        assert result.model == "MiniMax-M3"
+        assert result.video_summary == "s"
+
+    def test_missing_minimax_key_raises(self, monkeypatch):
+        """MINIMAX_API_KEY 缺失时，构建期即抛 LLMError（不回退占位摘要）。"""
+        monkeypatch.delenv("MINIMAX_API_KEY", raising=False)
+        with pytest.raises(LLMError, match="(?i)minimax|api_key"):
+            _build_default_summarizer()
 
 
 # --------------------------------------------------------------------------- #
