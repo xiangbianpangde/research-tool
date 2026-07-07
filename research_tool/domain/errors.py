@@ -407,11 +407,20 @@ def format_error(record: ErrorRecord) -> str:
 def resolve_exit_code(records: list[ErrorRecord]) -> int:
     """状态机仲裁：取所有记录中优先级最高的退出码（DD-001 M-010）。
 
-    优先级：403 > 401 > 500 > 0
-    - 403 = 预检/工具缺失（用户需先安装）
+    优先级：403 > 401 > 404 > 400 > 500 > 0
+    - 403 = 预检/工具缺失（用户需先安装，阻断一切）
     - 401 = 配置缺失（用户需填 API key）
+    - 404 = 视频不存在/已下线（用户需换 URL）
+    - 400 = URL 非法/格式错（用户需改正输入）
     - 500 = 系统/网络/转写/ffmpeg/LLM/缓存（瞬时/重试可解）
     - 0   = 无错误
+
+    确定性错误（404/400，用户必须处理）排在瞬时错误（500，可重试）之前——
+    无论是否遇到瞬时抖动，用户都得修 URL。本序列扩展自 DD-001 M-010 原始
+    状态机（原仅考虑 403/401/500），覆盖 V1.1 新增的 404/400 提示。
+
+    防御性兜底：任何未列入上述序列的非零 hint 仍返回非零退出码，
+    避免新增 hint 值时再次落入“非零却退出 0”的陷阱。
 
     Args:
         records: ErrorRecord 列表
@@ -422,11 +431,13 @@ def resolve_exit_code(records: list[ErrorRecord]) -> int:
     if not records:
         return 0
     codes = [lookup_code(r.code).exit_code_hint for r in records]
-    # 优先级序列
-    for priority in (403, 401, 500):
+    # 优先级序列（高→低）：环境阻断 > 配置缺失 > 用户输入错误 > 瞬时错误
+    for priority in (403, 401, 404, 400, 500):
         if priority in codes:
             return priority
-    return 0
+    # 防御性兜底：未列入序列的非零 hint 仍退出非零，杜绝“非零却返回 0”
+    non_zero = [c for c in codes if c != 0]
+    return non_zero[0] if non_zero else 0
 
 
 # --------------------------------------------------------------------------- #

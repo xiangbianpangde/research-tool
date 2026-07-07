@@ -159,7 +159,7 @@ class TestFormatError:
 
 
 class TestResolveExitCode:
-    """进程退出码仲裁（403 > 401 > 500 > 0）。"""
+    """进程退出码仲裁（403 > 401 > 404 > 400 > 500 > 0）。"""
 
     def test_empty_returns_zero(self):
         assert resolve_exit_code([]) == 0
@@ -185,6 +185,43 @@ class TestResolveExitCode:
         rec_401 = register_error(ErrorCode.E_CFG_001_CONFIG_MISSING.value)
         rec_500 = register_error(ErrorCode.E_DL_001_NETWORK_TIMEOUT.value)
         assert resolve_exit_code([rec_403, rec_401, rec_500]) == 403
+
+    def test_404_only(self):
+        # E_VID_001 (404) previously fell through to 0 — the bug.
+        rec = register_error(ErrorCode.E_VID_001_VIDEO_NOT_FOUND.value)
+        assert resolve_exit_code([rec]) == 404
+
+    def test_400_only(self):
+        # E_VID_002 (400) previously fell through to 0 — the bug.
+        rec = register_error(ErrorCode.E_VID_002_INVALID_URL.value)
+        assert resolve_exit_code([rec]) == 400
+
+    def test_404_priority_over_500(self):
+        # 确定性错误（404 用户需换 URL）应排在瞬时错误（500 可重试）之前。
+        rec_404 = register_error(ErrorCode.E_VID_001_VIDEO_NOT_FOUND.value)
+        rec_500 = register_error(ErrorCode.E_DL_001_NETWORK_TIMEOUT.value)
+        assert resolve_exit_code([rec_500, rec_404]) == 404
+        assert resolve_exit_code([rec_404, rec_500]) == 404
+
+    def test_401_priority_over_404(self):
+        # 配置缺失（401）排在用户输入错误（404）之前。
+        rec_401 = register_error(ErrorCode.E_CFG_001_CONFIG_MISSING.value)
+        rec_404 = register_error(ErrorCode.E_VID_001_VIDEO_NOT_FOUND.value)
+        assert resolve_exit_code([rec_404, rec_401]) == 401
+
+    def test_fallback_unknown_nonzero_hint(self, monkeypatch):
+        # 未列入优先级序列的非零 hint 仍须退出非零（防御性兜底）。
+        fake_info = ErrorInfo(
+            code="E_SYNTHETIC_418",
+            category="TST",
+            exit_code_hint=418,
+            default_scene="s",
+            default_cause="c",
+            default_suggestion="g",
+        )
+        rec = ErrorRecord(code="E_SYNTHETIC_418", scene="s", cause="c", suggestion="g")
+        monkeypatch.setattr("research_tool.domain.errors.lookup_code", lambda _code: fake_info)
+        assert resolve_exit_code([rec]) == 418
 
 
 class TestExceptionSubclasses:
