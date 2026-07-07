@@ -108,5 +108,5 @@ research_tool/common/         公共工具 ← logging_config.py / slug.py / tra
 - **版本**: 0.1.1
 - **测试**: 417 passed / 5 skipped
 - **Python**: >=3.11
-- **LLM**: 5 provider（DeepSeek / OpenAI / Anthropic / Ollama / MiniMax）；`from_config` 把 openai/deepseek/ollama/minimax 路由到 `OpenAILLMClient`（OpenAI 兼容），anthropic 走 `AnthropicLLMClient`；`DeepseekClient` 已导出但未接入 `from_config`（半公开，当前非活路径）
+- **LLM**: 5 provider（DeepSeek / OpenAI / Anthropic / Ollama / MiniMax）；`from_config` 把 openai/deepseek/ollama/minimax 路由到 `OpenAILLMClient`（OpenAI 兼容），anthropic 走 `AnthropicLLMClient`
 - **搜索源**: 12 个后端（DDG/OpenAlex/Crossref/arXiv/S2/PubMed/Wikipedia/GitHub/GoogleNews/Tavily/Bilibili/X）；`SearchEngine` Literal 含 14 名（`scholar`→arxiv、`x`/`twitter`→x_backend 为别名）

@@ -4,7 +4,7 @@
 |--------|------|------|
 | FP01: 六阶段管道 | ✅ | Collect→Deepen→Clean→Extract→Organize→Report |
 | FP02: 12 搜索源 | ✅ | DDG/OpenAlex/Crossref/arXiv/S2/PubMed/Wikipedia/GitHub/GoogleNews/Tavily/Bilibili/X（SearchEngine Literal 含 14 名：scholar→arxiv、x/twitter→x_backend 为别名） |
-| FP03: LLM 抽象 | ✅ | 5 provider：DeepSeek/OpenAI/Anthropic/Ollama/MiniMax；from_config 把 openai/deepseek/ollama/minimax 路由到 OpenAILLMClient，anthropic 走 AnthropicLLMClient（DeepseekClient 已导出但未接入 from_config） |
+| FP03: LLM 抽象 | ✅ | 5 provider：DeepSeek/OpenAI/Anthropic/Ollama/MiniMax；from_config 把 openai/deepseek/ollama/minimax 路由到 OpenAILLMClient，anthropic 走 AnthropicLLMClient |
 | FP04: CLI 接口 | ✅ | 11 个命令（collect/ingest-pdf/ocr-engines/clean/extract/organize/report/run/status/ui/config） |
 | FP05: Python SDK | ✅ | `research()` / `quick_collect()` 便捷函数 |
 | FP06: Web UI | ✅ | Gradio 可视化界面 |
