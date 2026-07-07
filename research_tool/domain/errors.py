@@ -305,7 +305,7 @@ _ERROR_REGISTRY: dict[str, ErrorInfo] = {
         exit_code_hint=401,
         default_scene="配置缺失",
         default_cause="config.yaml 不存在或必填字段缺失（llm.api_key 等）",
-        default_suggestion="cp config.example.yaml config.yaml 并填入 API key",
+        default_suggestion="cp docs/config.example.yaml config.yaml 并填入 API key",
     ),
     # 系统
     ErrorCode.E_SYS_001_UNKNOWN_ERROR_CODE.value: ErrorInfo(

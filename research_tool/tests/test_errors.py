@@ -97,6 +97,11 @@ class TestLookupCode:
             lookup_code("E_NOT_REAL_CODE_999")
         assert exc.value.code == ErrorCode.E_SYS_001_UNKNOWN_ERROR_CODE.value
 
+    def test_cfg_001_suggestion_points_to_docs(self):
+        # 回归：E_CFG_001 建议须指向 docs/config.example.yaml（实位于 docs/，非仓库根）。
+        info = lookup_code(ErrorCode.E_CFG_001_CONFIG_MISSING.value)
+        assert "docs/config.example.yaml" in info.default_suggestion
+
 
 class TestRegisterError:
     """register_error 公共 API。"""

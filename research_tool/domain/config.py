@@ -178,5 +178,5 @@ def load_config(
         return PipelineConfig.model_validate(data)
     except ValidationError as e:
         raise ConfigValidationError(
-            f"配置校验失败：\n{e}\n\n请检查 config.yaml；参考 config.example.yaml。"
+            f"配置校验失败：\n{e}\n\n请检查 config.yaml；参考 docs/config.example.yaml。"
         ) from e
