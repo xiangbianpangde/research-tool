@@ -12,7 +12,7 @@
 | FP08: 反偏差深挖 | ✅ | 实体拆分 + 画像注入 + 缺口检测 + 同名消歧 |
 | FP09: 反向传播 | ✅ | 知识树质量评估循环 |
 | FP10: 收束节点 v0.1.1 | ✅ | 密钥/日志/异常/死代码/架构/文档全面整改 |
-| FP11: 持续优化（2026-07） | ✅ | 包名 src→research_tool；MiniMax provider；SSRF 防护（common/url_guard.py）；gitleaks CI + ADR 0002；ruff 全仓清扫 |
+| FP11: 持续优化（2026-07） | ✅ | 包名 src→research_tool；MiniMax 永久视频总结器（ADR 0003）；DeepseekClient 移除（M-006）；defusedxml 迁移（S314）；resolve_exit_code 404/400 + config 路径修正；SSRF 防护（common/url_guard.py）；gitleaks CI + ADR 0002；ruff 全仓清扫 |
 
 ## 技术债
 
@@ -20,9 +20,7 @@
 |------|--------|---------|
 | 覆盖率报告（pytest-cov 未安装） | 🟡 中 | v0.1.1 收束 |
 | Git commit-msg 钩子（commitlint 配置已就位，pre-commit/CI 强制未落地） | 🟡 中 | v0.1.1 收束 |
+| wire resolve_exit_code 到 CLI 退出路径（CLI 现用 typer.Exit(code=1)，resolve_exit_code 仅库内调用） | 🟡 中 | 2026-07 Round 4 |
 | deepen.run 函数过长（已 noqa PLR0915，拆分仍 P1） | 🟢 低 | v0.1.1 收束 |
 | webui 长函数（run_video_note/run_web/build_ui 已 noqa PLR0915） | 🟢 低 | v0.1.1 收束 |
-| defusedxml 迁移（S314：arxiv/google_news 现用 xml.etree，已 noqa） | 🟡 中 | 2026-07 ruff 清扫 |
 | SSRF 封禁表可配置（198.18.0.0/15 当前豁免以兼容本机 DNS 代理） | 🟢 低 | 2026-07 SSRF |
-| resolve_exit_code 仅认 403/401/500（404/400 解析为 0） | 🟢 低 | 2026-07 SSRF |
-| config.py 错误提示指向仓库根 config.example.yaml，实位于 docs/ | 🟢 低 | 2026-07 文档对齐 |
