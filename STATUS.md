@@ -12,7 +12,7 @@
 | FP08: 反偏差深挖 | ✅ | 实体拆分 + 画像注入 + 缺口检测 + 同名消歧 |
 | FP09: 反向传播 | ✅ | 知识树质量评估循环 |
 | FP10: 收束节点 v0.1.1 | ✅ | 密钥/日志/异常/死代码/架构/文档全面整改 |
-| FP11: 持续优化（2026-07） | ✅ | 包名 src→research_tool；MiniMax 永久视频总结器（ADR 0003，--video-url 默认接入）；DeepseekClient 移除（M-006）；defusedxml 迁移（S314）；resolve_exit_code 404/400 + config 路径修正；移除死依赖 arxiv>=2.1；SSRF 防护（common/url_guard.py）；gitleaks CI + ADR 0002；ruff 全仓清扫；M-010 错误系统 CLI 接线（format_error+resolve_exit_code→_fail_video_ingest，VideoIngestError 退出码 1→403/401/404/400/500）；注册 E_VID_003_PIPELINE_FAIL（错误码 12→13） |
+| FP11: 持续优化（2026-07） | ✅ | 包名 src→research_tool；MiniMax 永久视频总结器（ADR 0003，--video-url 默认接入）；DeepseekClient 移除（M-006）；defusedxml 迁移（S314）；resolve_exit_code 404/400 + config 路径修正；移除死依赖 arxiv>=2.1；SSRF 防护（common/url_guard.py）；gitleaks CI + ADR 0002；ruff 全仓清扫；M-010 错误系统 CLI 接线（format_error+resolve_exit_code→_fail_video_ingest，VideoIngestError 退出码 1→403/401/404/400/500）；注册 E_VID_003_PIPELINE_FAIL（错误码 12→13）；M-010 遗留错误码注册（13 个：E_VID_URL_REJECTED/E_DL_002_VERSION_TOO_OLD/E_DL_BILI_403/E_DL_LOCAL_001/002/E_TR_001/E_TR_003/E_TR_004/E_PIPE_001/E_PIPE_DISK_FULL/E_PIPE_CONFIG_MISMATCH/E_LIM_001/E_LIM_002，错误码 13→26）+ register/raise 不一致对齐（14 处；4 处 raise 语义校正：yt-dlp 未安装 500→403、Cookie 缺失 400→401） |
 
 ## 技术债
 
@@ -20,7 +20,8 @@
 |------|--------|---------|
 | 覆盖率报告（pytest-cov 未安装） | 🟡 中 | v0.1.1 收束 |
 | Git commit-msg 钩子（commitlint 配置已就位，pre-commit/CI 强制未落地） | 🟡 中 | v0.1.1 收束 |
-| VideoIngest 错误码字典与 raise 站点脱节（56 个 raise 站点中仅 cli.py:493 用已注册码 E_VID_003；~15 个遗留未注册码散落 downloader/transcriber/ffmpeg_wrapper/notes_schema/pipeline_adapter/orchestrator，如 E_DL_001/E_DL_004_YT_DLP_FAILED/E_DL_BILI_403/E_TR_001/E_PIPE_001/E_NS_001 等；均走 _fail_video_ingest 降级 exit 1，不经 3 段式；ingest 模块 register_error 与 raise code 还存在跨码不一致） | 🔴 高 | 2026-07 Round 9 |
+| ✅ VideoIngest 错误码字典与 raise 站点脱节 — R10 已解决（13 个遗留错误码注册 + 14 处 register/raise 不一致对齐；AST 审计测试确认所有 raise 站点 lookup_code 成功，M-010 不再装饰性） | ✅ 已解决 | 2026-07 Round 10 |
+| 4 个死错误码常量（E_VID_PIPELINE_FAIL/E_LLM_002_CHAPTERS_FALLBACK/E_NS_001_YAML_PARSE_FAIL/E_NS_002_SCREENSHOT_MISSING：定义+导出但从不 raise，R10 审计发现；可安全删除或注册） | 🟢 低 | 2026-07 Round 10 |
 | deepen.run 函数过长（已 noqa PLR0915，拆分仍 P1） | 🟢 低 | v0.1.1 收束 |
 | webui 长函数（run_video_note/run_web/build_ui 已 noqa PLR0915） | 🟢 低 | v0.1.1 收束 |
 | SSRF 封禁表可配置（198.18.0.0/15 当前豁免以兼容本机 DNS 代理） | 🟢 低 | 2026-07 SSRF |
