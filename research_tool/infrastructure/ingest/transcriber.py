@@ -473,7 +473,7 @@ class GroqEngine:
             raise
         except Exception as e:
             register_error(
-                ErrorCode.E_LLM_001_LLM_CALL_FAILED.value,
+                ErrorCode.E_TR_003_GROQ_FAILED.value,
                 scene="Groq 转写 API 调用失败",
                 cause=str(e),
                 suggestion="检查 GROQ_API_KEY 与网络；或切回 whisper",
@@ -631,7 +631,7 @@ async def transcribe(
         except asyncio.TimeoutError:
             last_err = TranscribeError(E_TR_004, f"引擎 {eng.value} 转写超时 ({timeout_sec}s)")
             register_error(
-                ErrorCode.E_TX_001_WHISPER_INIT_FAILED.value,
+                ErrorCode.E_TR_004_TIMEOUT.value,
                 scene=f"{eng.value} 转写超时",
                 cause=f"超过 {timeout_sec}s 未完成",
                 suggestion="调大 transcribe_timeout_sec，或减小 model_size",
@@ -645,7 +645,7 @@ async def transcribe(
 
     # 所有引擎失败
     register_error(
-        ErrorCode.E_TX_001_WHISPER_INIT_FAILED.value,
+        ErrorCode.E_TR_001.value,
         scene="所有转写引擎失败",
         cause=str(last_err) if last_err else "未知错误",
         suggestion="检查音频文件；或检查 API key / 模型可用性",

@@ -18,7 +18,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from research_tool.domain.errors import DownloadError
+from research_tool.domain.errors import DownloadError, ErrorCode
 from research_tool.infrastructure.ingest.downloader import (
     COOKIE_REQUIRED_PERMS,
     E_DL_001,
@@ -252,7 +252,7 @@ class TestYtDlpVersionValidator:
         assert v.compare("2022.01.01") is False
 
     def test_check_raises_when_missing(self):
-        """mock ImportError → 抛 DownloadError(E_DL_003_NETWORK)。"""
+        """mock ImportError → 抛 DownloadError(E_PF_001_TOOL_MISSING)（R10：原 E_DL_003_NETWORK，语义校正为工具缺失）。"""
         import builtins
 
         real_import = builtins.__import__
@@ -266,7 +266,7 @@ class TestYtDlpVersionValidator:
             v = YtDlpVersionValidator()
             with pytest.raises(DownloadError) as exc_info:
                 v.check()
-            assert exc_info.value.code == E_DL_003_NETWORK
+            assert exc_info.value.code == ErrorCode.E_PF_001_TOOL_MISSING.value
 
     def test_validate_raises_when_too_old(self):
         """mock yt_dlp.version.__version__ 旧值。"""

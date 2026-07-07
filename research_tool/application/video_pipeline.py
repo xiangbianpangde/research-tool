@@ -139,7 +139,7 @@ def validate_video_url(url: str) -> VideoURL | None:
         return VideoURL(platform="youtube", url=url, video_id=video_id or None)
     # 拒绝
     register_error(
-        ErrorCode.E_VID_002_INVALID_URL.value,
+        ErrorCode.E_VID_URL_REJECTED.value,
         scene="URL 不在白名单（仅 bilibili / youtube）",
         cause=f"URL {url[:80]} 不匹配 bilibili.com / b23.tv / youtube.com / youtu.be",
         suggestion="使用 B 站或 YouTube 视频完整 URL",

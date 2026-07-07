@@ -96,7 +96,7 @@ class MarkdownWriter:
             usage = shutil.disk_usage(output_dir)
             if usage.free < MIN_DISK_FREE_BYTES:
                 register_error(
-                    ErrorCode.E_DL_001_NETWORK_TIMEOUT.value,
+                    ErrorCode.E_PIPE_DISK_FULL.value,
                     scene="磁盘剩余空间不足",
                     cause=f"剩余 {usage.free // 1024 // 1024}MB < 100MB 阈值",
                     suggestion="清理磁盘或更换输出目录",
@@ -169,7 +169,7 @@ class MarkdownWriter:
                     time.sleep(0.3 * (2**attempt))
                     continue
                 register_error(
-                    ErrorCode.E_DL_001_NETWORK_TIMEOUT.value,
+                    ErrorCode.E_PIPE_001.value,
                     scene="Markdown 落盘失败",
                     cause=str(e),
                     suggestion="检查输出目录权限 / 磁盘空间",

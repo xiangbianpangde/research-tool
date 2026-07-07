@@ -3,7 +3,7 @@
 依据 03-Python库接口设计.md §7 + DD-001 M-010 错误处理器。
 
 扩展点（V1.1 VideoIngest）：
-- 13 个 E_* 错误码常量（download/transcribe/ffmpeg/llm/cache/preflight/...）
+- 26 个 E_* 错误码常量（download/transcribe/ffmpeg/llm/cache/preflight/...）
 - ErrorRecord 数据类（DE-010）：错误码 + 场景/原因/建议 + 触发时间
 - register_error / format_error / resolve_exit_code / lookup_code 公共 API
 - 进程退出码仲裁：403 > 401 > 500 > 0（DD-001 M-010 状态机）
@@ -97,12 +97,12 @@ class ConfigError(VideoIngestError):
 
 
 # --------------------------------------------------------------------------- #
-# V1.1 新增：13 个错误码常量（DD-001 M-010 错误码字典）
+# V1.1 新增：26 个错误码常量（DD-001 M-010 错误码字典）
 # --------------------------------------------------------------------------- #
 
 
 class ErrorCode(str, Enum):
-    """13 个 VideoIngest 错误码（V1.1 范围）。
+    """26 个 VideoIngest 错误码（V1.1 范围）。
 
     命名规则：[E_]_[CATEGORY]_[NUMBER]_[DETAIL]
     - E_VID_* = 视频相关
@@ -116,18 +116,26 @@ class ErrorCode(str, Enum):
     - E_SYS_* = 系统级
     """
 
-    # 视频（3）
+    # 视频（4）
     E_VID_001_VIDEO_NOT_FOUND = "E_VID_001_VIDEO_NOT_FOUND"
     E_VID_002_INVALID_URL = "E_VID_002_INVALID_URL"
     E_VID_003_PIPELINE_FAIL = "E_VID_003_PIPELINE_FAIL"
+    E_VID_URL_REJECTED = "E_VID_URL_REJECTED"
 
-    # 下载（2）
+    # 下载（6）
     E_DL_001_NETWORK_TIMEOUT = "E_DL_001_NETWORK_TIMEOUT"
     E_DL_002_YT_DLP_FAILED = "E_DL_002_YT_DLP_FAILED"
+    E_DL_002_VERSION_TOO_OLD = "E_DL_002_VERSION_TOO_OLD"
+    E_DL_BILI_403 = "E_DL_BILI_403"
+    E_DL_LOCAL_001 = "E_DL_LOCAL_001"
+    E_DL_LOCAL_002 = "E_DL_LOCAL_002"
 
-    # 转写（2）
+    # 转写（5）
     E_TX_001_WHISPER_INIT_FAILED = "E_TX_001_WHISPER_INIT_FAILED"
     E_TX_002_AUDIO_EXTRACT_FAILED = "E_TX_002_AUDIO_EXTRACT_FAILED"
+    E_TR_001 = "E_TR_001"
+    E_TR_003_GROQ_FAILED = "E_TR_003_GROQ_FAILED"
+    E_TR_004_TIMEOUT = "E_TR_004_TIMEOUT"
 
     # ffmpeg（1）
     E_FM_001_FFMPEG_INVOKE_FAILED = "E_FM_001_FFMPEG_INVOKE_FAILED"
@@ -143,6 +151,15 @@ class ErrorCode(str, Enum):
 
     # 配置（1）
     E_CFG_001_CONFIG_MISSING = "E_CFG_001_CONFIG_MISSING"
+
+    # 管道（3）
+    E_PIPE_001 = "E_PIPE_001"
+    E_PIPE_DISK_FULL = "E_PIPE_DISK_FULL"
+    E_PIPE_CONFIG_MISMATCH = "E_PIPE_CONFIG_MISMATCH"
+
+    # 限流（2）
+    E_LIM_001 = "E_LIM_001"
+    E_LIM_002 = "E_LIM_002"
 
     # 系统（1）
     E_SYS_001_UNKNOWN_ERROR_CODE = "E_SYS_001_UNKNOWN_ERROR_CODE"
@@ -210,7 +227,7 @@ class ErrorRecord:
 # --------------------------------------------------------------------------- #
 
 
-# 默认错误码字典（V1.1 全部 13 个；扩展时往 _ERROR_REGISTRY 追加）
+# 默认错误码字典（V1.1 全部 26 个；扩展时往 _ERROR_REGISTRY 追加）
 _ERROR_REGISTRY: dict[str, ErrorInfo] = {
     # 视频
     ErrorCode.E_VID_001_VIDEO_NOT_FOUND.value: ErrorInfo(
@@ -237,6 +254,14 @@ _ERROR_REGISTRY: dict[str, ErrorInfo] = {
         default_cause="所有视频 URL 处理失败（下载/转写/总结均未成功）",
         default_suggestion="检查上游错误；或减少 URL 数量重试",
     ),
+    ErrorCode.E_VID_URL_REJECTED.value: ErrorInfo(
+        code=ErrorCode.E_VID_URL_REJECTED.value,
+        category="VID",
+        exit_code_hint=400,
+        default_scene="URL 不在白名单",
+        default_cause="URL 不匹配 bilibili / youtube 白名单",
+        default_suggestion="使用 B 站或 YouTube 视频完整 URL",
+    ),
     # 下载
     ErrorCode.E_DL_001_NETWORK_TIMEOUT.value: ErrorInfo(
         code=ErrorCode.E_DL_001_NETWORK_TIMEOUT.value,
@@ -254,6 +279,38 @@ _ERROR_REGISTRY: dict[str, ErrorInfo] = {
         default_cause="yt-dlp 二进制缺失/版本过旧/无法解析该 URL",
         default_suggestion="pip install -U yt-dlp；确认 URL 在浏览器可正常打开",
     ),
+    ErrorCode.E_DL_002_VERSION_TOO_OLD.value: ErrorInfo(
+        code=ErrorCode.E_DL_002_VERSION_TOO_OLD.value,
+        category="DL",
+        exit_code_hint=403,
+        default_scene="yt-dlp 版本过旧",
+        default_cause="已安装的 yt-dlp 版本低于最低要求",
+        default_suggestion="pip install -U yt-dlp 升级到最新版",
+    ),
+    ErrorCode.E_DL_BILI_403.value: ErrorInfo(
+        code=ErrorCode.E_DL_BILI_403.value,
+        category="DL",
+        exit_code_hint=403,
+        default_scene="B 站拒绝访问（403）",
+        default_cause="未提供有效 Cookie / 视频需要登录",
+        default_suggestion="配置 B 站 SESSDATA Cookie 后重试",
+    ),
+    ErrorCode.E_DL_LOCAL_001.value: ErrorInfo(
+        code=ErrorCode.E_DL_LOCAL_001.value,
+        category="DL",
+        exit_code_hint=400,
+        default_scene="本地文件不存在或不可读",
+        default_cause="路径不存在 / 不是文件 / 无读权限",
+        default_suggestion="检查文件路径与读权限",
+    ),
+    ErrorCode.E_DL_LOCAL_002.value: ErrorInfo(
+        code=ErrorCode.E_DL_LOCAL_002.value,
+        category="DL",
+        exit_code_hint=400,
+        default_scene="本地文件格式不支持",
+        default_cause="后缀不在支持列表内",
+        default_suggestion="使用支持的视频/音频后缀之一",
+    ),
     # 转写
     ErrorCode.E_TX_001_WHISPER_INIT_FAILED.value: ErrorInfo(
         code=ErrorCode.E_TX_001_WHISPER_INIT_FAILED.value,
@@ -270,6 +327,30 @@ _ERROR_REGISTRY: dict[str, ErrorInfo] = {
         default_scene="音频抽取失败",
         default_cause="ffmpeg 抽音轨子进程失败/视频无音轨/格式不受支持",
         default_suggestion="检查 ffmpeg 是否安装；用 ffprobe 确认音轨存在",
+    ),
+    ErrorCode.E_TR_001.value: ErrorInfo(
+        code=ErrorCode.E_TR_001.value,
+        category="TX",
+        exit_code_hint=500,
+        default_scene="所有转写引擎失败",
+        default_cause="whisper / Groq 均不可用或均失败",
+        default_suggestion="检查音频文件、API key、模型可用性",
+    ),
+    ErrorCode.E_TR_003_GROQ_FAILED.value: ErrorInfo(
+        code=ErrorCode.E_TR_003_GROQ_FAILED.value,
+        category="TX",
+        exit_code_hint=500,
+        default_scene="Groq 转写失败",
+        default_cause="API key 缺失 / 网络异常 / 音频压缩失败",
+        default_suggestion="检查 GROQ_API_KEY 与网络；或切回 whisper",
+    ),
+    ErrorCode.E_TR_004_TIMEOUT.value: ErrorInfo(
+        code=ErrorCode.E_TR_004_TIMEOUT.value,
+        category="TX",
+        exit_code_hint=500,
+        default_scene="转写超时",
+        default_cause="引擎在超时上限内未完成",
+        default_suggestion="调大 transcribe_timeout_sec，或减小 model_size",
     ),
     # ffmpeg
     ErrorCode.E_FM_001_FFMPEG_INVOKE_FAILED.value: ErrorInfo(
@@ -315,6 +396,48 @@ _ERROR_REGISTRY: dict[str, ErrorInfo] = {
         default_scene="配置缺失",
         default_cause="config.yaml 不存在或必填字段缺失（llm.api_key 等）",
         default_suggestion="cp docs/config.example.yaml config.yaml 并填入 API key",
+    ),
+    # 管道（R10 新增）
+    ErrorCode.E_PIPE_001.value: ErrorInfo(
+        code=ErrorCode.E_PIPE_001.value,
+        category="PIPE",
+        exit_code_hint=500,
+        default_scene="Markdown 落盘失败",
+        default_cause="写文件失败（重试后仍失败）",
+        default_suggestion="检查输出目录权限 / 磁盘空间",
+    ),
+    ErrorCode.E_PIPE_DISK_FULL.value: ErrorInfo(
+        code=ErrorCode.E_PIPE_DISK_FULL.value,
+        category="PIPE",
+        exit_code_hint=500,
+        default_scene="磁盘剩余空间不足",
+        default_cause="剩余空间 < 100MB 阈值",
+        default_suggestion="清理磁盘或更换输出目录",
+    ),
+    ErrorCode.E_PIPE_CONFIG_MISMATCH.value: ErrorInfo(
+        code=ErrorCode.E_PIPE_CONFIG_MISMATCH.value,
+        category="PIPE",
+        exit_code_hint=401,
+        default_scene="Collect 配置不一致",
+        default_cause="ResearchPipeline 配置加载/校验失败",
+        default_suggestion="检查 config.yaml 与 .env",
+    ),
+    # 限流（R10 新增）
+    ErrorCode.E_LIM_001.value: ErrorInfo(
+        code=ErrorCode.E_LIM_001.value,
+        category="LIM",
+        exit_code_hint=400,
+        default_scene="URL 数量超限",
+        default_cause="输入 URL 数量超过上限",
+        default_suggestion="减少 URL 数量后重试",
+    ),
+    ErrorCode.E_LIM_002.value: ErrorInfo(
+        code=ErrorCode.E_LIM_002.value,
+        category="LIM",
+        exit_code_hint=400,
+        default_scene="资源池获取超时",
+        default_cause="并发下载信号量在超时内未获取",
+        default_suggestion="减小并发数或重试",
     ),
     # 系统
     ErrorCode.E_SYS_001_UNKNOWN_ERROR_CODE.value: ErrorInfo(

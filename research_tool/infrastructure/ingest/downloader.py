@@ -241,7 +241,7 @@ class YtDlpVersionValidator:
                 suggestion="pip install yt-dlp 或 pip install -e .[video]",
             )
             raise DownloadError(
-                E_DL_003_NETWORK,
+                ErrorCode.E_PF_001_TOOL_MISSING.value,
                 "yt-dlp 未安装；请 pip install -e .[video]",
             ) from e
 
@@ -275,7 +275,7 @@ class YtDlpVersionValidator:
                 suggestion="重装 yt-dlp：pip install -U yt-dlp",
             )
             raise DownloadError(
-                E_DL_003_NETWORK,
+                ErrorCode.E_PF_001_TOOL_MISSING.value,
                 f"yt-dlp 版本检测失败: {e}",
             ) from e
 
@@ -299,7 +299,7 @@ class YtDlpVersionValidator:
         actual = self.check()
         if not self.compare(actual):
             register_error(
-                ErrorCode.E_PF_001_TOOL_MISSING.value,
+                ErrorCode.E_DL_002_VERSION_TOO_OLD.value,
                 scene=f"yt-dlp 版本过旧（{actual} < {self.min_version}）",
                 cause=f"实际版本 {actual} 低于最低要求 {self.min_version}",
                 suggestion="pip install -U yt-dlp",
@@ -344,7 +344,10 @@ class CookieInjector:
                 suggestion="配置正确的 cookie_path 或不传",
                 context={"cookie_path": str(self.cookie_path)},
             )
-            raise DownloadError(E_DL_001, f"Cookie 文件不存在: {self.cookie_path}")
+            raise DownloadError(
+                ErrorCode.E_CFG_001_CONFIG_MISSING.value,
+                f"Cookie 文件不存在: {self.cookie_path}",
+            )
 
         # Windows 上跳过 0o600 硬检查（stat.S_IMODE 仅低 9 位有效，但 Windows
         # ACL 与 Unix 文件权限模型不同）。Windows 上若文件存在即视为通过。
@@ -361,7 +364,7 @@ class CookieInjector:
                 context={"cookie_path": str(self.cookie_path), "mode": oct(mode)},
             )
             raise DownloadError(
-                E_DL_001,
+                ErrorCode.E_CFG_001_CONFIG_MISSING.value,
                 f"Cookie 文件权限 {oct(mode)} 不安全；需 {oct(self.required_perms)}",
             )
         return True
@@ -666,7 +669,7 @@ class BilibiliDownloader:
             # 403 严格不重试（AR 调研 S-101）
             if e.code == E_DL_BILI_403:
                 register_error(
-                    ErrorCode.E_DL_002_YT_DLP_FAILED.value,
+                    ErrorCode.E_DL_BILI_403.value,
                     scene="B 站 403（需要 Cookie）",
                     cause="未提供有效 Cookie / 视频需要登录",
                     suggestion="配置 B 站 SESSDATA Cookie 后重试",
@@ -740,7 +743,7 @@ class LocalFileResolver:
         p = Path(path)
         if not p.exists():
             register_error(
-                ErrorCode.E_VID_001_VIDEO_NOT_FOUND.value,
+                ErrorCode.E_DL_LOCAL_001.value,
                 scene="本地文件不存在",
                 cause=f"路径 {path} 不存在",
                 suggestion="检查文件路径",
@@ -753,7 +756,7 @@ class LocalFileResolver:
         ext = p.suffix.lower()
         if ext not in self.supported_ext:
             register_error(
-                ErrorCode.E_VID_002_INVALID_URL.value,
+                ErrorCode.E_DL_LOCAL_002.value,
                 scene="本地文件格式不支持",
                 cause=f"后缀 {ext} 不在支持列表 {self.supported_ext}",
                 suggestion=f"使用以下后缀之一: {', '.join(self.supported_ext)}",

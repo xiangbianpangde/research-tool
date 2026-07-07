@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import ast
+
 import pytest
 
 from research_tool.domain.errors import (
@@ -23,10 +25,10 @@ from research_tool.domain.errors import (
 
 
 class TestErrorCodeEnum:
-    """13 个错误码常量。"""
+    """26 个错误码常量。"""
 
-    def test_all_13_codes_present(self):
-        assert len(list(ErrorCode)) == 13
+    def test_all_26_codes_present(self):
+        assert len(list(ErrorCode)) == 26
 
     def test_code_string_values(self):
         assert ErrorCode.E_VID_001_VIDEO_NOT_FOUND.value == "E_VID_001_VIDEO_NOT_FOUND"
@@ -34,6 +36,20 @@ class TestErrorCodeEnum:
         assert ErrorCode.E_DL_001_NETWORK_TIMEOUT.value == "E_DL_001_NETWORK_TIMEOUT"
         assert ErrorCode.E_LLM_001_LLM_CALL_FAILED.value == "E_LLM_001_LLM_CALL_FAILED"
         assert ErrorCode.E_SYS_001_UNKNOWN_ERROR_CODE.value == "E_SYS_001_UNKNOWN_ERROR_CODE"
+        # R10 新增（13 个遗留 raise 站点错误码）
+        assert ErrorCode.E_VID_URL_REJECTED.value == "E_VID_URL_REJECTED"
+        assert ErrorCode.E_DL_002_VERSION_TOO_OLD.value == "E_DL_002_VERSION_TOO_OLD"
+        assert ErrorCode.E_DL_BILI_403.value == "E_DL_BILI_403"
+        assert ErrorCode.E_DL_LOCAL_001.value == "E_DL_LOCAL_001"
+        assert ErrorCode.E_DL_LOCAL_002.value == "E_DL_LOCAL_002"
+        assert ErrorCode.E_TR_001.value == "E_TR_001"
+        assert ErrorCode.E_TR_003_GROQ_FAILED.value == "E_TR_003_GROQ_FAILED"
+        assert ErrorCode.E_TR_004_TIMEOUT.value == "E_TR_004_TIMEOUT"
+        assert ErrorCode.E_PIPE_001.value == "E_PIPE_001"
+        assert ErrorCode.E_PIPE_DISK_FULL.value == "E_PIPE_DISK_FULL"
+        assert ErrorCode.E_PIPE_CONFIG_MISMATCH.value == "E_PIPE_CONFIG_MISMATCH"
+        assert ErrorCode.E_LIM_001.value == "E_LIM_001"
+        assert ErrorCode.E_LIM_002.value == "E_LIM_002"
 
     def test_codes_unique(self):
         values = [c.value for c in ErrorCode]
@@ -45,6 +61,124 @@ class TestErrorCodeEnum:
         assert info.exit_code_hint == 500
         assert info.category == "VID"
         assert "视频管道处理失败" in info.default_scene
+
+
+# R10 新增：13 个遗留 raise 站点错误码注册后的 exit_code_hint 期望。
+_R10_NEW_CODE_HINTS = {
+    ErrorCode.E_VID_URL_REJECTED.value: 400,
+    ErrorCode.E_DL_002_VERSION_TOO_OLD.value: 403,
+    ErrorCode.E_DL_BILI_403.value: 403,
+    ErrorCode.E_DL_LOCAL_001.value: 400,
+    ErrorCode.E_DL_LOCAL_002.value: 400,
+    ErrorCode.E_TR_001.value: 500,
+    ErrorCode.E_TR_003_GROQ_FAILED.value: 500,
+    ErrorCode.E_TR_004_TIMEOUT.value: 500,
+    ErrorCode.E_PIPE_001.value: 500,
+    ErrorCode.E_PIPE_DISK_FULL.value: 500,
+    ErrorCode.E_PIPE_CONFIG_MISMATCH.value: 401,
+    ErrorCode.E_LIM_001.value: 400,
+    ErrorCode.E_LIM_002.value: 400,
+}
+
+
+class TestR10RegisteredCodes:
+    """R10：13 个遗留 raise 站点错误码注册后，lookup_code 全部可解析 + 仲裁退出码正确。"""
+
+    @pytest.mark.parametrize("code,hint", list(_R10_NEW_CODE_HINTS.items()))
+    def test_new_code_registered(self, code, hint):
+        info = lookup_code(code)
+        assert info.code == code
+        assert info.exit_code_hint == hint
+        assert info.default_scene
+        assert info.default_cause
+        assert info.default_suggestion
+
+    @pytest.mark.parametrize("code,hint", list(_R10_NEW_CODE_HINTS.items()))
+    def test_new_code_resolve_exit_code(self, code, hint):
+        rec = register_error(code)
+        assert resolve_exit_code([rec]) == hint
+
+
+class TestRaiseSitesRegistered:
+    """R10 验收测试：每个 raise <X>Error(code, ...) 的 code 必须在 _ERROR_REGISTRY。
+
+    用 AST 解析生产模块，提取所有 raise 站点的错误码（常量名或 ErrorCode.E_X.value），
+    解析为字符串后断言 lookup_code 成功——确保 M-010 不再是装饰性的（无 ConfigError 兜底）。
+    """
+
+    _MODULES = [
+        "presentation/cli.py",
+        "application/video_pipeline.py",
+        "application/video_concurrent_orchestrator.py",
+        "infrastructure/ingest/downloader.py",
+        "infrastructure/ingest/transcriber.py",
+        "infrastructure/ingest/ffmpeg_wrapper.py",
+        "infrastructure/ingest/pipeline_adapter.py",
+    ]
+    _ERROR_CLASSES = {
+        "VideoIngestError",
+        "DownloadError",
+        "TranscribeError",
+        "FFmpegError",
+        "CacheError",
+        "PreflightError",
+        "ConfigError",
+    }
+
+    def test_every_raise_code_is_registered(self):
+        import ast
+        import importlib
+        from pathlib import Path
+
+        root = Path(__file__).resolve().parent.parent  # research_tool/
+        codes: set[str] = set()
+        for rel in self._MODULES:
+            mod_path = root / rel
+            tree = ast.parse(mod_path.read_text(encoding="utf-8"))
+            mod = importlib.import_module(
+                "research_tool." + rel.replace("/", ".").removesuffix(".py")
+            )
+            for node in ast.walk(tree):
+                if not isinstance(node, ast.Raise):
+                    continue
+                exc = node.exc
+                if not isinstance(exc, ast.Call):
+                    continue
+                func = exc.func
+                if not (isinstance(func, ast.Name) and func.id in self._ERROR_CLASSES):
+                    continue
+                if not exc.args:
+                    continue
+                resolved = self._resolve_code(exc.args[0], mod)
+                if resolved is not None:
+                    codes.add(resolved)
+
+        assert codes, "AST 未找到任何 raise 站点（解析异常）"
+        unregistered = sorted(c for c in codes if self._lookup_fails(c))
+        assert not unregistered, f"未注册的 raise 错误码: {unregistered}"
+
+    @staticmethod
+    def _resolve_code(arg, mod) -> str | None:
+        # 形如 E_DL_BILI_403（模块级常量，可能别名到 ErrorCode.E_X.value）
+        if isinstance(arg, ast.Name):
+            val = getattr(mod, arg.id, None)
+            return val if isinstance(val, str) else None
+        # 形如 ErrorCode.E_PF_001_TOOL_MISSING.value
+        if isinstance(arg, ast.Attribute) and arg.attr == "value":
+            inner = arg.value
+            if isinstance(inner, ast.Attribute) and isinstance(inner.value, ast.Name):
+                if inner.value.id == "ErrorCode":
+                    member = getattr(ErrorCode, inner.attr, None)
+                    return member.value if member is not None else None
+        return None
+
+    @staticmethod
+    def _lookup_fails(code: str) -> bool:
+        try:
+            lookup_code(code)
+            return False
+        except ConfigError:
+            return True
 
 
 class TestErrorInfo:
