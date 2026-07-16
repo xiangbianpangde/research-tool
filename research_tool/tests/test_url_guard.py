@@ -37,6 +37,26 @@ class TestScheme:
     def test_allows_https_literal_public(self) -> None:
         assert_safe_url("https://93.184.216.34/")
 
+    @pytest.mark.parametrize(
+        "url",
+        [
+            "https://alice:secret@93.184.216.34/paper",
+            "https://93.184.216.34/paper?token=secret",
+            "https://93.184.216.34/paper?api_key=secret",
+            "https://93.184.216.34/paper?X-Amz-Signature=secret",
+            "https://93.184.216.34/paper?client_secret=secret",
+            "https://93.184.216.34/paper?refresh_token=secret",
+            "https://93.184.216.34/paper?id_token=secret",
+            "https://93.184.216.34/paper?x-amz-security-token=secret",
+            "https://93.184.216.34/paper?x-goog-signature=secret",
+            "https://93.184.216.34/paper?awsaccesskeyid=secret",
+            "https://93.184.216.34/paper#access_token=secret",
+        ],
+    )
+    def test_rejects_embedded_credentials(self, url: str) -> None:
+        with pytest.raises(UrlBlockedError, match="credential"):
+            assert_safe_url(url)
+
 
 # --------------------------------------------------------------------------- #
 # Unit: literal IP
@@ -53,6 +73,7 @@ class TestLiteralIP:
             "169.254.169.254",  # cloud metadata
             "172.16.0.1",
             "100.64.0.1",  # CGNAT
+            "198.18.0.1",  # benchmarking/fake-IP; unsafe without explicit proxy mode
             "0.0.0.1",
             "224.0.0.1",  # multicast
             "240.0.0.1",  # reserved

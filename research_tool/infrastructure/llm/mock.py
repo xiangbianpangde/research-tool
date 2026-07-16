@@ -6,7 +6,7 @@
 from __future__ import annotations
 
 from collections.abc import AsyncIterator, Callable
-from typing import TypeVar
+from typing import TypeVar, cast
 
 from pydantic import BaseModel
 
@@ -34,6 +34,9 @@ class MockLLMClient(LLMClient):
         self._structured_response = structured_response
         self.calls: list[dict] = []
 
+    async def healthcheck(self, timeout_sec: float = 10.0) -> None:
+        self.calls.append({"kind": "health"})
+
     async def chat(self, prompt, system=None, temperature=None) -> str:
         self.calls.append({"kind": "chat", "prompt": prompt, "system": system})
         if callable(self._chat_response):
@@ -44,7 +47,7 @@ class MockLLMClient(LLMClient):
         self.calls.append({"kind": "structured", "prompt": prompt, "schema": schema})
         resp = self._structured_response
         if callable(resp):
-            return resp(prompt, schema)
+            return cast(T, resp(prompt, schema))
         if isinstance(resp, schema):
             return resp
         # 缺省：构造空实例（要求 schema 字段都有默认值）

@@ -44,14 +44,33 @@ from research_tool.infrastructure.ingest.transcriber import (
 class TestEngineSelector:
     """引擎选择 + 降级链 + 可用性。"""
 
-    def test_default_prefers_whisper(self):
+    def test_default_prefers_minimax(self):
         sel = EngineSelector()
-        assert sel.preferred_engine == EngineType.WHISPER
+        assert sel.preferred_engine == EngineType.MINIMAX
 
-    def test_groq_unavailable_without_key(self):
-        sel = EngineSelector(preferred_engine=EngineType.GROQ, groq_api_key=None)
+    def test_minimax_available_with_key(self):
+        sel = EngineSelector(
+            preferred_engine=EngineType.MINIMAX, minimax_api_key="mm-test-key"
+        )
+        assert sel.is_available(EngineType.MINIMAX) is True
+        assert sel.select() == EngineType.MINIMAX
+
+    def test_minimax_unavailable_without_key(self, monkeypatch):
+        monkeypatch.delenv("MINIMAX_API_KEY", raising=False)
+        monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+        sel = EngineSelector(preferred_engine=EngineType.MINIMAX, minimax_api_key=None)
+        assert sel.is_available(EngineType.MINIMAX) is False
+        # 无 MiniMax key 时 select 落到 whisper（若已装）或 groq
+        chosen = sel.select()
+        assert chosen in (EngineType.WHISPER, EngineType.GROQ, EngineType.MINIMAX)
+
+    def test_groq_unavailable_without_key(self, monkeypatch):
+        monkeypatch.delenv("MINIMAX_API_KEY", raising=False)
+        monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+        sel = EngineSelector(
+            preferred_engine=EngineType.GROQ, groq_api_key=None, minimax_api_key=None
+        )
         assert sel.is_available(EngineType.GROQ) is False
-        # 主选自动降级到 whisper
         assert sel.select() == EngineType.WHISPER
 
     def test_groq_available_with_key(self):
@@ -62,7 +81,8 @@ class TestEngineSelector:
     def test_fallback_chain_order(self):
         sel = EngineSelector()
         chain = sel.fallback_chain()
-        assert chain[0] == EngineType.WHISPER
+        assert chain[0] == EngineType.MINIMAX
+        assert EngineType.WHISPER in chain
         assert EngineType.GROQ in chain
 
 
@@ -341,6 +361,7 @@ class TestTranscribeFailureModes:
                 fp,
                 engine=EngineType.WHISPER,
                 preferred_engine=EngineType.WHISPER,
+                minimax_api_key="",  # 强制禁用 minimax，验证 whisper→groq
                 groq_api_key="gsk-test",
                 cache_manager=cm,
                 timeout_sec=10,
@@ -447,6 +468,111 @@ class TestGroqEngineMocked:
             from research_tool.infrastructure.ingest.transcriber import GroqEngine
 
             assert GroqEngine._needs_compress("fake/path.mp3") is True
+
+
+class TestMiniMaxEngineMocked:
+    """MiniMax-M3 多模态转写：mock OpenAI 客户端，驱动真实 MiniMaxEngine.transcribe。"""
+
+    def test_transcribe_video_inline_calls_chat(self, tmp_path: Path):
+        from research_tool.infrastructure.ingest.transcriber import MiniMaxEngine
+
+        video = tmp_path / "talk.mp4"
+        video.write_bytes(b"\x00\x00fake-mp4-bytes")
+
+        class _Msg:
+            content = "Hello from the podium. VGGT is a geometry transformer."
+
+        class _Choice:
+            message = _Msg()
+
+        class _Resp:
+            choices = [_Choice()]
+
+        captured: dict = {}
+
+        class _FakeCompletions:
+            def create(self, **kwargs):
+                captured.update(kwargs)
+                return _Resp()
+
+        class _FakeChat:
+            completions = _FakeCompletions()
+
+        class _FakeOpenAI:
+            def __init__(self, **kw):
+                self.kw = kw
+                self.chat = _FakeChat()
+
+        eng = MiniMaxEngine(
+            api_key="mm-test", model="MiniMax-M3", base_url="https://api.minimaxi.com/v1"
+        )
+
+        def _fake_call(self, user_content):
+            captured["model"] = self.model
+            captured["content"] = user_content
+            return "Hello from the podium. VGGT is a geometry transformer."
+
+        with patch.object(MiniMaxEngine, "_call_chat", _fake_call):
+            out = eng.transcribe(str(video), language="en", video_path=str(video))
+
+        assert out.engine == "minimax"
+        assert "VGGT" in out.full_text
+        content = captured["content"]
+        assert any(p.get("type") == "video_url" for p in content if isinstance(p, dict))
+        vu = next(p for p in content if p.get("type") == "video_url")
+        assert vu["video_url"]["url"].startswith("data:video/")
+
+    def test_audio_only_without_images_raises(self, tmp_path: Path):
+        from research_tool.infrastructure.ingest.transcriber import MiniMaxEngine, E_TR_006
+
+        audio = tmp_path / "a.wav"
+        audio.write_bytes(b"RIFF")
+        eng = MiniMaxEngine(api_key="mm-test")
+        with pytest.raises(TranscribeError) as ei:
+            eng.transcribe(str(audio), language="zh")
+        assert ei.value.code == E_TR_006
+
+    @pytest.mark.asyncio
+    async def test_minimax_fallback_after_failure(self, tmp_path: Path):
+        """minimax 失败 → whisper → groq（mock _run_engine）。"""
+        audio = tmp_path / "a.wav"
+        audio.write_bytes(b"x")
+        fp = compute_audio_fingerprint(str(audio))
+        cm = MagicMock(spec=CacheManager)
+        cm.query = AsyncMock(return_value=None)
+        cm.write = AsyncMock(return_value=True)
+        call_log: list[str] = []
+
+        async def fake_run(engine, *_a, **_kw):
+            call_log.append(engine.value)
+            if engine == EngineType.MINIMAX:
+                raise TranscribeError("E_TR_006_MINIMAX_FAILED", "mm boom")
+            if engine == EngineType.WHISPER:
+                raise TranscribeError(E_TR_002, "whisper boom")
+            return Transcript(language="zh", full_text="from groq", segments=[], engine="groq")
+
+        with (
+            patch(
+                "research_tool.infrastructure.ingest.transcriber._run_engine",
+                side_effect=fake_run,
+            ),
+            patch(
+                "research_tool.infrastructure.ingest.transcriber.get_cache_manager",
+                AsyncMock(return_value=cm),
+            ),
+        ):
+            result = await transcribe(
+                str(audio),
+                fp,
+                preferred_engine=EngineType.MINIMAX,
+                minimax_api_key="mm-k",
+                groq_api_key="gsk-test",
+                cache_manager=cm,
+                timeout_sec=10,
+            )
+        assert call_log[0] == "minimax"
+        assert "groq" in call_log
+        assert result.full_text == "from groq"
 
     def test_init_requires_api_key(self):
         with pytest.raises(TranscribeError):

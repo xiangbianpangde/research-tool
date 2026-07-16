@@ -85,6 +85,8 @@ class SemaphorePool:
         self._size = int(size)
         self._sem = asyncio.Semaphore(self._size)
         self._in_use = 0  # 测试可观察
+        # asyncio.Semaphore 绑定首次使用的 event loop；记录之以便跨 loop 时重建。
+        self._bound_loop: asyncio.AbstractEventLoop | None = None
 
     @property
     def size(self) -> int:
@@ -96,6 +98,18 @@ class SemaphorePool:
 
     async def acquire(self, timeout_sec: float = ACQUIRE_TIMEOUT_SEC) -> None:
         """获取信号量（带超时）。"""
+        # 模块级单例 _default_pool 会被 pytest-asyncio 的多个 event loop 复用，
+        # 而 asyncio.Semaphore 绑定首次 acquire 的 loop → 跨 loop 抛
+        # "bound to a different event loop"。检测 loop 切换并重建 _sem。
+        # 生产环境单一 loop 下 _bound_loop is running_loop 恒成立，不会重建。
+        try:
+            running_loop = asyncio.get_running_loop()
+        except RuntimeError:
+            running_loop = None
+        if self._bound_loop is not running_loop:
+            self._sem = asyncio.Semaphore(self._size)
+            self._in_use = 0
+            self._bound_loop = running_loop
         try:
             await asyncio.wait_for(self._sem.acquire(), timeout=timeout_sec)
         except asyncio.TimeoutError as e:

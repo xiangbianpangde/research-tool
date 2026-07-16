@@ -24,20 +24,23 @@ REM against an old package name after a refactor). So we don't just test that
 REM the file exists -- we test that it actually runs. If it errors, reinstall.
 set "NEED_INSTALL="
 if not exist ".venv\Scripts\research.exe" set "NEED_INSTALL=1"
+if not exist ".research-deployment.json" set "NEED_INSTALL=1"
 if not defined NEED_INSTALL (
     ".venv\Scripts\research.exe" --version >nul 2>&1
     if errorlevel 1 set "NEED_INSTALL=1"
 )
+if not defined NEED_INSTALL (
+    ".venv\Scripts\research.exe" setup --check-only
+    if errorlevel 1 set "NEED_INSTALL=1"
+)
 if defined NEED_INSTALL (
-    echo [setup] Creating venv and installing deps, 2-5 min...
-    if not exist ".venv\Scripts\python.exe" python -m venv .venv
+    echo [setup] Starting the shared deployment wizard...
+    python scripts\setup_interactive.py
+    if errorlevel 1 ( echo [ERROR] deployment incomplete & pause & exit /b 1 )
+    if not exist ".venv\Scripts\research.exe" (
+        echo [ERROR] research CLI is still missing after setup & pause & exit /b 1
+    )
     call ".venv\Scripts\activate.bat"
-    python -m pip install -U pip >nul
-    echo   installing research-tool + search backends + web UI + LLM client...
-    pip install -e ".[search,ui]" openai
-    if errorlevel 1 ( echo [ERROR] dependency install failed & pause & exit /b 1 )
-    echo [done] installed.
-    echo.
 ) else (
     call ".venv\Scripts\activate.bat"
 )
@@ -48,41 +51,10 @@ REM The package `src` lives in the project root (parent of this scripts dir),
 REM so PYTHONPATH must point there, not at %~dp0 (the scripts folder).
 set "PYTHONPATH=%~dp0.."
 
-REM ---------- 3. load API keys from .env ----------
-set "ENVFILE="
-if exist ".env"            set "ENVFILE=.env"
-if not defined ENVFILE if exist "..\.env"             set "ENVFILE=..\.env"
-if not defined ENVFILE if exist "%USERPROFILE%\.env"  set "ENVFILE=%USERPROFILE%\.env"
-if defined ENVFILE (
-    for /f "usebackq eol=# tokens=1,* delims==" %%a in ("!ENVFILE!") do (
-        set "k=%%a" & set "v=%%b"
-        if /i "!k!"=="deepseek_api_key" set "DEEPSEEK_API_KEY=!v!"
-        if /i "!k!"=="tavily_api_key"   set "TAVILY_API_KEY=!v!"
-        if /i "!k!"=="DEEPSEEK_API_KEY" set "DEEPSEEK_API_KEY=!v!"
-        if /i "!k!"=="TAVILY_API_KEY"   set "TAVILY_API_KEY=!v!"
-    )
-    echo [config] keys loaded from !ENVFILE!
-)
-if not defined DEEPSEEK_API_KEY (
-    echo.
-    echo No DeepSeek API key found. Enter it now ^(saved to .env for next time^):
-    set /p DEEPSEEK_API_KEY=DeepSeek API Key:
-    >>".env" echo deepseek_api_key=!DEEPSEEK_API_KEY!
-)
-
-REM search source: tavily if key present, else free web
-if defined TAVILY_API_KEY ( set "SRC=-s tavily" ) else ( set "SRC=-s web" )
-
-REM mineru (points at pdf2zh venv by default); used by BOTH web and pdf modes
-set "MINERU=C:\Users\yhn\pdf2zh\.venv\Scripts\mineru.exe"
+REM Runtime loads the shared .env itself; do not maintain a second key parser here.
+set "SRC=-s web"
+set "MINERU=mineru"
 set "MCMD="
-if exist "!MINERU!" (
-    set "MCMD=--mineru-cmd "!MINERU!""
-    echo [config] mineru found: web-collected PDFs will be parsed too
-) else (
-    echo [warn] mineru not found at default path; web PDFs will be skipped.
-    echo        Edit MINERU in this script or use PDF mode to set the path.
-)
 
 :menu
 echo.

@@ -12,6 +12,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import re
 
 try:
@@ -25,11 +26,15 @@ except ImportError:  # pragma: no cover - 退化路径
 _NON_SLUG = re.compile(r"[^a-z0-9]+")
 _CJK = re.compile(r"[一-鿿]")
 
+# macOS 文件名上限 255 字节；主题过长（P2）时截断并挂短 hash，保证可辨且唯一。
+_DEFAULT_MAX_LEN = 80
 
-def slugify(topic: str) -> str:
+
+def slugify(topic: str, max_len: int = _DEFAULT_MAX_LEN) -> str:
     """把任意主题转为文件系统安全的 slug。
 
     保证：纯 ASCII、小写、连字符分隔、首尾无连字符、非空。
+    超过 ``max_len`` 时截断并追加 8 位 sha1 后缀（P2 修复）。
     """
     if _CJK.search(topic) and _HAS_PINYIN:
         # 逐字转拼音，英文 token 原样保留（lazy_pinyin 对非汉字返回原串）
@@ -40,4 +45,11 @@ def slugify(topic: str) -> str:
 
     text = text.lower().strip()
     slug = _NON_SLUG.sub("-", text).strip("-")
-    return slug or "untitled"
+    if not slug:
+        return "untitled"
+    if max_len > 0 and len(slug) > max_len:
+        digest = hashlib.sha1(slug.encode("utf-8"), usedforsecurity=False).hexdigest()[:8]
+        # 留 1 连字符 + 8 hash
+        keep = max(max_len - 9, 8)
+        slug = slug[:keep].rstrip("-") + "-" + digest
+    return slug

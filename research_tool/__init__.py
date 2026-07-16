@@ -13,9 +13,17 @@ try:
     import os as _os
     from dotenv import load_dotenv as _load_dotenv  # type: ignore[import-not-found]
 
-    _env_path = _Path(__file__).resolve().parent.parent / ".env"
-    if _env_path.exists():
-        _load_dotenv(_env_path, override=False)
+    _package_env = _Path(__file__).resolve().parent.parent / ".env"
+    _research_home = _Path(_os.environ.get("RESEARCH_HOME", _Path.home() / ".research"))
+    _env_candidates = (
+        (_research_home / ".env", _package_env)
+        if "RESEARCH_HOME" in _os.environ
+        else (_package_env, _research_home / ".env")
+    )
+    if _os.environ.get("RESEARCH_DISABLE_DOTENV") != "1":
+        for _env_path in _env_candidates:
+            if _env_path.exists():
+                _load_dotenv(_env_path, override=False)
     # 跨平台：.env 里常写小写 key（如 minimax_api_key），把它们镜像成大写一份，
     # 让 _PROVIDER_KEY_ENV 这类只查大写名的代码在 Linux 上也能拿到值。
     for _k in list(_os.environ.keys()):

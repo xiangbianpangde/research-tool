@@ -256,15 +256,32 @@ def build_video_task_func(  # noqa: PLR0915 - many statements OK for orchestrato
 
         downloader = VideoDownloader(output_dir=work_dir / "videos")
 
-    # 默认 transcriber：transcriber.transcribe
+    # 默认 transcriber：MiniMax-M3 多模态（视频/关键帧）→ whisper → groq
+    # 签名扩展：transcriber_fn(audio_path, lang, video_path=..., image_paths=...)
     if transcriber_fn is None:
-        from ..infrastructure.ingest.transcriber import transcribe as _transcribe
+        from ..infrastructure.ingest.transcriber import (
+            EngineType,
+            resolve_minimax_api_key,
+            resolve_minimax_base_url,
+            transcribe as _transcribe,
+        )
 
-        def _default_transcribe(audio_path: str, lang: str) -> Any:
+        def _default_transcribe(
+            audio_path: str,
+            lang: str,
+            *,
+            video_path: str | None = None,
+            image_paths: list[str] | None = None,
+        ) -> Any:
             return asyncio.run(
                 _transcribe(
                     audio_path,
                     language=lang,
+                    preferred_engine=EngineType.MINIMAX,
+                    minimax_api_key=resolve_minimax_api_key(),
+                    minimax_base_url=resolve_minimax_base_url(),
+                    video_path=video_path,
+                    image_paths=image_paths,
                     read_cache=use_cache,
                     write_cache=use_cache,
                 )
@@ -382,9 +399,27 @@ def build_video_task_func(  # noqa: PLR0915 - many statements OK for orchestrato
             except Exception as e:  # noqa: BLE001
                 logger.warning("关键帧截图失败（继续，不阻断笔记生成）: %s", e)
 
-        # 4) 转写
+        # 4) 转写（MiniMax-M3 优先吃原视频 + 关键帧；whisper/groq 用抽音结果）
+        image_paths = [
+            str((work_dir / s.path) if not Path(s.path).is_absolute() else s.path)
+            for s in screenshots
+            if getattr(s, "path", None)
+        ]
         try:
-            transcript = await asyncio.to_thread(transcriber_fn, str(audio_path), language)
+            import inspect
+
+            sig = inspect.signature(transcriber_fn)
+            kwargs: dict = {}
+            if "video_path" in sig.parameters:
+                kwargs["video_path"] = str(original_path)
+            if "image_paths" in sig.parameters:
+                kwargs["image_paths"] = image_paths
+            if kwargs:
+                transcript = await asyncio.to_thread(
+                    transcriber_fn, str(audio_path), language, **kwargs
+                )
+            else:
+                transcript = await asyncio.to_thread(transcriber_fn, str(audio_path), language)
         except TranscribeError:
             raise
 

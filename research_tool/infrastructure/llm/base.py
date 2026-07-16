@@ -7,18 +7,36 @@
 from __future__ import annotations
 
 import abc
-from collections.abc import AsyncIterator
+import asyncio
+from collections.abc import AsyncIterator, Awaitable, Iterable
 from pathlib import Path
 from typing import TYPE_CHECKING, TypeVar
 
 from pydantic import BaseModel
 
-from ...domain.models import LLMConfig
+from ...domain.errors import LLMAuthenticationError, LLMError
+from ...domain.models import LLMConfig, Provider
 
 if TYPE_CHECKING:
     from ...domain.config import load_config  # noqa: F401
 
 T = TypeVar("T", bound=BaseModel)
+R = TypeVar("R")
+
+
+async def gather_fail_fast(awaitables: Iterable[Awaitable[R]]) -> list[R]:
+    """首个异常即取消并等待所有兄弟任务，避免 401 后仍有请求在飞。"""
+    tasks = [asyncio.ensure_future(awaitable) for awaitable in awaitables]
+    if not tasks:
+        return []
+    try:
+        return list(await asyncio.gather(*tasks))
+    except BaseException:
+        for task in tasks:
+            if not task.done():
+                task.cancel()
+        await asyncio.gather(*tasks, return_exceptions=True)
+        raise
 
 # 各 provider 的默认 endpoint
 _DEFAULT_BASE_URL = {
@@ -35,6 +53,7 @@ class LLMClient(abc.ABC):
 
     def __init__(self, config: LLMConfig) -> None:
         self.config = config
+        self._authentication_failed = False
 
     # -- 核心接口 -------------------------------------------------------- #
 
@@ -60,12 +79,32 @@ class LLMClient(abc.ABC):
     def stream(self, prompt: str, system: str | None = None) -> AsyncIterator[str]:
         """流式返回文本增量。"""
 
+    async def healthcheck(self, timeout_sec: float = 10.0) -> None:
+        """在阶段业务请求前执行短 PONG 探针；结果异常或超时都阻止阶段启动。"""
+        self._raise_if_authentication_failed()
+        try:
+            reply = await asyncio.wait_for(
+                self.chat("只回复 PONG", temperature=0),
+                timeout=timeout_sec,
+            )
+        except asyncio.TimeoutError as exc:
+            raise LLMError(f"LLM 健康检查超时（{timeout_sec:g}s）") from exc
+        if reply.strip().upper() != "PONG":
+            raise LLMError("LLM 健康检查失败：未返回 PONG")
+
+    def _raise_if_authentication_failed(self) -> None:
+        if self._authentication_failed:
+            raise LLMAuthenticationError("LLM 鉴权已失败；拒绝继续请求")
+
+    def _mark_authentication_failed(self) -> None:
+        self._authentication_failed = True
+
     # -- 工厂 ------------------------------------------------------------ #
 
     @classmethod
     def create(
         cls,
-        provider: str = "deepseek",
+        provider: Provider = "deepseek",
         api_key: str | None = None,
         model: str | None = None,
         base_url: str | None = None,

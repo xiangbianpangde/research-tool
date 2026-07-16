@@ -13,7 +13,8 @@ from pathlib import Path
 
 from pydantic import BaseModel, Field
 
-from ..llm.base import LLMClient
+from ..llm.base import LLMClient, gather_fail_fast
+from ...domain.errors import LLMAuthenticationError
 from ...domain.models import Entity, ExtractorConfig, ExtractResult, Relation, Triple
 from .base import ensure_dir, write_json
 
@@ -127,11 +128,13 @@ class Extractor:
                     res = await llm.chat_structured(
                         _build_prompt(self.config, ch), _ChunkResult, system=_SYSTEM
                     )
-                except Exception:  # noqa: BLE001 - 单块失败不应整批中断
+                except LLMAuthenticationError:
+                    raise
+                except Exception:  # noqa: BLE001 - 非鉴权单块失败不应整批中断
                     return source_file, file_lines, _ChunkResult()
                 return source_file, file_lines, res
 
-        results = await asyncio.gather(*[_do(j) for j in jobs]) if jobs else []
+        results = await gather_fail_fast(_do(job) for job in jobs)
 
         entities: list[Entity] = []
         relations: list[Relation] = []

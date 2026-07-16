@@ -312,3 +312,81 @@ def test_x_backend_parses_json_before_opencli_notice():
 
     data = XBackend._loads_json_output('[{"id":"123"}]\n\nExtension update available')
     assert data == [{"id": "123"}]
+
+
+@pytest.mark.asyncio
+async def test_youtube_ytsearch_hit(monkeypatch):
+    from research_tool.infrastructure.search.youtube_backend import YouTubeBackend
+
+    async def fake_thread(fn, *args, **kwargs):
+        return [
+            {
+                "id": "Cwue59SAF5Q",
+                "title": "VGGT: Visual Geometry Grounded Transformer",
+                "channel": "Chris Paxton",
+                "duration": 3518,
+                "description": "talk about VGGT",
+            }
+        ]
+
+    monkeypatch.setattr(
+        "research_tool.infrastructure.search.youtube_backend.asyncio.to_thread",
+        fake_thread,
+    )
+    hits = await YouTubeBackend().search("VGGT", 5)
+    assert len(hits) == 1
+    assert hits[0].url == "https://www.youtube.com/watch?v=Cwue59SAF5Q"
+    assert hits[0].source_engine == "youtube"
+    assert "Chris Paxton" in hits[0].snippet
+    assert "时长" in hits[0].snippet
+
+
+@pytest.mark.asyncio
+async def test_youtube_empty_query():
+    from research_tool.infrastructure.search.youtube_backend import YouTubeBackend
+
+    assert await YouTubeBackend().search("", 5) == []
+
+
+def test_get_backend_cvpr_and_youtube():
+    from research_tool.infrastructure.search import get_backend
+
+    cfg = CollectorConfig(search_cache=False)
+    assert get_backend("cvpr", cfg).name == "cvpr"
+    assert get_backend("youtube", cfg).name == "youtube"
+
+
+@pytest.mark.asyncio
+async def test_github_composite_prefers_topic_match_over_pure_stars(monkeypatch):
+    """低 star 但标题/描述贴 query 的仓应排在高 star 离题仓前面。"""
+    async def fake(url, **kw):
+        return {
+            "items": [
+                {
+                    "full_name": "popular/unrelated",
+                    "html_url": "https://github.com/popular/unrelated",
+                    "description": "generic web framework",
+                    "stargazers_count": 200000,
+                    "forks_count": 40000,
+                    "language": "JS",
+                    "pushed_at": "2020-01-01T00:00:00Z",
+                    "topics": ["web"],
+                },
+                {
+                    "full_name": "facebookresearch/vggt-omega",
+                    "html_url": "https://github.com/facebookresearch/vggt-omega",
+                    "description": "VGGT visual geometry grounded transformer for 3D reconstruction",
+                    "stargazers_count": 50,
+                    "forks_count": 5,
+                    "language": "Python",
+                    "pushed_at": "2026-06-01T00:00:00Z",
+                    "topics": ["3d", "reconstruction", "vggt"],
+                    "homepage": "https://example.com",
+                },
+            ]
+        }
+
+    monkeypatch.setattr("research_tool.infrastructure.search.github_backend.get_json", fake)
+    hits = await GitHubBackend().search("vggt 3d reconstruction geometry", 10)
+    assert hits[0].title == "facebookresearch/vggt-omega"
+    assert "score=" in hits[0].snippet

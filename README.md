@@ -14,7 +14,7 @@ topic ─→ Collect ─→ Deepen ─→ Clean ─→ Extract ─→ Organize �
 
 | 阶段 | 职责 | 输出 |
 |------|------|------|
-| Collect | 搜索 12 源（见下方）+ 抓取（Crawl4AI，回退 httpx）。**P1 两阶段锚定/去锚** + **P2 时间窗口 + deep-search 多排序翻页** | `raw/*.md` + `sources.json` |
+| Collect | 搜索 14 个后端（另有 2 个别名）+ 抓取（Crawl4AI，回退 httpx）。**P1 两阶段锚定/去锚** + **P2 时间窗口 + deep-search 多排序翻页** | `raw/*.md` + `sources.json` |
 | Deepen | 反偏差深挖：实体拆分→多视角搜索 + 缺口/矛盾补搜。**P1 LLM 结构化画像注入英文名去锚** + **P2 时间线回溯 + 同名消歧 + 多轮迭代**（可选，默认开） | 追加 `raw/*.md` + `raw/_disambig/` + `.deepen_done` |
 | Clean | 去 HTML/导航/广告噪音，定位正文。**P2 MinHash 去重 + LLM 相关性过滤** | `clean/*.md` + `quality.json` |
 | Extract | LLM 抽取实体/关系/三元组（可选） | `extracted/*.json` |
@@ -24,9 +24,10 @@ topic ─→ Collect ─→ Deepen ─→ Clean ─→ Extract ─→ Organize �
 
 ## 一键启动（Windows，推荐）
 
-双击 **`scripts/start.bat`** 即可。首次运行自动建 `.venv`、装依赖（2-5 分钟），并从
-`.env`（脚本目录 / 上级目录 / 用户目录任一）读取 `deepseek_api_key`、
-`tavily_api_key`。之后是菜单：
+双击 **`scripts/start.bat`** 即可。首次运行会进入共享部署向导：选择能力档位、创建
+`.venv`、安装对应依赖、配置密钥，并逐项验收模块、系统工具和 LLM 连通性。只有所选
+档位全部通过后才会写入无密钥部署回执；以后每次启动都会先复验该回执，缺项则重新
+进入向导。之后是菜单：
 
 ```
 1. 可视化界面  浏览器图形界面（推荐）
@@ -45,13 +46,16 @@ research ui              # 浏览器打开 http://127.0.0.1:7861
 
 左栏选「网页调研 / PDF 调研」、填主题与选项，右栏实时看进度、读报告、下载知识树文件。
 
-`.env` 示例（放在仓库上级或用户目录）：
+`.env` 示例（放在项目根目录，wheel 安装默认放在 `~/.research/.env`）：
 ```
-deepseek_api_key=sk-xxxx
-tavily_api_key=tvly-xxxx
+LLM_PROVIDER=deepseek
+LLM_MODEL=deepseek-chat
+LLM_BASE_URL=https://api.deepseek.com/v1
+DEEPSEEK_API_KEY=sk-xxxx
+TAVILY_API_KEY=tvly-xxxx
 ```
-没有 `.env` 时脚本会提示输入 DeepSeek Key 并保存。PDF 模式默认调用
-`C:\Users\<你>\pdf2zh\.venv\Scripts\mineru.exe`，找不到会让你输入路径。
+没有 `.env` 时向导会安全隐藏输入并以 `0600` 权限原子写入。LLM 主后端与视频转录
+使用的 MiniMax 密钥相互独立，不会跨供应商复用。
 
 ---
 
@@ -59,11 +63,23 @@ tavily_api_key=tvly-xxxx
 
 ```bash
 cd research-tool
-pip install -e .              # 核心（含 httpx 轻量抓取）
-pip install -e ".[all]"       # + Crawl4AI + 三个搜索后端
+python -m venv .venv
+source .venv/bin/activate           # Windows: .venv\Scripts\activate
+pip install -e ".[llm,search]"     # 先安装，才能使用 research 命令
+
+research setup                    # 交互部署（首次默认完整档）
+research setup --profile full     # 直接选择完整档部署
+research setup --check-only       # 按上次档位严格复验，不安装、不提问
+research setup --check-only --profile full
+
+pip install -e ".[all]"        # 全部 Python 能力：LLM/search/UI/video/PDF/Crawl
 crawl4ai-setup               # 安装 Crawl4AI 用的浏览器（用 [crawl] 时）
-pip install openai           # LLM 客户端（DeepSeek/OpenAI 兼容）
+# 完整档仍会严格检查系统工具：ffmpeg、Deno、OpenCLI
 ```
+
+部署档位：`minimal`（LLM + 搜索）、`recommended`（再含 UI + Crawl）、`full`
+（再含视频、PDF、ffmpeg、Deno、OpenCLI）。安装命令、Python extras、验收项均由同一份
+能力清单派生，任一步失败都会终止，不再把部分安装显示为成功。
 
 ## 配置
 
@@ -101,6 +117,11 @@ research config                                       # 查看解析后的配置
 research run "X" --skip extract --no-resume           # 跳过抽取/不跳过已完成
 research run "X" --skip deepen                        # 关闭反偏差深挖（更快/更省）
 
+# 新论文：官方源强制先抓，成功后才用 OpenAlex/Crossref/arXiv 扩展
+research run "论文完整标题" \
+  --official-url "https://作者或实验室的官方论文页" \
+  --official-url "https://官方项目页或全文"
+
 # P1 两阶段锚定/去锚（解决"机构名锚定"偏差）
 research run "中南民族大学 康怡琳" --core "康怡琳" --facets "博士,论文,南洋理工"
 
@@ -111,9 +132,46 @@ research collect "graph in-context learning" --from-year 2023 --to-year 2027 -s 
 research collect "扩散模型" --deep-search --deep-pages 3 --deep-sorts "relevance,date,citations" -s openalex
 ```
 
-**复合 P2 选项需写 config.yaml**（CLI 还未暴露全部 P2 标志）：`relevance_filter`、
-`profile_iterations`、`max_backward_rounds`、`min_evidence_per_node` 等在
-`docs/config.example.yaml` 都有示例。
+### 调研档位：fast / standard / deep
+
+三个档位固定的是成本与质量边界，不是同等质量的速度对比。`fast` 跳过 Deepen，适合
+快速摸底；`standard` 是默认六阶段；`deep` 开启两轮查询、保守的 2 页 × 2 排序深搜、
+两轮画像和一轮反向修正。
+
+| 档位 | 默认行为 | 典型用途 |
+|------|----------|----------|
+| `fast` | 5 个阶段，`r=1`，无 Deepen/Backward | 先判断主题是否值得深挖 |
+| `standard` | 完整六阶段，`r=1`，无 Backward | 日常调研与报告 |
+| `deep` | 完整六阶段，`r=2`，Deepen 画像迭代，deep-search，Backward 1 轮 | 证据覆盖与矛盾核验优先 |
+
+```bash
+research run "主题" --mode fast
+research run "主题" --mode standard
+research run "主题" --mode deep
+
+# 显式参数仍可覆盖档位；--skip 始终决定最终阶段列表
+research run "主题" --mode deep -r 3 --deep-pages 2 --skip extract
+```
+
+每次运行都会在主题目录生成 `run-summary.json`，记录总耗时、各阶段耗时、是否启用
+resume/搜索缓存、完成与跳过阶段及来源审计。CLI 的阶段完成事件也会直接打印耗时。
+
+### 新论文官方源优先流程
+
+新论文不应先用聚合索引猜原文。先定位作者、实验室、项目页或论文官方全文，
+再通过可重复的 `--official-url` 传入。工具按以下硬顺序执行：
+
+1. 校验并抓取所有官方 URL；任一失败则终止，不启动旁支搜索。
+2. 自动补齐 OpenAlex、Crossref、arXiv，扩展引用与相关工作。
+3. 每个实际执行的 LLM 阶段前运行短 PONG 健康检查。
+4. 任一请求返回 HTTP 401，立即熔断客户端并终止后续 LLM 阶段。
+
+`--extra-url` 仍是普通优先种子，不具备“全部成功否则中止”的强制语义；
+新论文原文请使用 `--official-url`。
+
+`--relevance-filter`、`--profile-iterations`、`--max-backward-rounds` 已有 CLI 参数；
+`min_evidence_per_node` 等低频参数可写入 `config.yaml`。完整示例见
+`docs/config.example.yaml`。
 
 ### 搜索源（`-s`，可多选）
 
@@ -122,6 +180,7 @@ research collect "扩散模型" --deep-search --deep-pages 3 --deep-sorts "relev
 | `web` | DuckDuckGo | 免 | 通用网页 |
 | `openalex` | OpenAlex | 免 | **论文首选**：2.5亿+ 全学术，自动混合"经典+最新" |
 | `crossref` | Crossref | 免 | 1.5亿+ DOI，跨出版商元数据 |
+| `cvpr` | CVPR / DBLP | 免 | CVPR 论文及官方开放页面 |
 | `arxiv` | arXiv | 免 | 预印本论文（按相关性，偏经典） |
 | `semantic_scholar` | Semantic Scholar | 可选 | 全出版商论文 + 引用数（无 key 易限流） |
 | `pubmed` | PubMed | 免 | 生物医学 3700万+ 文献 |
@@ -130,6 +189,7 @@ research collect "扩散模型" --deep-search --deep-pages 3 --deep-sorts "relev
 | `google_news` | Google News | 免 | 最新进展 / 新闻 |
 | `tavily` | Tavily | 需 | LLM 优化的网页搜索 |
 | `bilibili` | Bilibili | 免 | B 站视频搜索 |
+| `youtube` | YouTube | 免 | 公开视频与会议演讲发现 |
 | `x` / `twitter` | X/Twitter | 需登录态 | 通过 `twitter-cli` 或 OpenCLI 读取公开推文搜索 |
 
 **论文调研推荐 `openalex`**：覆盖最全、限流最宽、且自动一半按相关性 + 一半按发表日期检索，
@@ -176,8 +236,8 @@ timeline_backtrack/disambiguation/min_profile_confidence 等），`--skip deepen
 - **MinHash 去重 `dedup_similarity`**：char-5gram Jaccard，相似 ≥阈值组内保留
   最长正文，其余从 clean/ 删除并标 `dedup_of`
 - **LLM 相关性过滤 `relevance_filter`**：按主题批量评 0-1 分，低于阈值的从
-  clean/ 删除（raw/ 保留以便溯源），quality.json 标 `low_relevance`。实测能
-  剔除 70%+ 的同名污染/广告页/无关页
+  clean/ 删除（raw/ 保留以便溯源），quality.json 标 `low_relevance`。实际剔除比例
+  取决于主题、阈值和搜索源，应以 `quality.json` 为准。
 
 ### P2 反向传播（树状图修正）
 
@@ -185,6 +245,34 @@ timeline_backtrack/disambiguation/min_profile_confidence 等），`--skip deepen
 "来源NN" 引用数 < `min_evidence_per_node` 判为**稀疏节点**，再调一次 LLM 同时
 产出稀疏补充 / 节点桥接 / 矛盾交叉验证的修正查询，追加到 raw → 清理下游 →
 再跑一轮正向。最多循环 `max_backward_rounds` 次（默认 0 不启用，向后兼容）。
+
+### 代理诊断
+
+`collector.proxy`（或 `HTTPS_PROXY` fallback）只控制搜索与网页抓取；LLM 客户端当前
+显式直连，不应把它描述成“所有请求都走代理”。运行前会对显式代理做一次脱敏 TCP
+预检：端口不可达时立即失败，不会静默改成直连。
+
+```bash
+research config                       # 查看脱敏后的生效配置
+HTTPS_PROXY= research run "主题" --mode fast   # 本次进程明确直连
+```
+
+长期直连请在配置中设置 `collector.proxy: null`，并删除或清空 `.env` 中失效的
+`HTTPS_PROXY`。错误信息只显示协议、主机和端口，不输出用户名、密码或查询参数。
+
+### 公平比较性能
+
+不要把暖缓存、续跑的 `fast` 与冷启动的完整调研直接比较。可复现基准至少应固定
+commit、主题、LLM/provider、网络地区、搜索源、`-n/-r` 和调研档位，并满足：
+
+1. `pipeline.resume: false`，每次使用独立输出目录；
+2. `collector.search_cache: false`，避免一天缓存影响结果；
+3. 每个档位至少运行 3 次，报告中位数；
+4. 同时记录 `run-summary.json` 的阶段耗时，以及 `source-audit.json` 的
+   attempted/hits/filtered/deduplicated/fetch_failed/retained。
+
+`-n` 是“每个搜索源 × 每个查询”的上限，不是最终来源数；结果还会去重并受
+`collector.max_total_results` 限制。
 
 ## 从 PDF 调研（pdf2zh / MinerU 集成）
 
@@ -236,14 +324,22 @@ research collect "multimodal medical AI" -s x -n 3 --dry-run
 research run "multimodal medical AI" -s x --x-backend opencli
 ```
 
-Windows 本机已下载的 OpenCLI 浏览器桥接扩展路径：
+OpenCLI 浏览器桥接扩展（cookie 登录态由此自动读取，**不要**手抄到 `.env`）：
+
+```bash
+# macOS 一键：CLI + 下载扩展目录
+bash scripts/install_opencli_macos.sh
+# 扩展目录示例：
+#   ~/.cache/research-tool/opencli/opencli-extension-v1.0.22
+```
 
 ```text
+# Windows 示例（版本号以 releases 为准）
 C:\Users\yhn\.cache\research-tool\opencli\opencli-extension-v1.0.20
 ```
 
-首次使用需要在 Chrome/Edge 打开 `chrome://extensions`，启用 Developer mode，
-点击 `Load unpacked`，选择上面的扩展目录，并保持浏览器里已登录 `x.com`。
+首次使用：Chrome 打开 `chrome://extensions` → 启用 Developer mode →
+`Load unpacked` 选扩展目录 → 同一浏览器登录 `x.com` → `opencli doctor`。
 
 如果要退回 `twitter-cli`，可在配置中指定：
 
@@ -300,8 +396,8 @@ result = await ingest_pdfs("./papers", "./out/topic",
 ## 视频摄入（V1.1 VideoIngest）
 
 粘贴一个 B 站 / YouTube 链接，系统自动把视频下载 → 转写 → LLM 总结成 Markdown，
-无缝接入既有 5 阶段管道（clean → extract → organize → report）。
-**下游 5 阶段管道零改动**——视频笔记以 `raw/<topic>/video_<video_id>.md`
+无缝接入既有 4 个下游阶段（clean → extract → organize → report）。
+视频笔记以 `raw/<topic>/video_<video_id>.md`
 形式落入标准目录，Collect 阶段用 `resume=True` 自动跳过已存在的视频文件。
 
 ### 安装（按需，NFR1 隔离重依赖）
@@ -327,7 +423,7 @@ export MINIMAX_API_KEY=<your_key>
 ### 一键命令
 
 ```bash
-# 单视频：自动转写 + 落 raw/ + 触发 5 阶段管道
+# 单视频：自动转写 + 落 raw/ + 触发 4 个下游阶段
 research run "AI 教程" --video-url "https://www.bilibili.com/video/BV1xx411c7mD"
 
 # 多视频并发（默认 Semaphore(3)，可配 1-10）
@@ -354,7 +450,7 @@ research run "AI 教程" --video-url "URL" --no-cache
 research-output/
 └── <topic_slug>/
     ├── raw/
-    │   └── video_<video_id>.md     ← 视频笔记（落盘后下游 5 阶段自动接力）
+    │   └── video_<video_id>.md     ← 视频笔记（落盘后下游 4 阶段自动接力）
     ├── clean/video_<video_id>.md   ← 清洗
     ├── extracted/...json            ← 实体/关系/三元组
     ├── tree/00-主表.md              ← 知识树
@@ -399,7 +495,7 @@ video_language: zh
 
 | 编号 | 指标 | 实现 |
 |------|------|------|
-| NF-1 | 30 min 视频端到端 | ≤ 8 min（实测） |
+| NF-1 | 视频端到端耗时 | 取决于视频长度、转写引擎、硬件和网络；以结构化日志为准 |
 | NF-2 | 并发吞吐 | 3 URL 默认（`Semaphore(3)`，可由 `psutil` 自动降到 2） |
 | NF-3 | 错误信息 | 3 段式（场景/原因/建议），M-010 错误码体系 |
 | NF-4 | Cookie 文件权限 | 0o600（POSIX），Windows 跳过 |
@@ -408,7 +504,7 @@ video_language: zh
 | NF-7 | 日志 | JSON Lines（含 `url_sha256` 替代原始 URL） |
 | NF-8 | Deno（YouTube 必需） | 缺则 `E_DL_001_DENO_MISSING` + 安装命令 |
 | NF-9 | 网络抖动 | 重试 1 次（指数退避），B 站 403 严格不重试 |
-| NF-10 | 模型一致 | 默认 `deepseek-v4-flash`（可 `--model` 覆盖） |
+| NF-10 | 模型边界 | 视频转写/总结默认 MiniMax-M3；主管道 LLM 由 `llm` 配置决定 |
 
 ### SDK 用法
 
@@ -424,7 +520,7 @@ async def main():
             "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
         ],
         work_dir="./research-output",
-        run_pipeline=True,   # 落盘后自动跑 5 阶段管道
+        run_pipeline=True,   # 落盘后自动跑 clean→extract→organize→report
     )
     print(f"成功 {report.success_count} / 失败 {report.failed_count}")
     for r in report.results:
@@ -454,27 +550,6 @@ asyncio.run(main())
 完整 NFR / 错误码见
 [`docs/plan/后续升级计划/01-需求澄清/PRD-VideoIngest-V1.1-20260601.md`](docs/plan/后续升级计划/01-需求澄清/PRD-VideoIngest-V1.1-20260601.md)。
 
-
-```bash
-pip install -e ".[pdf]"   # 安装 MinerU（重依赖，~7GB 含模型），或复用 pdf2zh 的 .venv
-
-# 仅摄取：PDF 文件夹 → raw/（可选 --translate 译中文）
-research ingest-pdf ./papers -T "扩散模型综述" --translate
-
-# 一键：PDF 文件夹 → 中文知识树 + 报告（collect 阶段改为 PDF 摄取）
-research run "扩散模型综述" --pdf-dir ./papers --translate --skip extract
-```
-
-未把 mineru 装到全局时，用 `--mineru-cmd` 指向 pdf2zh 虚拟环境里的可执行：
-`--mineru-cmd "C:\path\to\pdf2zh\.venv\Scripts\mineru.exe"`。
-
-SDK：
-
-```python
-from research_tool import ingest_pdfs, PdfIngestConfig, translate_markdown
-result = await ingest_pdfs("./papers", "./out/topic",
-                           PdfIngestConfig(translate=True), llm)
-```
 
 ## Python SDK
 

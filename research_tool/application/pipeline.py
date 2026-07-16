@@ -11,11 +11,11 @@ import time
 from collections.abc import AsyncIterator
 from pathlib import Path
 
-from ..domain.errors import StageError
+from ..domain.errors import LLMAuthenticationError, StageError
 from ..infrastructure.llm.base import LLMClient
-from ..domain.models import PipelineConfig, PipelineResult, StageEvent
+from ..domain.models import PipelineConfig, PipelineResult, StageEvent, StageRunMetric
 from ..common.slug import slugify
-from ..infrastructure.stages.base import ensure_dir, has_output
+from ..infrastructure.stages.base import ensure_dir, has_output, read_json, write_json
 from ..infrastructure.stages.cleaner import Cleaner
 from ..infrastructure.stages.collector import Collector
 from ..infrastructure.stages.deepen import DeepenStage
@@ -49,6 +49,18 @@ class ResearchPipeline:
             self._llm = LLMClient.from_config(self.config.llm)
         return self._llm
 
+    def _stage_uses_llm(self, stage: str) -> bool:
+        if stage == "collect":
+            return bool(
+                self.config.collector.llm_query_expansion
+                or (self.config.pdf_dir and self.config.pdf_ingest.translate)
+            )
+        if stage == "deepen":
+            return True
+        if stage == "clean":
+            return self.config.cleaner.relevance_filter
+        return stage in {"extract", "organize", "report"}
+
     async def run(self, topic: str | None = None) -> PipelineResult:
         """执行全部 Stage（可中断恢复）。"""
         async for _ in self.stream(topic):
@@ -74,37 +86,79 @@ class ResearchPipeline:
             async for ev in self._stream_forward(topic, topic_dir, result):
                 yield ev
             if result.failed_stage:
-                result.elapsed_sec = time.monotonic() - start
+                self._finish_run(result, start)
                 return
             if round_n >= self.config.max_backward_rounds:
                 break
             # 反向传播：评估 → 生成修正查询 → 追加 raw → 失效下游 → 下一轮正向
             if result.organize_result is None:
                 break
+            backward_start = time.monotonic()
             yield StageEvent(
                 stage="backward",
                 status="started",
                 message=f"第 {round_n + 1} 轮反向：评估知识树质量",
             )
             try:
+                await self._get_llm().healthcheck()
                 fb = await Organizer(self.config.organizer).assess_and_feedback(
                     result.organize_result,
                     self._get_llm(),
                     topic,
                 )
-            except Exception as e:  # noqa: BLE001
+            except LLMAuthenticationError as e:
+                duration = max(0.0, time.monotonic() - backward_start)
+                result.failed_stage = "backward"
+                message = f"反向评估失败: {e}"
+                result.stage_metrics.append(
+                    StageRunMetric(
+                        stage="backward",
+                        status="failed",
+                        duration_sec=duration,
+                        message=message,
+                    )
+                )
                 yield StageEvent(
                     stage="backward",
                     status="failed",
-                    message=f"反向评估失败: {e}",
+                    message=message,
+                    data={"duration_sec": duration},
+                )
+                self._finish_run(result, start)
+                return
+            except Exception as e:  # noqa: BLE001
+                duration = max(0.0, time.monotonic() - backward_start)
+                message = f"反向评估失败: {e}"
+                result.stage_metrics.append(
+                    StageRunMetric(
+                        stage="backward",
+                        status="failed",
+                        duration_sec=duration,
+                        message=message,
+                    )
+                )
+                yield StageEvent(
+                    stage="backward",
+                    status="failed",
+                    message=message,
+                    data={"duration_sec": duration},
                 )
                 break
             if not fb.queries:
+                duration = max(0.0, time.monotonic() - backward_start)
+                result.stage_metrics.append(
+                    StageRunMetric(
+                        stage="backward",
+                        status="completed",
+                        duration_sec=duration,
+                        message="无修正查询，反向终止",
+                    )
+                )
                 yield StageEvent(
                     stage="backward",
                     status="completed",
                     message="无修正查询，反向终止",
-                    data={"sparse_nodes": fb.sparse_nodes},
+                    data={"sparse_nodes": fb.sparse_nodes, "duration_sec": duration},
                 )
                 break
             yield StageEvent(
@@ -115,13 +169,50 @@ class ResearchPipeline:
             )
             await self._recollect(topic, topic_dir, fb.queries)
             self._invalidate_after_collect(topic_dir)
+            duration = max(0.0, time.monotonic() - backward_start)
+            result.stage_metrics.append(
+                StageRunMetric(stage="backward", status="completed", duration_sec=duration)
+            )
             yield StageEvent(
                 stage="backward",
                 status="completed",
                 message=f"第 {round_n + 1} 轮反向完成，进入下一轮正向",
+                data={"duration_sec": duration},
             )
 
-        result.elapsed_sec = time.monotonic() - start
+        self._finish_run(result, start)
+
+    def _finish_run(self, result: PipelineResult, started_at: float) -> None:
+        result.elapsed_sec = max(0.0, time.monotonic() - started_at)
+        summary_path = result.topic_dir / "run-summary.json"
+        audit_path = result.topic_dir / "raw" / "source-audit.json"
+        if audit_path.exists():
+            try:
+                source_audits = list((read_json(audit_path) or {}).get("sources") or [])
+            except (OSError, ValueError, TypeError):
+                source_audits = []
+        else:
+            source_audits = (
+                [audit.model_dump() for audit in result.collect_result.source_audits]
+                if result.collect_result
+                else []
+            )
+        write_json(
+            summary_path,
+            {
+                "version": 1,
+                "mode": self.config.mode,
+                "elapsed_sec": round(result.elapsed_sec, 3),
+                "resume_enabled": self.config.resume,
+                "search_cache_enabled": self.config.collector.search_cache,
+                "stages_completed": list(result.stages_completed),
+                "stages_skipped": list(result.stages_skipped),
+                "failed_stage": result.failed_stage,
+                "stage_metrics": [metric.model_dump() for metric in result.stage_metrics],
+                "source_audits": source_audits,
+            },
+        )
+        result.run_summary_path = summary_path
 
     async def _stream_forward(
         self,
@@ -134,6 +225,13 @@ class ResearchPipeline:
             # Extractor 可选（决策 06-3）
             if stage == "extract" and not self.config.extractor.enabled:
                 result.stages_skipped.append(stage)
+                result.stage_metrics.append(
+                    StageRunMetric(
+                        stage=stage,
+                        status="skipped",
+                        message="extractor.enabled=false，跳过",
+                    )
+                )
                 yield StageEvent(
                     stage=stage,
                     status="skipped",
@@ -144,6 +242,13 @@ class ResearchPipeline:
             # Deepen 可选（默认启用；deepen.enabled=false 或 --skip deepen 关闭）
             if stage == "deepen" and not self.config.deepen.enabled:
                 result.stages_skipped.append(stage)
+                result.stage_metrics.append(
+                    StageRunMetric(
+                        stage=stage,
+                        status="skipped",
+                        message="deepen.enabled=false，跳过",
+                    )
+                )
                 yield StageEvent(
                     stage=stage,
                     status="skipped",
@@ -154,6 +259,9 @@ class ResearchPipeline:
             # PDF 数据源时跳过 deepen（深挖针对 Web 搜索，PDF 摄取无意义）
             if stage == "deepen" and self.config.pdf_dir:
                 result.stages_skipped.append(stage)
+                result.stage_metrics.append(
+                    StageRunMetric(stage=stage, status="skipped", message="PDF 数据源，跳过深挖")
+                )
                 yield StageEvent(
                     stage=stage,
                     status="skipped",
@@ -165,6 +273,9 @@ class ResearchPipeline:
             out_dir, patterns = _stage_output(stage, topic_dir)
             if self.config.resume and has_output(out_dir, patterns):
                 result.stages_skipped.append(stage)
+                result.stage_metrics.append(
+                    StageRunMetric(stage=stage, status="skipped", message="已有输出，跳过")
+                )
                 yield StageEvent(
                     stage=stage,
                     status="skipped",
@@ -173,16 +284,191 @@ class ResearchPipeline:
                 )
                 continue
 
+            stage_start = time.monotonic()
             yield StageEvent(stage=stage, status="started", message=f"开始 {stage}")
             try:
+                if self._stage_uses_llm(stage):
+                    await self._get_llm().healthcheck()
                 await self._exec(stage, topic, topic_dir, result)
             except Exception as e:  # noqa: BLE001 - 记录失败并中断，保留已有输出
+                duration = max(0.0, time.monotonic() - stage_start)
                 result.failed_stage = stage
-                yield StageEvent(stage=stage, status="failed", message=f"{stage} 失败: {e}")
+                message = f"{stage} 失败: {e}"
+                result.stage_metrics.append(
+                    StageRunMetric(
+                        stage=stage,
+                        status="failed",
+                        duration_sec=duration,
+                        message=message,
+                    )
+                )
+                yield StageEvent(
+                    stage=stage,
+                    status="failed",
+                    message=message,
+                    data={"duration_sec": duration},
+                )
                 return  # 外层 stream 见 failed_stage 后会停止反向循环
 
+            duration = max(0.0, time.monotonic() - stage_start)
             result.stages_completed.append(stage)
-            yield StageEvent(stage=stage, status="completed", progress=1.0, message=f"{stage} 完成")
+            result.stage_metrics.append(
+                StageRunMetric(stage=stage, status="completed", duration_sec=duration)
+            )
+            yield StageEvent(
+                stage=stage,
+                status="completed",
+                progress=1.0,
+                message=f"{stage} 完成（{duration:.1f}s）",
+                data={"duration_sec": duration},
+            )
+
+            # 阶段 F：organize 后可选 talk 关联（论文 → YouTube）；命中则重跑 clean→report
+            if (
+                stage == "organize"
+                and self.config.talk.enabled
+                and "report" in self.config.stages
+            ):
+                async for ev in self._run_talk_enrichment(topic, topic_dir, result):
+                    yield ev
+                if result.failed_stage:
+                    return
+
+    async def _run_talk_enrichment(
+        self,
+        topic: str,
+        topic_dir: Path,
+        result: PipelineResult,
+    ) -> AsyncIterator[StageEvent]:
+        """organize 后：TalkLinker 关联演讲视频；有新笔记则失效下游并重跑 clean→report。"""
+        from .talk_linker import TalkLinker
+
+        talk_start = time.monotonic()
+        yield StageEvent(
+            stage="talk",
+            status="started",
+            message=(
+                f"talk 关联：max={self.config.talk.max_talks} "
+                f"sim≥{self.config.talk.min_title_similarity} "
+                f"ingest={self.config.talk.ingest}"
+            ),
+        )
+        try:
+            linker = TalkLinker(self.config.talk)
+            report = await linker.enrich(topic_dir, topic=topic)
+        except Exception as e:  # noqa: BLE001 — talk 失败不拖垮主管道
+            duration = max(0.0, time.monotonic() - talk_start)
+            message = f"talk 关联失败（继续 report）: {e}"
+            result.stage_metrics.append(
+                StageRunMetric(
+                    stage="talk",
+                    status="failed",
+                    duration_sec=duration,
+                    message=message,
+                )
+            )
+            yield StageEvent(
+                stage="talk",
+                status="failed",
+                message=message,
+                data={"duration_sec": duration},
+            )
+            return
+
+        msg = (
+            f"候选 {report.candidates} 篇，命中 {len(report.matched)}，"
+            f"跳过 {len(report.skipped)}，笔记 {len(report.files_written)}"
+        )
+        if report.warnings:
+            msg += f"；warnings={len(report.warnings)}"
+        talk_duration = max(0.0, time.monotonic() - talk_start)
+        result.stage_metrics.append(
+            StageRunMetric(
+                stage="talk",
+                status="completed",
+                duration_sec=talk_duration,
+                message=msg,
+            )
+        )
+        yield StageEvent(
+            stage="talk",
+            status="completed",
+            progress=1.0,
+            message=msg,
+            data={
+                "matched": [
+                    {
+                        "paper": m.paper_title,
+                        "url": m.video_url,
+                        "confidence": m.confidence,
+                    }
+                    for m in report.matched
+                ],
+                "warnings": report.warnings,
+                "duration_sec": talk_duration,
+            },
+        )
+
+        if not report.files_written:
+            return
+
+        # 新 talk 笔记进入 raw/ → 失效 clean/extract/tree/report 并重跑（含 organize 以并入知识树）
+        for sub in ("clean", "extracted", "tree"):
+            d = topic_dir / sub
+            if d.exists():
+                shutil.rmtree(d)
+        for fname in ("report.md", "report.html"):
+            f = topic_dir / fname
+            if f.exists():
+                f.unlink()
+
+        # report 由外层正向循环生成一次，避免 enrichment 后重复生成。
+        rerun = [s for s in ("clean", "extract", "organize") if s in self.config.stages]
+        for stage in rerun:
+            if stage == "extract" and not self.config.extractor.enabled:
+                continue
+            stage_start = time.monotonic()
+            yield StageEvent(
+                stage=stage,
+                status="started",
+                message=f"talk 后重跑 {stage}",
+            )
+            try:
+                if self._stage_uses_llm(stage):
+                    await self._get_llm().healthcheck()
+                await self._exec(stage, topic, topic_dir, result)
+            except Exception as e:  # noqa: BLE001
+                duration = max(0.0, time.monotonic() - stage_start)
+                result.failed_stage = stage
+                message = f"talk 后 {stage} 失败: {e}"
+                result.stage_metrics.append(
+                    StageRunMetric(
+                        stage=stage,
+                        status="failed",
+                        duration_sec=duration,
+                        message=message,
+                    )
+                )
+                yield StageEvent(
+                    stage=stage,
+                    status="failed",
+                    message=message,
+                    data={"duration_sec": duration},
+                )
+                return
+            duration = max(0.0, time.monotonic() - stage_start)
+            if stage not in result.stages_completed:
+                result.stages_completed.append(stage)
+            result.stage_metrics.append(
+                StageRunMetric(stage=stage, status="completed", duration_sec=duration)
+            )
+            yield StageEvent(
+                stage=stage,
+                status="completed",
+                progress=1.0,
+                message=f"talk 后 {stage} 完成（{duration:.1f}s）",
+                data={"duration_sec": duration},
+            )
 
     async def _recollect(
         self,
@@ -221,7 +507,7 @@ class ResearchPipeline:
                 pcfg = self.config.pdf_ingest
                 llm = self._get_llm() if pcfg.translate else None
                 result.collect_result = await PdfIngestor(pcfg, llm).run(
-                    self.config.pdf_dir, topic_dir
+                    Path(self.config.pdf_dir), topic_dir
                 )
             else:
                 llm = self._get_llm() if self.config.collector.llm_query_expansion else None

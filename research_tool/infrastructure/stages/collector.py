@@ -16,9 +16,11 @@ from pathlib import Path
 from pydantic import BaseModel, Field
 
 from ..llm.base import LLMClient
-from ...domain.models import CollectorConfig, CollectResult, Source
+from ...domain.models import CollectorConfig, CollectResult, Source, SourceAudit
 from ..search import get_backend
+from ..search._http import set_default_proxy
 from ..search.base import SearchHit, SearchResult
+from ..search.proxy_preflight import preflight_proxy
 from .base import (
     domain_of,
     ensure_dir,
@@ -30,9 +32,24 @@ from .base import (
 from .fetcher import FetchResult, Fetcher
 from ...common.logging_config import get_logger, hash_url
 from ...common.url_guard import assert_safe_url
-from ...domain.errors import UrlBlockedError
+from ...domain.errors import CollectError, LLMAuthenticationError, UrlBlockedError
 
 logger = get_logger(__name__)
+
+# 视频 host：命中则不走 Fetcher HTML，改写 discovery 笔记
+# （完整转写仍靠 --video-url / process_videos）
+_VIDEO_HOST_MARKERS = (
+    "youtube.com/watch",
+    "youtu.be/",
+    "youtube.com/shorts/",
+    "bilibili.com/video/",
+    "b23.tv/",
+)
+
+
+def _is_video_url(url: str) -> bool:
+    u = (url or "").lower()
+    return any(m in u for m in _VIDEO_HOST_MARKERS)
 
 
 # 多轮搜索关键词扩展模板（方法论 1.1：由宽泛到精确、中英文并行、学术+通俗）
@@ -110,7 +127,9 @@ async def _llm_build_queries(topic: str, rounds: int, language: str, llm: LLMCli
     )
     try:
         res = await llm.chat_structured(prompt, _Queries, system=_QUERY_SYSTEM)
-    except Exception:  # noqa: BLE001 - 失败则回退模板
+    except LLMAuthenticationError:
+        raise
+    except Exception:  # noqa: BLE001 - 非鉴权失败则回退模板
         return _build_queries(topic, rounds, language)
     queries = [topic] + [q.strip() for q in res.queries if q.strip()]
     return list(dict.fromkeys(queries)) or [topic]
@@ -170,6 +189,32 @@ class Collector:
     def __init__(self, config: CollectorConfig | None = None, llm: LLMClient | None = None) -> None:
         self.config = config or CollectorConfig()
         self.llm = llm
+        self._proxy_preflight_done = False
+
+    @staticmethod
+    def _increment(audit: SourceAudit, **counts: int) -> SourceAudit:
+        """Return an updated immutable audit counter."""
+        return audit.model_copy(
+            update={name: getattr(audit, name) + value for name, value in counts.items()}
+        )
+
+    @staticmethod
+    def _merge_audits(*groups: list[SourceAudit]) -> list[SourceAudit]:
+        merged: dict[str, SourceAudit] = {}
+        for group in groups:
+            for incoming in group:
+                current = merged.get(incoming.engine, SourceAudit(engine=incoming.engine))
+                merged[incoming.engine] = SourceAudit(
+                    engine=incoming.engine,
+                    attempted=current.attempted + incoming.attempted,
+                    hits=current.hits + incoming.hits,
+                    failed=current.failed + incoming.failed,
+                    filtered=current.filtered + incoming.filtered,
+                    deduplicated=current.deduplicated + incoming.deduplicated,
+                    fetch_failed=current.fetch_failed + incoming.fetch_failed,
+                    retained=current.retained + incoming.retained,
+                )
+        return [merged[name] for name in sorted(merged)]
 
     async def search_only(self, topic: str) -> SearchResult:
         """两阶段 × 多引擎搜索，按 URL 去重（方法论 1.1 + P1 锚定/去锚）。
@@ -194,7 +239,131 @@ class Collector:
         if self.config.core_keyword or self.config.facets:
             core = self.config.core_keyword or topic
             queries = list(dict.fromkeys(queries + _facet_queries(core, self.config.facets)))
-        return await self.search_queries(queries)
+
+        # 专家库/额外 URL 强档直注：绕过搜索与相关性过滤，置顶保证纳入（ExpertLib）。
+        injected = self._direct_inject_hits(topic)
+        # 专家弱档：org:<handle> <topic> 仅打 github 后端，结果 expert=True
+        expert_gh, expert_warns = await self._expert_scoped_github_hits(topic)
+        sr = await self.search_queries(queries)
+        warnings = list(sr.warnings) + expert_warns
+
+        head: list[SearchHit] = list(injected)
+        # 弱档 org 命中紧随强档，仍标 expert；与搜索结果按 URL 去重
+        seen = {h.url for h in head}
+        for h in expert_gh:
+            if h.url and h.url not in seen:
+                head.append(h)
+                seen.add(h.url)
+        if not head:
+            # 无专家注入时保持原 SearchResult 身份（向后兼容；仅附加弱档 warning）
+            if expert_warns:
+                return SearchResult(
+                    hits=sr.hits, warnings=warnings, source_audits=sr.source_audits
+                )
+            return sr
+        tail = [h for h in sr.hits if h.url not in seen]
+        merged = (head + tail)[: self.config.max_total_results]
+        return SearchResult(
+            hits=merged, warnings=warnings, source_audits=sr.source_audits
+        )
+
+    def _direct_inject_hits(self, topic: str) -> list[SearchHit]:
+        """强档直注 hit：config.extra_urls + 匹配专家的 seed_urls。
+
+        这些是策展的确切 URL，直接成 hit（expert=True）跳过搜索，由 fetch 阶段照常抓取。
+        experts_file 未设且 extra_urls 为空时返回空表，search_only 行为与原先一致。
+        """
+        official_urls = list(dict.fromkeys(self.config.official_urls))
+        urls: list[str] = list(self.config.extra_urls)
+        if self.config.experts_file:
+            from ..experts import ExpertRegistry
+
+            reg = ExpertRegistry.load(self.config.experts_file)
+            matched = reg.match(topic, self.config.expert_match_min_overlap)
+            urls += reg.seed_urls_for(matched)
+
+        seen: set[str] = set()
+        hits: list[SearchHit] = [
+            SearchHit(
+                url=url,
+                title="",
+                snippet="[official source]",
+                source_engine="official",
+                expert=True,
+            )
+            for url in official_urls
+        ]
+        seen.update(official_urls)
+        for url in urls:
+            if url and url not in seen:
+                seen.add(url)
+                hits.append(
+                    SearchHit(
+                        url=url,
+                        title=url.rstrip("/").split("/")[-1] if "github.com" in url else "",
+                        snippet="[expert/seed]",
+                        source_engine="expert_seed",
+                        expert=True,
+                    )
+                )
+        return hits
+
+    async def _expert_scoped_github_hits(
+        self, topic: str
+    ) -> tuple[list[SearchHit], list[str]]:
+        """专家弱档：对匹配专家的 github handle 跑 ``org:X <topic>``（仅 GitHub 引擎）。
+
+        不把 org: 查询塞进全引擎 search_queries，避免 web/openalex 被污染。
+        需 search_engines 含 github 且 expert_scoped_github=True。
+        """
+        warnings: list[str] = []
+        if not getattr(self.config, "expert_scoped_github", True):
+            return [], warnings
+        if not self.config.experts_file:
+            return [], warnings
+        engines = [str(e) for e in (self.config.search_engines or [])]
+        if "github" not in engines:
+            return [], warnings
+
+        from ..experts import ExpertRegistry
+        from ..search.github_backend import GitHubBackend
+
+        reg = ExpertRegistry.load(self.config.experts_file)
+        matched = reg.match(topic, self.config.expert_match_min_overlap)
+        scoped = reg.scoped_queries_for(matched, topic)
+        if not scoped:
+            return [], warnings
+
+        gh = GitHubBackend(
+            self.config.github_token,
+            enable_code_search=bool(getattr(self.config, "github_code_search", True)),
+        )
+        hits: list[SearchHit] = []
+        seen: set[str] = set()
+        for engine, q in scoped:
+            if engine != "github":
+                continue
+            try:
+                batch = await gh.search(q, self.config.max_results_per_engine)
+            except Exception as e:  # noqa: BLE001
+                warnings.append(f"expert scoped github 失败 query={q!r}: {e}")
+                continue
+            for h in batch:
+                if not h.url or h.url in seen:
+                    continue
+                seen.add(h.url)
+                hits.append(
+                    SearchHit(
+                        url=h.url,
+                        title=h.title,
+                        snippet=(h.snippet or "") + "\n[expert/scoped]",
+                        source_engine=h.source_engine or "github",
+                        expert=True,
+                    )
+                )
+        if hits:
+            logger.info("专家弱档 github 命中 %d 条（topic=%r）", len(hits), topic[:60])
+        return hits, warnings
 
     def _deep_combos(self) -> list[tuple[str | None, int]]:
         """Deep-Search 的 (sort, offset) 矩阵：deep_pages 页 × deep_sorts 排序。
@@ -206,7 +375,7 @@ class Collector:
         sorts = self.config.deep_sorts or ["relevance"]
         return [(s, p * page_size) for p in range(self.config.deep_pages) for s in sorts]
 
-    async def search_queries(
+    async def search_queries(  # noqa: PLR0915 - search funnel records every terminal path
         self,
         queries: list[str],
         *,
@@ -221,6 +390,31 @@ class Collector:
         P2 时间标签：年份窗口缺省取 config.from_year/to_year（显式传参可覆盖）。
         P2 deep-search：显式 sort/offset → 单次（供画像时间线回溯）；否则
         config.deep_search 开启时展开 (sort,offset) 矩阵，每查询多次搜索后去重。"""
+        if not self._proxy_preflight_done:
+            proxy_result = await preflight_proxy(self.config.proxy)
+            if not proxy_result.ok:
+                raise CollectError(proxy_result.message)
+            self._proxy_preflight_done = True
+
+        # 按 config.proxy 设置模块级默认代理，供走 _http 的后端及 ddgs/tavily 共用
+        set_default_proxy(self.config.proxy)
+
+        # X 源 preflight：CLI 缺失/未登录时提前给出安装说明（不拖到中段）
+        early_warnings: list[str] = []
+        engines = [str(e) for e in (self.config.search_engines or [])]
+        if any(e in ("x", "twitter") for e in engines):
+            from ..search.x_backend import preflight_x
+
+            pf = preflight_x(self.config, run_doctor=True)
+            if not pf.ok:
+                early_warnings.append(pf.message)
+                logger.warning("X preflight 失败，将跳过 x/twitter 引擎: %s", pf.message[:200])
+                # 从本轮引擎列表剔除，避免每个 query 重复 SearchError
+                self._x_preflight_failed = True  # type: ignore[attr-defined]
+            else:
+                self._x_preflight_failed = False  # type: ignore[attr-defined]
+                logger.info("%s", pf.message)
+
         fy = from_year if from_year is not None else self.config.from_year
         ty = to_year if to_year is not None else self.config.to_year
         if sort is not None or offset is not None:
@@ -246,47 +440,132 @@ class Collector:
 
         tasks = []
         meta: list[tuple[str, str]] = []  # (engine, query)，用于失败时定位
+        audits: dict[str, SourceAudit] = {
+            str(engine): SourceAudit(engine=str(engine)) for engine in self.config.search_engines
+        }
+        skip_x = bool(getattr(self, "_x_preflight_failed", False))
         for engine in self.config.search_engines:
+            if skip_x and str(engine) in ("x", "twitter"):
+                continue
             backend = get_backend(engine, self.config)
             for query in queries:
                 for s, off in combos:
                     meta.append((engine, query))
                     tasks.append(_one(backend, query, s, off))
-        results = await asyncio.gather(*tasks, return_exceptions=True)
+                    name = str(engine)
+                    audits[name] = self._increment(audits[name], attempted=1)
+        results = await asyncio.gather(*tasks, return_exceptions=True) if tasks else []
 
         hits: list[SearchHit] = []
-        warnings: list[str] = []
+        warnings: list[str] = list(early_warnings)
         seen: set[str] = set()
         for (engine, query), res in zip(meta, results):
-            if isinstance(res, Exception):
+            if isinstance(res, BaseException):
                 warnings.append(f"{engine} 搜索失败 query={query!r}: {res}")
+                name = str(engine)
+                audits[name] = self._increment(audits[name], failed=1)
                 continue
+            name = str(engine)
+            audits[name] = self._increment(audits[name], hits=len(res))
             for hit in res:
                 threshold = self.config.search_relevance_min_overlap
                 if threshold > 0 and _hit_relevance(query, hit) < threshold:
                     warnings.append(f"{engine} 低相关命中已跳过 query={query!r}: {hit.title[:80]}")
+                    audits[name] = self._increment(audits[name], filtered=1)
                     continue
                 if hit.url in seen:
+                    audits[name] = self._increment(audits[name], deduplicated=1)
                     continue
                 seen.add(hit.url)
-                hits.append(hit)
-                if len(hits) >= self.config.max_total_results:
-                    return SearchResult(hits=hits, warnings=warnings)
-        return SearchResult(hits=hits, warnings=warnings)
+                if len(hits) < self.config.max_total_results:
+                    hits.append(hit.model_copy(update={"audit_engine": name}))
+                else:
+                    audits[name] = self._increment(audits[name], filtered=1)
+        source_audits = [audits[name] for name in sorted(audits)]
+        self._pending_source_audits = source_audits
+        return SearchResult(
+            hits=hits,
+            warnings=warnings,
+            source_audits=source_audits,
+        )
 
     async def run(self, topic: str, work_dir: Path, *, dry_run: bool = False) -> CollectResult:
         raw_dir = ensure_dir(Path(work_dir) / "raw")
+        if dry_run and self.config.official_urls:
+            return CollectResult(
+                files=[],
+                sources=[],
+                raw_dir=raw_dir,
+                warnings=[
+                    "dry-run 未抓取验证官方来源，已跳过 OpenAlex/Crossref/arXiv 扩展检索"
+                ],
+            )
+        official_result = CollectResult(files=[], sources=[], raw_dir=raw_dir, warnings=[])
+        if self.config.official_urls and not dry_run:
+            try:
+                for url in self.config.official_urls:
+                    assert_safe_url(url)
+            except UrlBlockedError as exc:
+                raise CollectError("官方来源 URL 未通过安全校验，已停止学术扩展") from exc
+            official_hits = [
+                SearchHit(
+                    url=url,
+                    title="",
+                    snippet="[official source]",
+                    source_engine="official",
+                    expert=True,
+                )
+                for url in dict.fromkeys(self.config.official_urls)
+            ]
+            self._pending_source_audits = [
+                SourceAudit(
+                    engine="official",
+                    attempted=len(official_hits),
+                    hits=len(official_hits),
+                )
+            ]
+            official_result = await self.fetch_and_store(topic, official_hits, raw_dir)
+            recorded_urls = {
+                url
+                for source in self._load_sources(raw_dir)
+                if isinstance((url := source.get("url")), str)
+            }
+            missing = [hit.url for hit in official_hits if hit.url not in recorded_urls]
+            successful_count = max(
+                len(official_hits) - len(missing),
+                len(official_result.files),
+            )
+            if successful_count == 0:
+                details = "; ".join(official_result.warnings) or "未生成有效正文"
+                raise CollectError(f"官方来源抓取失败，已停止学术扩展：{details}")
+            if successful_count < len(official_hits):
+                raise CollectError(
+                    f"官方来源未全部抓取成功（{len(official_hits) - successful_count} 个），"
+                    "已停止学术扩展"
+                )
+
         sr = await self.search_only(topic)
 
         if dry_run:
             return CollectResult(files=[], sources=[], raw_dir=raw_dir, warnings=sr.warnings)
 
-        result = await self.fetch_and_store(topic, sr.hits, raw_dir)
-        result.warnings = sr.warnings + result.warnings
-        return result
+        extension_result = await self.fetch_and_store(topic, sr.hits, raw_dir)
+        return CollectResult(
+            files=[*official_result.files, *extension_result.files],
+            sources=[*official_result.sources, *extension_result.sources],
+            raw_dir=raw_dir,
+            warnings=[*official_result.warnings, *sr.warnings, *extension_result.warnings],
+            # extension_result 已从 source-audit.json 合并了 official 计数。
+            source_audits=extension_result.source_audits,
+        )
 
-    async def fetch_and_store(
-        self, topic: str, hits: list[SearchHit], raw_dir: Path
+    async def fetch_and_store(  # noqa: PLR0915 - fetch funnel records every terminal path
+        self,
+        topic: str,
+        hits: list[SearchHit],
+        raw_dir: Path,
+        *,
+        source_audits: list[SourceAudit] | None = None,
     ) -> CollectResult:
         """抓取 hits 并写入 raw/，幂等且防覆盖。
 
@@ -296,7 +575,21 @@ class Collector:
         - 写完后合并 sources.json（风险 8：来源不断裂）
         """
         ensure_dir(raw_dir)
-        existing_urls = {s.get("url") for s in self._load_sources(raw_dir)}
+        existing_urls = {
+            url
+            for source in self._load_sources(raw_dir)
+            if isinstance((url := source.get("url")), str)
+        }
+        pending = source_audits
+        if pending is None:
+            pending = list(getattr(self, "_pending_source_audits", []))
+            self._pending_source_audits = []
+        audits = {audit.engine: audit for audit in pending}
+        for hit in hits:
+            name = hit.audit_engine or hit.source_engine or "unknown"
+            audits.setdefault(name, SourceAudit(engine=name))
+            if hit.url in existing_urls:
+                audits[name] = self._increment(audits[name], deduplicated=1)
         todo = [h for h in hits if h.url not in existing_urls]
 
         fetcher = Fetcher(
@@ -304,11 +597,25 @@ class Collector:
             parse_pdf=self.config.parse_pdf,
             mineru_cmd=self.config.mineru_cmd,
             pdf_dir=raw_dir / "_pdfs",
+            proxy=self.config.proxy,
         )
         sem = asyncio.Semaphore(self.config.concurrency)
 
         async def _fetch(hit: SearchHit) -> tuple[SearchHit, FetchResult]:
             async with sem:
+                # 视频 URL：Crawl4AI 抓到的是播放器壳页，无实质正文。写 discovery
+                # 笔记让 youtube/bilibili 搜索命中进入 raw/（完整 whisper 转写走 VideoIngest）。
+                if _is_video_url(hit.url):
+                    body = (
+                        f"# {hit.title or 'Video'}\n\n"
+                        f"- URL: {hit.url}\n"
+                        f"- engine: {hit.source_engine}\n"
+                        "- note: video discovery "
+                        "(not transcribed; use --video-url for full ingest)\n\n"
+                        f"{hit.snippet or ''}\n"
+                    )
+                    fr = FetchResult(hit.url, body, ok=True)
+                    return hit, fr
                 if self.config.depth >= 2:
                     fr = await fetcher.fetch(hit.url)
                 else:
@@ -328,12 +635,16 @@ class Collector:
         idx = self._next_idx(raw_dir)
         written_urls: set[str] = set(existing_urls)
         for hit, fr in fetched:
+            name = hit.audit_engine or hit.source_engine or "unknown"
             if not fr.ok or not fr.markdown.strip():
+                audits[name] = self._increment(audits[name], fetch_failed=1)
                 continue
             # 垃圾过滤：正文过短(登录页/导航页/JS空壳)直接丢弃
             if len(fr.markdown.strip()) < self.config.min_doc_chars:
+                audits[name] = self._increment(audits[name], filtered=1)
                 continue
             if hit.url in written_urls:  # 二级链接也可能撞已有 URL
+                audits[name] = self._increment(audits[name], deduplicated=1)
                 continue
             written_urls.add(hit.url)
             idx += 1
@@ -359,9 +670,16 @@ class Collector:
                     snippet=hit.snippet,
                 )
             )
+            audits[name] = self._increment(audits[name], retained=1)
 
         self._append_sources(raw_dir, sources)
-        return CollectResult(files=files, sources=sources, raw_dir=raw_dir)
+        merged_audits = self._persist_audits(raw_dir, list(audits.values()))
+        return CollectResult(
+            files=files,
+            sources=sources,
+            raw_dir=raw_dir,
+            source_audits=merged_audits,
+        )
 
     # -- sources.json / 文件名 辅助 ------------------------------------- #
 
@@ -383,6 +701,19 @@ class Collector:
         for s in new_sources:
             by_url[s.url] = s.model_dump()
         write_json(raw_dir / "sources.json", list(by_url.values()))
+
+    def _persist_audits(self, raw_dir: Path, audits: list[SourceAudit]) -> list[SourceAudit]:
+        path = raw_dir / "source-audit.json"
+        previous: list[SourceAudit] = []
+        if path.exists():
+            try:
+                payload = read_json(path)
+                previous = [SourceAudit.model_validate(item) for item in payload.get("sources", [])]
+            except (OSError, ValueError, AttributeError):
+                previous = []
+        merged = self._merge_audits(previous, audits)
+        write_json(path, {"version": 1, "sources": [item.model_dump() for item in merged]})
+        return merged
 
     @staticmethod
     def _next_idx(raw_dir: Path) -> int:

@@ -10,12 +10,48 @@ from pathlib import Path
 from research_tool.common.logging_config import (
     DailyRotatingHandler,
     JsonFormatter,
+    RuntimeSecretFilter,
     configure_structured_logging,
     emit_log,
     filter_sensitive,
     hash_url,
     replace_url,
 )
+
+
+def test_runtime_filter_redacts_proxy_url_password(monkeypatch):
+    proxy = "http://alice:proxy-password@example.com:8080"
+    monkeypatch.setenv("HTTPS_PROXY", proxy)
+    record = logging.LogRecord(
+        name="test",
+        level=logging.ERROR,
+        pathname="",
+        lineno=0,
+        msg="proxy failed: %s",
+        args=(proxy,),
+        exc_info=None,
+    )
+
+    RuntimeSecretFilter().filter(record)
+
+    assert "proxy-password" not in record.getMessage()
+
+
+def test_structured_logger_redacts_runtime_alphanumeric_secret(tmp_path, monkeypatch):
+    marker = "ALPHANUMERIC" + "SECRET123456"
+    monkeypatch.setenv("MINIMAX_API_KEY", marker)
+    logger = configure_structured_logging(log_dir=tmp_path, retention_days=7)
+    try:
+        logger.error("provider rejected %s", marker)
+        for handler in logger.handlers:
+            handler.flush()
+    finally:
+        for handler in list(logger.handlers):
+            handler.close()
+            logger.removeHandler(handler)
+
+    text = "\n".join(path.read_text(encoding="utf-8") for path in tmp_path.glob("*.log"))
+    assert marker not in text
 
 
 class TestHashUrl:

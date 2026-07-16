@@ -11,6 +11,8 @@ import abc
 
 from pydantic import BaseModel, Field
 
+from ...domain.models import SourceAudit
+
 
 class SearchHit(BaseModel):
     """单条搜索命中。"""
@@ -19,6 +21,11 @@ class SearchHit(BaseModel):
     title: str = ""
     snippet: str = ""
     source_engine: str = ""
+    # 专家库命中标记（ExpertLib）：为真时豁免各源 top-N 截断，保证纳入。
+    expert: bool = False
+    # 请求时的后端名；例如 github 可返回 github_code 子类型，
+    # 审计仍应归到用户请求的 github 后端。
+    audit_engine: str = ""
 
 
 class SearchResult(BaseModel):
@@ -29,6 +36,7 @@ class SearchResult(BaseModel):
 
     hits: list[SearchHit] = Field(default_factory=list)
     warnings: list[str] = Field(default_factory=list)
+    source_audits: list[SourceAudit] = Field(default_factory=list)
 
 
 class SearchBackend(abc.ABC):

@@ -21,6 +21,8 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+# 六阶段 LLM 客户端（DeepSeek/OpenAI/Ollama/MiniMax 共用 openai SDK）
+llm = ["openai>=1.0", "anthropic>=0.40"]
 # 重量级抓取：Crawl4AI（按架构设计 07）。安装后需执行 `crawl4ai-setup` 装浏览器。
 crawl = ["crawl4ai>=0.4"]
 # 搜索后端
@@ -35,11 +37,15 @@ ui = ["gradio>=4.0"]
 video = ["yt-dlp>=2024.5", "faster-whisper>=1.0"]
 # 全部
 all = [
+    "openai>=1.0",
+    "anthropic>=0.40",
     "crawl4ai>=0.4",
     "ddgs>=6.0",
     "tavily-python>=0.5",
+    "gradio>=4.0",
     "yt-dlp>=2024.5",
     "faster-whisper>=1.0",
+    "mineru>=2.0",
 ]
 dev = ["pytest>=8.0", "pytest-asyncio>=0.23"]
 
@@ -48,6 +54,9 @@ research = "research_tool.presentation.cli:app"
 
 [tool.hatch.build.targets.wheel]
 packages = ["research_tool"]
+
+[tool.hatch.build.targets.wheel.force-include]
+"scripts/setup_interactive.py" = "research_tool/presentation/setup_interactive.py"
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

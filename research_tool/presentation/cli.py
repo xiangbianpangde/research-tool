@@ -10,6 +10,7 @@ import asyncio
 import json
 from pathlib import Path
 from typing import Optional
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 import typer
 from rich.console import Console
@@ -20,6 +21,7 @@ from ..domain.config import load_config
 from ..domain.errors import ErrorCode, ResearchToolError, VideoIngestError
 from ..infrastructure.llm.base import LLMClient
 from ..common.logging_config import get_logger, setup_logging
+from ..common.url_guard import is_sensitive_url_key
 from ..domain.models import (
     CleanerConfig,
     CollectorConfig,
@@ -31,6 +33,7 @@ from ..domain.models import (
 from ..application.pipeline import ResearchPipeline
 from ..common.slug import slugify
 from ..infrastructure.stages import Cleaner, Collector, Extractor, Organizer, Reporter
+from ..infrastructure.export.wiki_publisher import publish as publish_to_wiki
 
 logger = get_logger(__name__)
 
@@ -42,6 +45,85 @@ app = typer.Typer(
 
 # rich Console 仅用于渲染 JSON/Table 等结构化输出（非日志消息）
 _out = Console()
+
+def _redact_proxy_url(value: object) -> str:
+    if not isinstance(value, str) or not value:
+        return "***"
+    try:
+        parsed = urlsplit(value)
+        host = parsed.hostname
+        port = parsed.port
+    except ValueError:
+        return "***"
+    if not parsed.scheme or not host:
+        return "***"
+    display_host = f"[{host}]" if ":" in host else host
+    netloc = f"{display_host}:{port}" if port is not None else display_host
+    return urlunsplit((parsed.scheme, netloc, "", "", ""))
+
+
+def _redact_url(value: str) -> str:
+    if not value.lower().startswith(("http://", "https://")):
+        return value
+    try:
+        parsed = urlsplit(value)
+        host = parsed.hostname
+        port = parsed.port
+    except ValueError:
+        return "***"
+    if not host:
+        return "***"
+    display_host = f"[{host}]" if ":" in host else host
+    netloc = f"{display_host}:{port}" if port is not None else display_host
+
+    def _clean_pairs(component: str) -> str:
+        pairs = parse_qsl(component, keep_blank_values=True)
+        cleaned = [
+            (key, "***" if is_sensitive_url_key(key) else item)
+            for key, item in pairs
+        ]
+        return urlencode(cleaned)
+
+    return urlunsplit(
+        (
+            parsed.scheme,
+            netloc,
+            parsed.path,
+            _clean_pairs(parsed.query),
+            _clean_pairs(parsed.fragment),
+        )
+    )
+
+
+def _redact_nested_urls(value: object) -> object:
+    if isinstance(value, dict):
+        return {key: _redact_nested_urls(item) for key, item in value.items()}
+    if isinstance(value, list):
+        return [_redact_nested_urls(item) for item in value]
+    if isinstance(value, str):
+        return _redact_url(value)
+    return value
+
+
+def _redact_config_data(data: dict) -> dict:
+    """Return a redacted copy safe for terminal and CI logs."""
+    sanitized = _redact_nested_urls(data)
+    if not isinstance(sanitized, dict):
+        return {}
+    llm = dict(sanitized.get("llm") or {})
+    if llm.get("api_key"):
+        llm["api_key"] = "***"
+    collector = dict(sanitized.get("collector") or {})
+    for secret_field in (
+        "github_token",
+        "tavily_api_key",
+        "semantic_scholar_api_key",
+    ):
+        if collector.get(secret_field):
+            collector[secret_field] = "***"
+    if collector.get("proxy"):
+        collector["proxy"] = _redact_proxy_url(collector["proxy"])
+    return {**sanitized, "llm": llm, "collector": collector}
 
 # 全局状态（由回调填充）
 _state: dict = {"config_path": None, "verbose": False, "quiet": False}
@@ -107,6 +189,25 @@ def _print_warnings(warnings: list[str]) -> None:
         logger.warning(w)
 
 
+def _print_source_audits(audits) -> None:
+    """输出真实多来源漏斗，明确区分「调用」与「最终贡献」。"""
+    if not audits:
+        return
+    logger.info("来源审计（调用/命中/失败/过滤/去重/抓取失败/保留）:")
+    for audit in audits:
+        logger.info(
+            "  %-18s %d/%d/%d/%d/%d/%d/%d",
+            audit.engine,
+            audit.attempted,
+            audit.hits,
+            audit.failed,
+            audit.filtered,
+            audit.deduplicated,
+            audit.fetch_failed,
+            audit.retained,
+        )
+
+
 def input_topic_from_dir(path: Path) -> str:
     """从 raw/clean/extracted/tree 的父目录名推断主题（slug 形式）。"""
     p = Path(path)
@@ -118,6 +219,12 @@ def _make_llm(model: str | None = None) -> LLMClient:
     overrides = {"llm": {"model": model}} if model else None
     cfg = load_config(_state["config_path"], overrides=overrides)
     return LLMClient.from_config(cfg.llm)
+
+
+async def _make_healthy_llm(model: str | None = None) -> LLMClient:
+    llm = _make_llm(model)
+    await llm.healthcheck()
+    return llm
 
 
 # --------------------------------------------------------------------------- #
@@ -138,6 +245,11 @@ def collect(
     ),
     query: list[str] = typer.Option(
         [], "-q", "--query", help="额外查询（可多次，点名要找的论文/方法，最高优先级）"
+    ),
+    official_url: list[str] = typer.Option(
+        [],
+        "--official-url",
+        help="新论文官方来源（可多次）；成功抓取后才运行 OpenAlex/Crossref/arXiv",
     ),
     core: Optional[str] = typer.Option(
         None, "--core", help="核心词（去锚锚点），如 topic 含机构名时填人物名突破偏差"
@@ -189,6 +301,7 @@ def collect(
         search_rounds=rounds,
         llm_query_expansion=llm_expand,
         extra_queries=list(query),
+        official_urls=list(official_url),
         core_keyword=core,
         facets=_split_csv(facets),
         from_year=from_year,
@@ -203,8 +316,16 @@ def collect(
     topic_dir = output / slugify(topic)
 
     async def _go():
-        c = Collector(cfg, _make_llm() if llm_expand else None)
+        llm = await _make_healthy_llm() if llm_expand else None
+        c = Collector(cfg, llm)
         if dry_run:
+            if cfg.official_urls:
+                for url in cfg.official_urls:
+                    logger.info("[official] 待验证并抓取\n  %s", url)
+                logger.info(
+                    "dry-run 不抓取官方源，因此不执行 OpenAlex/Crossref/arXiv 扩展检索"
+                )
+                return
             sr = await c.search_only(topic)
             for h in sr.hits:
                 logger.info("[%s] %s\n  %s", h.source_engine, h.title, h.url)
@@ -213,6 +334,7 @@ def collect(
             return
         res = await c.run(topic, topic_dir)
         logger.info("采集完成：%d 个文件 → %s", len(res.files), res.raw_dir)
+        _print_source_audits(res.source_audits)
         _print_warnings(res.warnings)
 
     _run(_go())
@@ -226,7 +348,12 @@ def ingest_pdf(
     pdf_path: Path = typer.Argument(..., help="PDF 文件或文件夹"),
     topic: str = typer.Option(..., "-T", "--topic", help="调研主题（决定输出子目录）"),
     output: Path = typer.Option(Path("./research-output"), "-o", "--output"),
-    backend: str = typer.Option("pipeline", "-b", "--backend", help="MinerU 后端"),
+    backend: Optional[str] = typer.Option(
+        None,
+        "-b",
+        "--backend",
+        help="MinerU 后端（默认取 config.yaml 的 pdf_ingest.mineru_backend）",
+    ),
     ocr_engine: str = typer.Option(
         "mineru",
         "--ocr-engine",
@@ -246,19 +373,24 @@ def ingest_pdf(
     """用 MinerU 把本地 PDF 转为 raw/ Markdown（可选翻译），供后续阶段接力。"""
     from ..infrastructure.ingest import PdfIngestor
 
+    # 读 config.yaml 的 pdf_ingest 作默认，CLI 参数覆盖，确保 backend/cmd 生效。
+    try:
+        _base_pdf = load_config(_state.get("config_path", "config.yaml")).pdf_ingest
+    except Exception:
+        _base_pdf = PdfIngestConfig()
     cfg = PdfIngestConfig(
         ocr_engine=ocr_engine,
-        mineru_backend=backend,
+        mineru_backend=backend if backend is not None else _base_pdf.mineru_backend,
         ocr_lang=lang,
         translate=translate,
-        mineru_cmd=mineru_cmd,
-        ocr_cmd=ocr_cmd,
-        ocr_model_path=ocr_model_path,
+        mineru_cmd=mineru_cmd or _base_pdf.mineru_cmd,
+        ocr_cmd=ocr_cmd or _base_pdf.ocr_cmd,
+        ocr_model_path=ocr_model_path or _base_pdf.ocr_model_path,
     )
     topic_dir = output / slugify(topic)
 
     async def _go():
-        llm = _make_llm(model) if translate else None
+        llm = await _make_healthy_llm(model) if translate else None
         res = await PdfIngestor(cfg, llm).run(pdf_path, topic_dir)
         logger.info("PDF 摄取完成：%d 个文件 → %s", len(res.files), res.raw_dir)
         if translate:
@@ -338,7 +470,8 @@ def extract(
     work_dir = output.parent if output else None
 
     async def _go():
-        res = await Extractor(cfg).run(input_dir, _make_llm(model), work_dir)
+        llm = await _make_healthy_llm(model)
+        res = await Extractor(cfg).run(input_dir, llm, work_dir)
         logger.info(
             "抽取完成：%d 实体 / %d 关系 / %d 三元组 → %s",
             len(res.entities),
@@ -368,7 +501,8 @@ def organize(
     topic_hint = topic or input_topic_from_dir(extracted_dir)
 
     async def _go():
-        res = await Organizer(cfg).run(extracted_dir, _make_llm(model), work_dir, topic=topic_hint)
+        llm = await _make_healthy_llm(model)
+        res = await Organizer(cfg).run(extracted_dir, llm, work_dir, topic=topic_hint)
         logger.info("组织完成：%d 个节点 → %s", len(res.nodes), res.tree_dir)
 
     _run(_go())
@@ -391,8 +525,9 @@ def report(
     topic_hint = topic or input_topic_from_dir(tree_dir)
 
     async def _go():
+        llm = await _make_healthy_llm(model)
         res = await Reporter(cfg).run(
-            tree_dir, _make_llm(model), topic=topic_hint, output_path=output
+            tree_dir, llm, topic=topic_hint, output_path=output
         )
         logger.info("报告完成：%d 字 → %s", res.word_count, res.report_path)
 
@@ -495,22 +630,23 @@ def _run_video_ingest(
     _run(_go())
 
 
-def _build_run_overrides(
+def _build_run_overrides(  # noqa: PLR0915
     *,
     topic: str,
+    mode: str,
     output: Path | None,
     stages: list[str],
     resume: bool,
     source: list[str],
     max_results: int,
-    rounds: int,
+    rounds: int | None,
     llm_expand: bool,
     query: list[str],
     core: str | None,
     facets: str | None,
     from_year: int | None,
     to_year: int | None,
-    deep_search: bool,
+    deep_search: bool | None,
     deep_pages: int | None,
     deep_sorts: str | None,
     search_relevance_min_overlap: float | None,
@@ -526,17 +662,24 @@ def _build_run_overrides(
     ocr_model_path: str | None,
     translate: bool,
     model: str | None,
+    with_talks: bool = False,
+    max_talks: int | None = None,
+    min_talk_similarity: float | None = None,
+    ingest_talks: bool = False,
+    experts_file: str | None = None,
+    extra_url: list[str] | None = None,
+    official_url: list[str] | None = None,
 ) -> dict:
     """从 CLI 参数构建 config overrides 字典（抽离 run 命令的超长参数）。"""
     overrides: dict = {
         "topic": topic,
+        "mode": mode,
         "work_dir": str(output) if output is not None else None,
         "stages": stages,
         "resume": resume,
         "collector": {
             "search_engines": source,
             "max_results_per_engine": max_results,
-            "search_rounds": rounds,
             "llm_query_expansion": llm_expand,
             "extra_queries": list(query),
             "core_keyword": core,
@@ -544,10 +687,12 @@ def _build_run_overrides(
             "to_year": to_year,
         },
     }
+    if rounds is not None:
+        overrides["collector"]["search_rounds"] = rounds
     if facets:
         overrides["collector"]["facets"] = _split_csv(facets)
-    if deep_search:
-        overrides["collector"]["deep_search"] = True
+    if deep_search is not None:
+        overrides["collector"]["deep_search"] = deep_search
     if deep_pages is not None:
         overrides["collector"]["deep_pages"] = deep_pages
     if deep_sorts:
@@ -566,6 +711,12 @@ def _build_run_overrides(
         overrides["max_backward_rounds"] = max_backward_rounds
     if mineru_cmd:
         overrides["collector"]["mineru_cmd"] = mineru_cmd
+    if experts_file:
+        overrides["collector"]["experts_file"] = experts_file
+    if extra_url:
+        overrides["collector"]["extra_urls"] = list(extra_url)
+    if official_url:
+        overrides["collector"]["official_urls"] = list(official_url)
     if pdf_dir:
         overrides["pdf_dir"] = str(pdf_dir)
         overrides["pdf_ingest"] = {"translate": translate}
@@ -579,6 +730,17 @@ def _build_run_overrides(
             overrides["pdf_ingest"]["mineru_cmd"] = mineru_cmd
     if model:
         overrides["llm"] = {"model": model}
+    if with_talks or max_talks is not None or min_talk_similarity is not None or ingest_talks:
+        talk: dict = {}
+        if with_talks:
+            talk["enabled"] = True
+        if max_talks is not None:
+            talk["max_talks"] = max_talks
+        if min_talk_similarity is not None:
+            talk["min_title_similarity"] = min_talk_similarity
+        if ingest_talks:
+            talk["ingest"] = True
+        overrides["talk"] = talk
     return overrides
 
 
@@ -594,6 +756,11 @@ def run(
         help="输出目录（不传则取 config.yaml 的 pipeline.work_dir，默认 ./research-output）",
     ),
     skip: list[str] = typer.Option([], "--skip", help="跳过阶段，如 --skip deepen"),
+    mode: Optional[str] = typer.Option(
+        None,
+        "--mode",
+        help="调研档位：fast（跳过 Deepen）| standard | deep（深搜+反向一轮）",
+    ),
     resume: bool = typer.Option(True, "--resume/--no-resume", help="跳过已完成阶段"),
     dry_run: bool = typer.Option(False, "--dry-run", help="仅打印将执行的步骤"),
     # --- 高级项：低频，等价配置项见 config.yaml ---------------------- #
@@ -604,8 +771,8 @@ def run(
         rich_help_panel=_ADVANCED,
         help="每源最多结果（=collector.max_results_per_engine）",
     ),
-    rounds: int = typer.Option(
-        1,
+    rounds: Optional[int] = typer.Option(
+        None,
         "-r",
         "--rounds",
         rich_help_panel=_ADVANCED,
@@ -632,9 +799,9 @@ def run(
     to_year: Optional[int] = typer.Option(
         None, "--to-year", rich_help_panel=_ADVANCED, help="发表年份上限（=collector.to_year）"
     ),
-    deep_search: bool = typer.Option(
-        False,
-        "--deep-search",
+    deep_search: Optional[bool] = typer.Option(
+        None,
+        "--deep-search/--no-deep-search",
         rich_help_panel=_ADVANCED,
         help="深搜：多排序×多页翻页（=collector.deep_search）",
     ),
@@ -731,6 +898,47 @@ def run(
         rich_help_panel=_ADVANCED,
         help="V1.1 VideoIngest：跳过 M-004 转写缓存（强制重转）。",
     ),
+    with_talks: bool = typer.Option(
+        False,
+        "--with-talks",
+        rich_help_panel=_ADVANCED,
+        help="阶段 F：organize 后把论文标题关联 YouTube talk（=talk.enabled）",
+    ),
+    max_talks: Optional[int] = typer.Option(
+        None,
+        "--max-talks",
+        rich_help_panel=_ADVANCED,
+        help="talk 关联硬上限（=talk.max_talks，默认 5）",
+    ),
+    min_talk_similarity: Optional[float] = typer.Option(
+        None,
+        "--min-talk-similarity",
+        rich_help_panel=_ADVANCED,
+        help="talk 标题相似度置信闸 0-1（=talk.min_title_similarity，默认 0.7）",
+    ),
+    ingest_talks: bool = typer.Option(
+        False,
+        "--ingest-talks",
+        rich_help_panel=_ADVANCED,
+        help="talk 命中后全量 VideoIngest 转写（=talk.ingest；默认仅 discovery 笔记）",
+    ),
+    experts_file: Optional[str] = typer.Option(
+        None,
+        "--experts-file",
+        rich_help_panel=_ADVANCED,
+        help="专家库 YAML 路径（=collector.experts_file）",
+    ),
+    extra_url: list[str] = typer.Option(
+        [],
+        "--extra-url",
+        rich_help_panel=_ADVANCED,
+        help="直塞抓取队列的 URL（可多次，=collector.extra_urls）",
+    ),
+    official_url: list[str] = typer.Option(
+        [],
+        "--official-url",
+        help="新论文官方来源；先强制抓取，再自动扩展 OpenAlex/Crossref/arXiv",
+    ),
 ) -> None:
     """一键全流程：collect/PDF摄取 → clean → extract → organize → report。
 
@@ -747,15 +955,28 @@ def run(
         )
         return
 
+    configured = load_config(_state["config_path"])
+    effective_mode = mode or configured.mode
+    if effective_mode not in {"fast", "standard", "deep"}:
+        _fail(f"未知调研模式: {effective_mode}（可选 fast/standard/deep）")
     all_stages = ["collect", "deepen", "clean", "extract", "organize", "report"]
-    stages = [s for s in all_stages if s not in skip]
+    if mode is None:
+        mode_stages = list(configured.stages)
+    else:
+        mode_stages = [
+            stage
+            for stage in all_stages
+            if not (effective_mode == "fast" and stage == "deepen")
+        ]
+    stages = [s for s in mode_stages if s not in skip]
 
     if dry_run:
-        logger.info("将执行的阶段：%s", " → ".join(stages))
+        logger.info("mode=%s；将执行的阶段：%s", effective_mode, " → ".join(stages))
         raise typer.Exit()
 
     overrides = _build_run_overrides(
         topic=topic,
+        mode=effective_mode,
         output=output,
         stages=stages,
         resume=resume,
@@ -784,6 +1005,13 @@ def run(
         ocr_model_path=ocr_model_path,
         translate=translate,
         model=model,
+        with_talks=with_talks,
+        max_talks=max_talks,
+        min_talk_similarity=min_talk_similarity,
+        ingest_talks=ingest_talks,
+        experts_file=experts_file,
+        extra_url=extra_url,
+        official_url=official_url,
     )
 
     async def _go():
@@ -793,6 +1021,7 @@ def run(
             logger.info("%-9s %-9s %s", ev.status, ev.stage, ev.message)
         res = pipeline._result
         if res and res.collect_result:
+            _print_source_audits(res.collect_result.source_audits)
             _print_warnings(res.collect_result.warnings)
         if res and res.deepen_result:
             _print_warnings(res.deepen_result.warnings)
@@ -802,6 +1031,14 @@ def run(
             logger.info("✓ 报告：%s", res.report_result.report_path)
         if res:
             logger.info("耗时 %.1fs", res.elapsed_sec)
+            logger.info(
+                "运行档位=%s resume=%s search_cache=%s",
+                cfg.mode,
+                cfg.resume,
+                cfg.collector.search_cache,
+            )
+            if res.run_summary_path:
+                logger.info("运行摘要：%s", res.run_summary_path)
 
     _run(_go())
 
@@ -809,6 +1046,31 @@ def run(
 # --------------------------------------------------------------------------- #
 # status
 # --------------------------------------------------------------------------- #
+@app.command(name="publish-wiki")
+def publish_wiki(
+    slug: str = typer.Argument(..., help="research-output 下的主题目录名"),
+    vault: Path = typer.Option(..., "--vault", help="Obsidian staging vault 路径"),
+    research_output: Path = typer.Option(
+        Path("./research-output"), "--research-output", help="research-output 根目录"
+    ),
+    confirm: bool = typer.Option(False, "--confirm", help="将产物标为 verified（默认 draft）"),
+    dry_run: bool = typer.Option(False, "--dry-run", help="仅显示将写入的文件"),
+) -> None:
+    """将一份研究产物发布到受控的 Obsidian staging vault。"""
+    try:
+        result = publish_to_wiki(
+            slug, vault, research_output=research_output, confirm=confirm, dry_run=dry_run
+        )
+    except ValueError as exc:
+        _fail(str(exc))
+        return
+    action = "将写入" if result.dry_run else "已写入"
+    logger.info("%s %d 个目标：%s", action, len(result.written), result.form.value)
+    for path in result.written:
+        logger.info("  %s", path)
+    _print_warnings(list(result.warnings))
+
+
 @app.command()
 def status(path: Path = typer.Argument(..., help="主题目录")) -> None:
     """查看调研进度。"""
@@ -862,10 +1124,77 @@ def config() -> None:
     except ResearchToolError as e:
         _fail(str(e))
         return
-    data = cfg.model_dump(mode="json")
-    if cfg.llm.api_key:
-        data["llm"]["api_key"] = "***"
+    data = _redact_config_data(cfg.model_dump(mode="json"))
     _out.print_json(json.dumps(data, ensure_ascii=False))
+
+
+@app.command("setup")
+def setup_cmd(
+    secrets_only: bool = typer.Option(
+        False,
+        "--secrets-only",
+        "-s",
+        help="逐步更新全部密钥（LLM/GitHub/Tavily/S2/代理/Groq/X…）",
+    ),
+    github_only: bool = typer.Option(
+        False,
+        "--github-only",
+        "-g",
+        help="只更新 GITHUB_TOKEN",
+    ),
+    tavily_only: bool = typer.Option(
+        False,
+        "--tavily-only",
+        "-t",
+        help="只更新 TAVILY_API_KEY",
+    ),
+    check_only: bool = typer.Option(
+        False,
+        "--check-only",
+        help="按 receipt/--profile 重新验收，不安装、不提问",
+    ),
+    profile: Optional[str] = typer.Option(
+        None,
+        "--profile",
+        help="直接部署/验收档位：minimal | recommended | full",
+    ),
+) -> None:
+    """交互式部署 / 密钥配置（密钥本地隐藏输入，勿粘贴到聊天）。"""
+    import runpy
+    from pathlib import Path
+
+    # Wheel 使用随包脚本；源码运行时仅回退到已验证仓库内的 scripts/。
+    candidates = [
+        Path(__file__).with_name("setup_interactive.py"),
+        Path(__file__).resolve().parents[2] / "scripts" / "setup_interactive.py",
+    ]
+    script = next((p for p in candidates if p.is_file()), None)
+    if script is None:
+        _fail(
+            "找不到 scripts/setup_interactive.py。请在 research-tool 仓库根目录执行：\n"
+            "  python scripts/setup_interactive.py --tavily-only"
+        )
+        return
+    argv = []
+    if secrets_only:
+        argv.append("--secrets-only")
+    if github_only:
+        argv.append("--github-only")
+    if tavily_only:
+        argv.append("--tavily-only")
+    if check_only:
+        argv.append("--check-only")
+    if profile:
+        argv.extend(("--profile", profile))
+    # 用 runpy 执行脚本的 main，避免再起子进程丢 TTY
+    import sys
+
+    old = sys.argv
+    try:
+        sys.argv = [str(script), *argv]
+        runpy.run_path(str(script), run_name="__main__")
+    finally:
+        sys.argv = old
 
 
 def _run(coro) -> None:

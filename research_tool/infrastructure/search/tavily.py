@@ -9,6 +9,7 @@ from __future__ import annotations
 import asyncio
 
 from ...domain.errors import SearchError
+from ._http import get_default_proxy
 from .base import SearchBackend, SearchHit
 
 
@@ -30,7 +31,11 @@ class TavilyBackend(SearchBackend):
             raise SearchError(
                 "需要 tavily-python 包：pip install tavily-python（或 research-tool[search]）"
             ) from e
-        client = TavilyClient(api_key=self._api_key)
+        proxy = get_default_proxy()
+        client = TavilyClient(
+            api_key=self._api_key,
+            proxies={"http": proxy, "https": proxy} if proxy else None,
+        )
         resp = client.search(query=query, max_results=max_results)
         hits: list[SearchHit] = []
         for r in resp.get("results", []):

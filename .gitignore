@@ -5,11 +5,15 @@ __pycache__/
 build/
 dist/
 .pytest_cache/
+.coverage
+.DS_Store
 .venv/
+.venv-*/
 venv/
 config.yaml
 config.*.yaml
 research-output/
+work/
 .env
 webui-test/
 out-icl/
@@ -21,10 +25,12 @@ tests/fixtures/*/tree/
 tests/fixtures/*/report.md
 
 # 工具数据
+.cache/
 .benchmarks/
 .ruff_cache/
 .deepseek/
 state/
+.research-deployment.json
 
 # 08-图谱工具
 .codegraph/

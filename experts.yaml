@@ -1,0 +1,74 @@
+# 专家库（ExpertLib）——策展的可信实体，让其产出绕过搜索默认排序被保证纳入。
+# 用法：config.yaml 的 collector.experts_file 指向本文件，或 CLI --experts-file 传入。
+# 强档：填 seed_urls（已知高质量 repo/paper 的确切 URL），直塞抓取队列、跳过搜索。
+# 弱档：只填 handles.github，靠 scoped 搜索 org:<handle> <topic>，命中豁免 top-N。
+# domains 是与 topic 做词重叠匹配的键，用收敛的技术标签（同义词归并），别用宽泛词。
+version: 1
+experts:
+  - id: facebookresearch
+    name: Meta AI (FAIR)
+    kind: org
+    domains:
+      - 3d-vision
+      - sfm
+      - reconstruction
+      - multimodal
+      - point-cloud
+      - segmentation
+      - vggt
+      - geometry
+      - transformer
+    handles:
+      github: facebookresearch
+      homepage: https://ai.meta.com/research/
+    seed_urls:
+      - https://github.com/facebookresearch/vggt-omega
+    priority: high
+    notes: "vggt 系列；star 可能被淹没但质量高，强档入库示例"
+
+  - id: google-research
+    name: Google Research
+    kind: org
+    domains:
+      - machine-learning
+      - nlp
+      - vision
+      - diffusion
+      - representation-learning
+    handles:
+      github: google-research
+      homepage: https://research.google/
+    seed_urls: []
+    priority: normal
+    notes: "弱档示例：仅 org handle，靠 scoped 搜索命中"
+
+  - id: openai
+    name: OpenAI
+    kind: org
+    domains:
+      - llm
+      - multimodal
+      - reinforcement-learning
+      - generative
+    handles:
+      github: openai
+      homepage: https://openai.com/research/
+    seed_urls: []
+    priority: normal
+    notes: "弱档：scoped org 搜索"
+
+  - id: deepmind
+    name: Google DeepMind
+    kind: org
+    domains:
+      - reinforcement-learning
+      - agent
+      - protein
+      - multimodal
+      - games
+    handles:
+      github: google-deepmind
+      homepage: https://deepmind.google/
+    seed_urls: []
+    priority: normal
+    notes: "弱档：scoped org 搜索"

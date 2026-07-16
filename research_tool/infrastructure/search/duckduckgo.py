@@ -9,6 +9,7 @@ from __future__ import annotations
 import asyncio
 
 from ...domain.errors import SearchError
+from ._http import get_default_proxy
 from .base import SearchBackend, SearchHit
 
 # language → DDG region
@@ -25,7 +26,7 @@ class DuckDuckGoBackend(SearchBackend):
             raise SearchError("需要 ddgs 包：pip install ddgs（或 research-tool[search]）") from e
         region = _REGION.get(language, "wt-wt")
         hits: list[SearchHit] = []
-        with DDGS() as ddgs:
+        with DDGS(proxy=get_default_proxy()) as ddgs:
             for r in ddgs.text(query, region=region, max_results=max_results):
                 url = r.get("href") or r.get("url") or ""
                 if not url:

@@ -19,7 +19,8 @@ from pathlib import Path
 
 from pydantic import BaseModel, Field
 
-from ..llm.base import LLMClient
+from ..llm.base import LLMClient, gather_fail_fast
+from ...domain.errors import LLMAuthenticationError
 from ...domain.models import FeedbackPlan, OrganizeResult, OrganizerConfig
 from .base import ensure_dir, read_json, write_text
 
@@ -88,12 +89,10 @@ def _chunk(text: str, size: int) -> list[str]:
 def _load_clean_docs(input_dir: Path) -> list[_SourceDoc]:
     docs: list[_SourceDoc] = []
     for md in sorted(input_dir.glob("*.md")):
-        if md.name in ("quality.json",):
-            continue
         raw = md.read_text(encoding="utf-8")
         sid = md.stem.split("-", 1)[0]
-        title = (_META_TITLE.search(raw) or [None, ""])[1] if _META_TITLE.search(raw) else ""
-        url = (_META_SRC.search(raw) or [None, ""])[1] if _META_SRC.search(raw) else ""
+        title = match.group(1) if (match := _META_TITLE.search(raw)) else ""
+        url = match.group(1) if (match := _META_SRC.search(raw)) else ""
         body = _strip_meta_body(raw).strip()
         if body:
             docs.append(_SourceDoc(sid=sid, title=title.strip(), url=url.strip(), text=body))
@@ -129,8 +128,9 @@ class Organizer:
         nodes = plan.nodes[: self.config.max_nodes]
         node_titles = [n.title for n in nodes]
 
-        node_bodies = await asyncio.gather(
-            *[self._node_body(i + 1, n, node_titles, evidence, llm) for i, n in enumerate(nodes)]
+        node_bodies = await gather_fail_fast(
+            self._node_body(i + 1, n, node_titles, evidence, llm)
+            for i, n in enumerate(nodes)
         )
 
         node_paths: list[Path] = []
@@ -151,7 +151,15 @@ class Organizer:
     # -- map：逐篇摘要 -------------------------------------------------- #
 
     async def _summarize_all(self, topic: str, sources: list[_SourceDoc], llm: LLMClient) -> None:
-        await asyncio.gather(*[self._summarize_doc(topic, s, llm) for s in sources])
+        # 限制逐篇摘要的 LLM 并发：MiniMax 等端点对密集并发调用会 429 限流，
+        # SDK 重试卡死（50 文档全并发必触发）。Semaphore(2) 控制为最多 2 篇并行。
+        sem = asyncio.Semaphore(2)
+
+        async def _limited(s: _SourceDoc) -> None:
+            async with sem:
+                await self._summarize_doc(topic, s, llm)
+
+        await gather_fail_fast(_limited(source) for source in sources)
 
     async def _summarize_doc(self, topic: str, s: _SourceDoc, llm: LLMClient) -> None:
         chunks = _chunk(s.text, _DOC_CHUNK)[:_MAX_CHUNKS_PER_DOC]
@@ -169,11 +177,13 @@ class Organizer:
             try:
                 res = await llm.chat_structured(prompt, _Points, system=_SUM_SYSTEM)
                 return res.points
+            except LLMAuthenticationError:
+                raise
             except Exception as exc:  # noqa: BLE001
                 logger.debug("逐篇摘要失败: %s", exc)
                 return []
 
-        results = await asyncio.gather(*[_one(c) for c in chunks])
+        results = await gather_fail_fast(_one(chunk) for chunk in chunks)
         points: list[str] = []
         for r in results:
             points.extend(r)
@@ -209,7 +219,9 @@ class Organizer:
         )
         plan = await llm.chat_structured(prompt, _NodePlan, system=_SYSTEM)
         if not plan.nodes:
-            plan.nodes = [_Node(title="概述", core_question="该主题的核心内容是什么？")]
+            plan = plan.model_copy(
+                update={"nodes": [_Node(title="概述", core_question="该主题的核心内容是什么？")]}
+            )
         return plan
 
     async def _node_body(
@@ -305,6 +317,8 @@ class Organizer:
         )
         try:
             fb = await llm.chat_structured(prompt, _Feedback, system=_FB_SYSTEM)
+        except LLMAuthenticationError:
+            raise
         except Exception as exc:  # noqa: BLE001
             logger.debug("反向传播反馈生成失败: %s", exc)
             return FeedbackPlan(sparse_nodes=sparse)

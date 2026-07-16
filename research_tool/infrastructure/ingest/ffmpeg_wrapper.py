@@ -282,7 +282,7 @@ class AudioExtractor:
 
 
 class KeyframeCapture:
-    """关键帧（I 帧）截图。
+    r"""关键帧（I 帧）截图。
 
     用 ffmpeg `-vf select=eq(pict_type\,I)` 选择 I 帧，等距分布。
     默认 5 张，可调 1-10。

@@ -14,6 +14,7 @@ from pathlib import Path
 from pydantic import BaseModel, Field
 
 from ..llm.base import LLMClient
+from ...domain.errors import LLMAuthenticationError
 from ...domain.models import CleanerConfig, CleanResult, FileQuality
 from .base import ensure_dir, write_json, write_text
 
@@ -331,7 +332,9 @@ class Cleaner:
             try:
                 res = await llm.chat_structured(prompt, _Scores, system=_SCORE_SYSTEM)
                 scores = list(res.scores)
-            except Exception:  # noqa: BLE001 - 单批失败不阻断，全批默认通过
+            except LLMAuthenticationError:
+                raise
+            except Exception:  # noqa: BLE001 - 非鉴权失败时全批默认通过
                 scores = [1.0] * len(batch)
 
             for i, path in enumerate(batch):

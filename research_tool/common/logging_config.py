@@ -17,6 +17,7 @@ import hashlib
 import json
 import logging
 import os
+import re
 import sys
 import time
 from datetime import datetime, timezone
@@ -26,6 +27,32 @@ from typing import Any, ClassVar
 
 _DETAIL_FORMAT = "%(asctime)s [%(levelname)-5s] %(name)s: %(message)s"
 _DATE_FMT = "%H:%M:%S"
+
+_TOKEN_PATTERN = re.compile(r"(?<![A-Za-z0-9])sk-[A-Za-z0-9._-]{8,}")
+_BEARER_PATTERN = re.compile(r"(?i)(authorization\s*:\s*bearer\s+)\S+")
+_URL_USERINFO_PATTERN = re.compile(r"(?i)(https?://[^:@/\s]+:)[^@/\s]+(@)")
+_PROXY_ENV_NAMES = frozenset({"HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY"})
+
+
+class RuntimeSecretFilter(logging.Filter):
+    """从普通文本日志中移除当前环境凭据和常见 token 形态。"""
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        message = record.getMessage()
+        for name, value in os.environ.items():
+            upper = name.upper()
+            if not value or len(value) < 8:
+                continue
+            if upper in _PROXY_ENV_NAMES or any(
+                marker in upper for marker in ("KEY", "TOKEN", "SECRET", "PASSWORD")
+            ):
+                message = message.replace(value, "***REDACTED***")
+        message = _TOKEN_PATTERN.sub("***REDACTED***", message)
+        message = _BEARER_PATTERN.sub(r"\1***REDACTED***", message)
+        message = _URL_USERINFO_PATTERN.sub(r"\1***REDACTED***\2", message)
+        record.msg = message
+        record.args = ()
+        return True
 
 # --------------------------------------------------------------------------- #
 # V1.0：原 setup_logging / get_logger 保持不变（向后兼容）
@@ -52,19 +79,39 @@ def setup_logging(verbose: bool = False, quiet: bool = False) -> None:
         level = logging.INFO
     root.setLevel(level)
 
-    # INFO → stdout（干净格式）
-    stdout_handler = logging.StreamHandler(sys.stdout)
-    stdout_handler.setLevel(logging.INFO)
-    stdout_handler.addFilter(lambda r: r.levelno == logging.INFO)
-    stdout_handler.setFormatter(logging.Formatter("%(message)s"))
-    root.addHandler(stdout_handler)
+    # P11：nohup/管道重定向下 stdout 默认全缓冲会"假挂起"；尽量行缓冲。
+    try:
+        sys.stdout.reconfigure(line_buffering=True)  # type: ignore[attr-defined]
+    except Exception:  # noqa: BLE001, S110
+        pass
+    try:
+        sys.stderr.reconfigure(line_buffering=True)  # type: ignore[attr-defined]
+    except Exception:  # noqa: BLE001, S110
+        pass
 
-    # DEBUG/WARNING/ERROR → stderr（含时间戳+模块）
-    stderr_handler = logging.StreamHandler(sys.stderr)
-    stderr_handler.setLevel(logging.DEBUG)
-    stderr_handler.addFilter(lambda r: r.levelno != logging.INFO)
-    stderr_handler.setFormatter(logging.Formatter(_DETAIL_FORMAT, _DATE_FMT))
-    root.addHandler(stderr_handler)
+    if verbose:
+        # verbose：全部走 stderr（带时间戳），后台 nohup 时进度立即可见
+        stderr_handler = logging.StreamHandler(sys.stderr)
+        stderr_handler.setLevel(logging.DEBUG)
+        stderr_handler.addFilter(RuntimeSecretFilter())
+        stderr_handler.setFormatter(logging.Formatter(_DETAIL_FORMAT, _DATE_FMT))
+        root.addHandler(stderr_handler)
+    else:
+        # INFO → stdout（干净格式）
+        stdout_handler = logging.StreamHandler(sys.stdout)
+        stdout_handler.setLevel(logging.INFO)
+        stdout_handler.addFilter(RuntimeSecretFilter())
+        stdout_handler.addFilter(lambda r: r.levelno == logging.INFO)
+        stdout_handler.setFormatter(logging.Formatter("%(message)s"))
+        root.addHandler(stdout_handler)
+
+        # DEBUG/WARNING/ERROR → stderr（含时间戳+模块）
+        stderr_handler = logging.StreamHandler(sys.stderr)
+        stderr_handler.setLevel(logging.DEBUG)
+        stderr_handler.addFilter(RuntimeSecretFilter())
+        stderr_handler.addFilter(lambda r: r.levelno != logging.INFO)
+        stderr_handler.setFormatter(logging.Formatter(_DETAIL_FORMAT, _DATE_FMT))
+        root.addHandler(stderr_handler)
 
     # 抑制第三方库的 DEBUG 噪音
     for noisy in ("httpx", "httpcore", "urllib3", "asyncio"):
@@ -85,7 +132,7 @@ def get_logger(name: str | None = None) -> logging.Logger:
 
 
 # 敏感字段名（不区分大小写，递归 redact 嵌套 dict，深度上限 5）
-_SENSITIVE_KEYS: ClassVar[frozenset[str]] = frozenset(
+_SENSITIVE_KEYS: frozenset[str] = frozenset(
     {
         "api_key",
         "apikey",
@@ -291,10 +338,10 @@ class DailyRotatingHandler(BaseRotatingHandler):
     def doRollover(self) -> None:  # noqa: N802
         if self.stream:
             self.stream.close()
-            self.stream = None
+        self.stream = None
         self._current_date = datetime.now(tz=timezone.utc).date()
         self.baseFilename = self._filepath_for_date(self._current_date)
-        self._open_stream()
+        self.stream = self._open()
         self._cleanup_expired()
 
     def _cleanup_expired(self) -> None:
@@ -344,12 +391,14 @@ def configure_structured_logging(
             log_dir=log_dir or DEFAULT_LOG_DIR,
             retention_days=retention_days,
         )
+        handler.addFilter(RuntimeSecretFilter())
         handler.setFormatter(JsonFormatter())
         logger.addHandler(handler)
         logger.propagate = False
     except OSError:
         # 路径不可写：降级为 stderr
         stderr_handler = logging.StreamHandler(sys.stderr)
+        stderr_handler.addFilter(RuntimeSecretFilter())
         stderr_handler.setFormatter(JsonFormatter())
         logger.addHandler(stderr_handler)
         logger.propagate = False

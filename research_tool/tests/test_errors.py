@@ -25,10 +25,11 @@ from research_tool.domain.errors import (
 
 
 class TestErrorCodeEnum:
-    """26 个错误码常量。"""
+    """VideoIngest 错误码常量（含 MiniMax 转写 E_TR_006）。"""
 
-    def test_all_26_codes_present(self):
-        assert len(list(ErrorCode)) == 26
+    def test_all_codes_present(self):
+        assert len(list(ErrorCode)) == 27
+        assert ErrorCode.E_TR_006_MINIMAX_FAILED.value == "E_TR_006_MINIMAX_FAILED"
 
     def test_code_string_values(self):
         assert ErrorCode.E_VID_001_VIDEO_NOT_FOUND.value == "E_VID_001_VIDEO_NOT_FOUND"

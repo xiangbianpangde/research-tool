@@ -136,13 +136,15 @@ class TestCookieInjectorPosix:
         injector = CookieInjector(cookie)
         with pytest.raises(DownloadError) as exc_info:
             injector.validate_perms()
-        assert exc_info.value.code == E_DL_001
+        # Cookie 属用户配置项，文件缺失/权限不安全 → E_CFG_001_CONFIG_MISSING
+        # （E_DL_001 重构后映射 E_VID_002_INVALID_URL=URL非法，不再适用此处）
+        assert exc_info.value.code == ErrorCode.E_CFG_001_CONFIG_MISSING.value
 
     def test_missing_file_raises(self, tmp_path: Path):
         injector = CookieInjector(tmp_path / "missing.txt")
         with pytest.raises(DownloadError) as exc_info:
             injector.validate_perms()
-        assert exc_info.value.code == E_DL_001
+        assert exc_info.value.code == ErrorCode.E_CFG_001_CONFIG_MISSING.value
 
     def test_inject_args_appends_cookies(self, tmp_path: Path):
         cookie = tmp_path / "cookies.txt"

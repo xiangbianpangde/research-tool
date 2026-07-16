@@ -9,7 +9,8 @@ from __future__ import annotations
 import asyncio
 import logging
 
-from ..infrastructure.llm.base import LLMClient
+from ..domain.errors import LLMAuthenticationError
+from ..infrastructure.llm.base import LLMClient, gather_fail_fast
 
 logger = logging.getLogger(__name__)
 
@@ -56,18 +57,20 @@ async def translate_markdown(
     concurrency: int = 8,
 ) -> str:
     """把英文 Markdown 翻译为中文，分块并发，保序拼接。"""
-    chunks = chunk_markdown(md, chunk_size)
-    if not chunks:
+    if not md:
         return ""
+    chunks = chunk_markdown(md, chunk_size)
     sem = asyncio.Semaphore(max(1, concurrency))
 
     async def _one(chunk: str) -> str:
         async with sem:
             try:
                 return await llm.chat(chunk, system=TRANSLATE_SYSTEM, temperature=0.3)
-            except Exception as exc:  # noqa: BLE001 - 单块失败保留原文，不中断整篇
+            except LLMAuthenticationError:
+                raise
+            except Exception as exc:  # noqa: BLE001 - 非鉴权失败保留原文
                 logger.debug("翻译分块失败: %s", exc)
                 return chunk
 
-    results = await asyncio.gather(*[_one(c) for c in chunks])
+    results = await gather_fail_fast(_one(chunk) for chunk in chunks)
     return "\n\n".join(results)

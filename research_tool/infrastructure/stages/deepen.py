@@ -26,6 +26,7 @@ from pydantic import BaseModel, Field
 import logging
 
 from ..llm.base import LLMClient
+from ...domain.errors import LLMAuthenticationError
 from ...domain.models import DeepenConfig, DeepenResult
 from .base import write_text
 from .collector import Collector
@@ -189,7 +190,9 @@ class DeepenStage:
         )
         try:
             res = await self.llm.chat_structured(prompt, _Entities, system=_SYSTEM)
-        except Exception as exc:  # noqa: BLE001 - 失败回退，不阻断管道
+        except LLMAuthenticationError:
+            raise
+        except Exception as exc:  # noqa: BLE001 - 非鉴权失败回退，不阻断管道
             logger.debug("实体拆分失败: %s", exc)
             return [topic]
         ents = [e.strip() for e in res.entities if e.strip()]
@@ -214,6 +217,8 @@ class DeepenStage:
         )
         try:
             res = await self.llm.chat_structured(prompt, _Queries, system=_SYSTEM)
+        except LLMAuthenticationError:
+            raise
         except Exception as exc:  # noqa: BLE001
             logger.debug("实体查询生成失败: %s", exc)
             # 回退：实体本身 + 英文/学术角度的朴素模板
@@ -257,7 +262,9 @@ class DeepenStage:
         )
         try:
             profile = await self.llm.chat_structured(prompt, _Profile, system=_SYSTEM)
-        except Exception as exc:  # noqa: BLE001 - 失败跳过，回退到已跑的实体查询
+        except LLMAuthenticationError:
+            raise
+        except Exception as exc:  # noqa: BLE001 - 非鉴权失败跳过
             logger.debug("画像抽取失败: %s", exc)
             return None
         # 全空画像无价值
@@ -351,7 +358,9 @@ class DeepenStage:
             try:
                 res = await self.llm.chat_structured(prompt, _OwnsBatch, system=_SYSTEM)
                 owns = list(res.owns)
-            except Exception as exc:  # noqa: BLE001 - 失败则该批默认全部保留
+            except LLMAuthenticationError:
+                raise
+            except Exception as exc:  # noqa: BLE001 - 非鉴权失败则该批默认全部保留
                 logger.debug("同名消歧失败: %s", exc)
                 continue
             for i, (path, _) in enumerate(batch):
@@ -413,6 +422,8 @@ class DeepenStage:
     async def _safe_queries(self, prompt: str) -> list[str]:
         try:
             res = await self.llm.chat_structured(prompt, _Queries, system=_SYSTEM)
+        except LLMAuthenticationError:
+            raise
         except Exception as exc:  # noqa: BLE001
             logger.debug("查询生成失败: %s", exc)
             return []

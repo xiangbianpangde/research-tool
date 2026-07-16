@@ -3,7 +3,7 @@
 依据 03-Python库接口设计.md §7 + DD-001 M-010 错误处理器。
 
 扩展点（V1.1 VideoIngest）：
-- 26 个 E_* 错误码常量（download/transcribe/ffmpeg/llm/cache/preflight/...）
+- E_* 错误码常量（download/transcribe/ffmpeg/llm/cache/preflight/...）
 - ErrorRecord 数据类（DE-010）：错误码 + 场景/原因/建议 + 触发时间
 - register_error / format_error / resolve_exit_code / lookup_code 公共 API
 - 进程退出码仲裁：403 > 401 > 500 > 0（DD-001 M-010 状态机）
@@ -41,6 +41,43 @@ class StageError(ResearchToolError):
 
 class LLMError(ResearchToolError):
     """LLM 调用失败。"""
+
+
+class LLMAuthenticationError(LLMError):
+    """LLM provider 拒绝凭据。必须立即终止，禁止阶段降级或继续请求。"""
+
+
+def _status_code_from_exception(exc: BaseException) -> int | None:
+    """从 SDK 异常链提取 HTTP 状态码，不读取或回显响应正文/headers。"""
+    seen: set[int] = set()
+    current: BaseException | None = exc
+    while current is not None and id(current) not in seen:
+        seen.add(id(current))
+        status = getattr(current, "status_code", None)
+        if isinstance(status, int):
+            return status
+        response = getattr(current, "response", None)
+        response_status = getattr(response, "status_code", None)
+        if isinstance(response_status, int):
+            return response_status
+        current = current.__cause__ or current.__context__
+    return None
+
+
+def classify_llm_error(operation: str, exc: BaseException) -> LLMError:
+    """把 provider 异常转换为不会泄露响应内容的领域异常。"""
+    if isinstance(exc, LLMAuthenticationError):
+        return exc
+    status = _status_code_from_exception(exc)
+    if status == 401:
+        error: LLMError = LLMAuthenticationError(
+            f"LLM 鉴权失败（{operation}，HTTP 401）；已停止后续 LLM 阶段"
+        )
+    else:
+        suffix = f"（HTTP {status}）" if status is not None else ""
+        error = LLMError(f"LLM {operation} 调用失败{suffix}")
+    error.__cause__ = exc
+    return error
 
 
 class SearchError(ResearchToolError):
@@ -97,12 +134,12 @@ class ConfigError(VideoIngestError):
 
 
 # --------------------------------------------------------------------------- #
-# V1.1 新增：26 个错误码常量（DD-001 M-010 错误码字典）
+# V1.1 新增：VideoIngest 错误码常量（DD-001 M-010 错误码字典）
 # --------------------------------------------------------------------------- #
 
 
 class ErrorCode(str, Enum):
-    """26 个 VideoIngest 错误码（V1.1 范围）。
+    """VideoIngest 错误码（V1.1 + MiniMax 多模态转写）。
 
     命名规则：[E_]_[CATEGORY]_[NUMBER]_[DETAIL]
     - E_VID_* = 视频相关
@@ -130,12 +167,13 @@ class ErrorCode(str, Enum):
     E_DL_LOCAL_001 = "E_DL_LOCAL_001"
     E_DL_LOCAL_002 = "E_DL_LOCAL_002"
 
-    # 转写（5）
+    # 转写（6）
     E_TX_001_WHISPER_INIT_FAILED = "E_TX_001_WHISPER_INIT_FAILED"
     E_TX_002_AUDIO_EXTRACT_FAILED = "E_TX_002_AUDIO_EXTRACT_FAILED"
     E_TR_001 = "E_TR_001"
     E_TR_003_GROQ_FAILED = "E_TR_003_GROQ_FAILED"
     E_TR_004_TIMEOUT = "E_TR_004_TIMEOUT"
+    E_TR_006_MINIMAX_FAILED = "E_TR_006_MINIMAX_FAILED"
 
     # ffmpeg（1）
     E_FM_001_FFMPEG_INVOKE_FAILED = "E_FM_001_FFMPEG_INVOKE_FAILED"
@@ -227,7 +265,7 @@ class ErrorRecord:
 # --------------------------------------------------------------------------- #
 
 
-# 默认错误码字典（V1.1 全部 26 个；扩展时往 _ERROR_REGISTRY 追加）
+# 默认错误码字典（扩展时往 _ERROR_REGISTRY 追加）
 _ERROR_REGISTRY: dict[str, ErrorInfo] = {
     # 视频
     ErrorCode.E_VID_001_VIDEO_NOT_FOUND.value: ErrorInfo(
@@ -333,8 +371,8 @@ _ERROR_REGISTRY: dict[str, ErrorInfo] = {
         category="TX",
         exit_code_hint=500,
         default_scene="所有转写引擎失败",
-        default_cause="whisper / Groq 均不可用或均失败",
-        default_suggestion="检查音频文件、API key、模型可用性",
+        default_cause="minimax / whisper / groq 均不可用或均失败",
+        default_suggestion="检查媒体文件、MINIMAX_API_KEY、faster-whisper、GROQ_API_KEY",
     ),
     ErrorCode.E_TR_003_GROQ_FAILED.value: ErrorInfo(
         code=ErrorCode.E_TR_003_GROQ_FAILED.value,
@@ -351,6 +389,14 @@ _ERROR_REGISTRY: dict[str, ErrorInfo] = {
         default_scene="转写超时",
         default_cause="引擎在超时上限内未完成",
         default_suggestion="调大 transcribe_timeout_sec，或减小 model_size",
+    ),
+    ErrorCode.E_TR_006_MINIMAX_FAILED.value: ErrorInfo(
+        code=ErrorCode.E_TR_006_MINIMAX_FAILED.value,
+        category="TX",
+        exit_code_hint=500,
+        default_scene="MiniMax-M3 多模态转写失败",
+        default_cause="API key 无效 / 无视频或关键帧 / 上传或 chat 失败",
+        default_suggestion="检查 MINIMAX_API_KEY；提供 video_path；或回退 whisper/groq",
     ),
     # ffmpeg
     ErrorCode.E_FM_001_FFMPEG_INVOKE_FAILED.value: ErrorInfo(

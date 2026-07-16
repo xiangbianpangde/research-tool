@@ -12,7 +12,7 @@ from datetime import date
 from pathlib import Path
 
 from ..llm.base import LLMClient
-from ...domain.models import ReporterConfig, ReportResult
+from ...domain.models import ReporterConfig, ReportResult, SourceAudit
 from .base import read_json, write_text
 
 logger = logging.getLogger(__name__)
@@ -94,6 +94,38 @@ class Reporter:
             out.append({"sid": f"{i:02d}", "title": s.get("title", ""), "url": s.get("url", "")})
         return out
 
+    def _load_source_audits(self, tree_dir: Path) -> list[SourceAudit]:
+        path = tree_dir.parent / "raw" / "source-audit.json"
+        if not path.exists():
+            return []
+        try:
+            payload = read_json(path)
+            return [SourceAudit.model_validate(item) for item in payload.get("sources", [])]
+        except (OSError, ValueError, AttributeError) as exc:
+            logger.debug("读取 source-audit.json 失败: %s", exc)
+            return []
+
+    @staticmethod
+    def _audit_markdown(audits: list[SourceAudit]) -> str:
+        if not audits:
+            return ""
+        attempted = sum(1 for item in audits if item.attempted > 0)
+        contributing = sum(1 for item in audits if item.retained > 0)
+        lines = [
+            "## 来源覆盖审计",
+            "",
+            f">已调用后端: {attempted} 个；有最终贡献: {contributing} 个。",
+            "",
+            "| 来源 | 调用 | 命中 | 失败 | 过滤 | 去重 | 抓取失败 | 保留 |",
+            "|---|---:|---:|---:|---:|---:|---:|---:|",
+        ]
+        lines.extend(
+            f"| {a.engine} | {a.attempted} | {a.hits} | {a.failed} | {a.filtered} | "
+            f"{a.deduplicated} | {a.fetch_failed} | {a.retained} |"
+            for a in sorted(audits, key=lambda item: item.engine)
+        )
+        return "\n".join(lines)
+
     async def run(
         self,
         tree_dir: Path,
@@ -105,6 +137,7 @@ class Reporter:
         main, nodes_text = self._read_tree(tree_dir)
         node_count = len(list(tree_dir.glob("N*.md")))
         refs = self._load_sources(tree_dir)
+        audits = self._load_source_audits(tree_dir)
         source_count = len(refs)
         struct = _STYLE_STRUCT.get(self.config.style, _STYLE_STRUCT["report"])
         ref_block = "\n".join(
@@ -136,7 +169,12 @@ class Reporter:
         )
         # 去掉模型可能自行写的(常不全的)参考资料，统一用程序生成的权威完整列表
         body = re.split(r"\n#{1,6}\s*参考资料", body)[0].rstrip()
-        markdown = header + body
+        audit_block = self._audit_markdown(audits)
+        # 审计块放在模型正文之前，确保长报告截断时仍可见。
+        markdown = header
+        if audit_block:
+            markdown += audit_block + "\n\n"
+        markdown += body
         if ref_block:
             markdown += "\n\n## 参考资料\n" + ref_block + "\n"
         if len(markdown) > self.config.max_length:

@@ -18,12 +18,42 @@ Residual risks (see SSRF round report):
 from __future__ import annotations
 
 import ipaddress
+import re
 import socket
-from urllib.parse import urlparse
+from urllib.parse import parse_qsl, urlparse
 
 from ..domain.errors import UrlBlockedError
 
 _ALLOWED_SCHEMES = {"http", "https"}
+_SENSITIVE_QUERY_KEYS = frozenset(
+    {
+        "access_token",
+        "api_key",
+        "apikey",
+        "auth",
+        "authorization",
+        "key",
+        "password",
+        "secret",
+        "sig",
+        "signature",
+        "token",
+        "x-amz-credential",
+        "x-amz-signature",
+        "awsaccesskeyid",
+    }
+)
+_SENSITIVE_QUERY_KEY_PATTERN = re.compile(
+    r"(?:^|[-_.])(api[-_.]?key|auth|credential|password|secret|signature|token)(?:$|[-_.])"
+)
+
+
+def is_sensitive_url_key(key: str) -> bool:
+    """Return whether a URL query/fragment key can carry credentials."""
+    normalized = key.strip().lower()
+    return normalized in _SENSITIVE_QUERY_KEYS or bool(
+        _SENSITIVE_QUERY_KEY_PATTERN.search(normalized)
+    )
 
 # Comprehensive block list: private, loopback, link-local, cloud-metadata,
 # CGNAT, benchmarking, documentation/anycast, multicast, reserved.
@@ -38,9 +68,7 @@ _BLOCKED_NETWORKS: tuple[ipaddress.IPv4Network | ipaddress.IPv6Network, ...] = (
     ipaddress.ip_network("192.0.2.0/24"),  # TEST-NET-1 (documentation)
     ipaddress.ip_network("192.88.99.0/24"),  # 6to4 relay anycast
     ipaddress.ip_network("192.168.0.0/16"),  # private
-    # NOTE: 198.18.0.0/15 (benchmarking) deliberately NOT blocked — some DNS
-    # proxies (fake-IP mode, e.g. Clash/Surge) return 198.18.x.x for ALL
-    # hostnames; blocking it makes the tool unusable in those environments.
+    ipaddress.ip_network("198.18.0.0/15"),  # benchmarking/fake-IP, not public-routable
     ipaddress.ip_network("224.0.0.0/4"),  # multicast
     ipaddress.ip_network("240.0.0.0/4"),  # reserved
     # IPv6
@@ -71,6 +99,14 @@ def assert_safe_url(url: str) -> None:
     parsed = urlparse(url)
     if parsed.scheme not in _ALLOWED_SCHEMES:
         raise UrlBlockedError(f"scheme {parsed.scheme!r} not allowed (only http/https)")
+    if parsed.username is not None or parsed.password is not None:
+        raise UrlBlockedError("URL contains embedded credentials")
+    query_keys = {key for key, _ in parse_qsl(parsed.query, keep_blank_values=True)}
+    if any(is_sensitive_url_key(key) for key in query_keys):
+        raise UrlBlockedError("URL contains credential query parameters")
+    fragment_keys = {key for key, _ in parse_qsl(parsed.fragment, keep_blank_values=True)}
+    if any(is_sensitive_url_key(key) for key in fragment_keys):
+        raise UrlBlockedError("URL contains credential fragment parameters")
     host = parsed.hostname
     if not host:
         raise UrlBlockedError("URL has no hostname")
@@ -98,4 +134,4 @@ def assert_safe_url(url: str) -> None:
             raise UrlBlockedError(f"host {host!r} resolves to blocked address {ip}")
 
 
-__all__ = ["assert_safe_url"]
+__all__ = ["assert_safe_url", "is_sensitive_url_key"]

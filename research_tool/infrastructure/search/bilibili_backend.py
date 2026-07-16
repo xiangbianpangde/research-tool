@@ -58,6 +58,7 @@ class BilibiliBackend(SearchBackend):
                 headers=_DEFAULT_HEADERS,
                 timeout=_HTTP_TIMEOUT_SEC,
                 follow_redirects=True,
+                trust_env=False,  # B 站国内站直连，避免被 HTTPS_PROXY 环境变量误伤
             )
         return self._client
 

@@ -1,30 +1,30 @@
 """M-005 转写器（V1.1 VideoIngest）。
 
 设计依据：
-- [DD-001:M-005 转写器] 三引擎调度（whisper / groq / bcut），V1.1 track-core 简化为
-  whisper + groq 双后端（B 站 ASR bcut 不在范围）
-- [DD-001:IC-012] 转写接口契约
-- [调研: BiliNote backend/app/transcriber/{whisper,groq,transcriber_provider}.py]
-  —— 移植 faster-whisper 调用 + Groq OpenAI 兼容 API 模式
+- [DD-001:M-005 转写器] 引擎调度
+- 默认 **MiniMax-M3 多模态**（视频 / 图片理解 → 讲稿级转写）；失败回退
+  faster-whisper → Groq Whisper API
+- MiniMax-M3 官方不接受纯音频 input，需视频文件或关键帧图
 - NFR4：同 URL 二次运行跳过转写（走 M-004 cache 命中短路）
 
 职责：
-- faster-whisper 本地引擎（优先，零成本；ctranslate2 单实例锁）
-- Groq 云端引擎（备选，>18MB 音频自动压缩）
+- MiniMax-M3：Files API ``video_understanding`` 或 base64 video/image → chat 转写
+- faster-whisper 本地引擎（零云成本 fallback）
+- Groq 云端 Whisper（备选，>18MB 音频自动压缩）
 - M-004 缓存命中直接返回（IC-009）
-- 模板方法：detect_ram → select_engine → transcribe → fallback
-- 转写超时（asyncio.wait_for 包装）
-- M-010 错误码登记
-- M-011 结构化日志
+- 模板方法：select_engine → transcribe → fallback + 超时
 
-异步：阻塞 I/O（faster-whisper / Groq HTTP）一律 asyncio.to_thread 或 httpx.AsyncClient
+异步：阻塞 I/O 一律 asyncio.to_thread 或 wait_for 包装
 """
 
 from __future__ import annotations
 
 import asyncio
+import base64
 import hashlib
+import mimetypes
 import os
+import re
 import time
 from dataclasses import dataclass
 from enum import Enum
@@ -62,6 +62,11 @@ SUPPORTED_AUDIO_EXTS: tuple[str, ...] = (".wav", ".mp3", ".m4a", ".flac", ".ogg"
 # Groq 上传限制（25MB → V1.1 设为 18MB 余量）
 GROQ_MAX_FILE_BYTES: int = 18 * 1024 * 1024
 
+# MiniMax-M3：base64/URL 视频 ≤50MB；更大走 Files API（≤512MB）
+MINIMAX_INLINE_VIDEO_MAX_BYTES: int = 45 * 1024 * 1024
+MINIMAX_DEFAULT_MODEL: str = "MiniMax-M3"
+MINIMAX_DEFAULT_BASE_URL: str = "https://api.minimaxi.com/v1"
+
 # 转写缓存有效期（V1.1 与 M-004 默认一致；视频转写 30 天复用）
 DEFAULT_TRANSCRIPT_TTL_DAYS: int = DEFAULT_TTL_DAYS
 
@@ -77,6 +82,10 @@ E_TR_002: str = ErrorCode.E_TX_001_WHISPER_INIT_FAILED.value
 E_TR_003: str = "E_TR_003_GROQ_FAILED"
 E_TR_004: str = "E_TR_004_TIMEOUT"
 E_TR_005: str = ErrorCode.E_TX_002_AUDIO_EXTRACT_FAILED.value
+E_TR_006: str = ErrorCode.E_TR_006_MINIMAX_FAILED.value
+
+_VIDEO_EXTS = {".mp4", ".avi", ".mov", ".mkv", ".webm", ".flv", ".m4v"}
+_IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".gif", ".webp"}
 
 
 # --------------------------------------------------------------------------- #
@@ -87,13 +96,47 @@ E_TR_005: str = ErrorCode.E_TX_002_AUDIO_EXTRACT_FAILED.value
 class EngineType(str, Enum):
     """转写引擎类型。
 
-    V1.1 简化为 WHISPER / GROQ 双后端；BCUT（V2.0）保留枚举值以兼容设计。
+    默认链路：MINIMAX（M3 视频/图理解）→ WHISPER → GROQ。
+    BCUT（V2.0）保留枚举值以兼容设计。
     """
 
+    MINIMAX = "minimax"
     WHISPER = "whisper"
     GROQ = "groq"
     # 保留 B 站 ASR 枚举位以兼容 IC-012 设计（V1.1 不实现）
     BCUT = "bcut"
+
+
+def resolve_minimax_api_key(explicit: str | None = None) -> str | None:
+    """解析 MiniMax key：显式参数（含空串=强制禁用）→ MINIMAX_API_KEY。
+
+    ``explicit is None``：读环境变量。
+    ``explicit == ""``：视为无 key（不回落到 env，便于测试与关闭）。
+    """
+    if explicit is not None:
+        s = str(explicit).strip()
+        return s or None
+    return os.environ.get("MINIMAX_API_KEY")
+
+
+def resolve_minimax_base_url(explicit: str | None = None) -> str:
+    """OpenAI 兼容根 URL（…/v1）。可从 Anthropic 兼容 base 推导。"""
+    if explicit and str(explicit).strip():
+        u = str(explicit).strip().rstrip("/")
+        if u.endswith("/anthropic"):
+            u = u[: -len("/anthropic")] + "/v1"
+        elif not u.endswith("/v1"):
+            u = u + "/v1"
+        return u
+    env = os.environ.get("MINIMAX_BASE_URL") or os.environ.get("MINIMAX_OPENAI_BASE_URL")
+    if env:
+        return resolve_minimax_base_url(env)
+    # 若 LLM 用 Anthropic 兼容端点，同主机换 /v1
+    anth = os.environ.get("MINIMAX_ANTHROPIC_BASE") or ""
+    if not anth:
+        # 常见：用户 config 只写了 base_url 在 yaml，运行时已进 LLMConfig；此处兜底国内站
+        pass
+    return MINIMAX_DEFAULT_BASE_URL
 
 
 # --------------------------------------------------------------------------- #
@@ -116,7 +159,7 @@ class TranscribeRequest:
     audio_path: str
     audio_fingerprint: str
     language: str = "zh"  # zh / en / ja
-    engine: EngineType = EngineType.WHISPER
+    engine: EngineType = EngineType.MINIMAX
     model_size: str = DEFAULT_MODEL_SIZE
     timeout_sec: int = 1800  # 默认 30 分钟
 
@@ -138,38 +181,42 @@ class TranscribeResult:
 
 
 class EngineSelector:
-    """引擎选择与降级链管理（V1.1 简化为 2 引擎）。"""
+    """引擎选择与降级链管理（MiniMax → Whisper → Groq）。"""
 
     def __init__(
         self,
-        preferred_engine: EngineType = EngineType.WHISPER,
+        preferred_engine: EngineType = EngineType.MINIMAX,
         groq_api_key: str | None = None,
+        minimax_api_key: str | None = None,
     ) -> None:
         self.preferred_engine = preferred_engine
         self.groq_api_key = groq_api_key
-        # 降级链：whisper 失败 → groq
-        self._fallback_chain: list[EngineType] = [EngineType.WHISPER, EngineType.GROQ]
+        self.minimax_api_key = resolve_minimax_api_key(minimax_api_key)
+        # 降级链：minimax 失败 → whisper → groq
+        self._fallback_chain: list[EngineType] = [
+            EngineType.MINIMAX,
+            EngineType.WHISPER,
+            EngineType.GROQ,
+        ]
 
     def select(self, ram_gb: float | None = None) -> EngineType:
-        """依据 RAM 与偏好选主引擎。
-
-        Args:
-            ram_gb: 可用 RAM（GB）；None=不探测（用 preferred_engine）
-
-        Returns:
-            选定的主引擎（未做降级链走完，留给模板方法处理）
-        """
-        # Groq 缺 key 时只能用 whisper
-        if not self.is_available(EngineType.GROQ) and self.preferred_engine == EngineType.GROQ:
-            return EngineType.WHISPER
-        return self.preferred_engine
+        """依据偏好与可用性选主引擎。"""
+        pref = self.preferred_engine
+        if self.is_available(pref):
+            return pref
+        for eng in self._fallback_chain:
+            if self.is_available(eng):
+                return eng
+        return pref
 
     def fallback_chain(self) -> list[EngineType]:
-        """降级链：[WHISPER, GROQ]。"""
+        """降级链：[MINIMAX, WHISPER, GROQ]。"""
         return list(self._fallback_chain)
 
     def is_available(self, engine: EngineType) -> bool:
         """引擎可用性（依赖 / API key）。"""
+        if engine == EngineType.MINIMAX:
+            return bool(self.minimax_api_key)
         if engine == EngineType.WHISPER:
             try:
                 import faster_whisper  # noqa: F401
@@ -328,6 +375,228 @@ class WhisperEngine:
         """显式卸载（释放内存）。"""
         self._model = None
         self._loaded_size = None
+
+
+# --------------------------------------------------------------------------- #
+# MiniMaxEngine（MiniMax-M3 多模态视频/图片理解 → 讲稿）
+# --------------------------------------------------------------------------- #
+
+
+class MiniMaxEngine:
+    """MiniMax-M3 多模态「转写」：看视频/关键帧，产出接近逐字稿的讲稿。
+
+    依据官方 OpenAI 兼容 API：
+    - ``video_url`` / ``image_url`` content parts（M3）
+    - 大视频：Files API ``purpose=video_understanding`` → ``mm_file://{file_id}``
+    - 不支持纯音频；仅音频时请走 whisper/groq，或提供关键帧图
+    """
+
+    DEFAULT_MODEL: ClassVar[str] = MINIMAX_DEFAULT_MODEL
+    TRANSCRIBE_SYSTEM: ClassVar[str] = (
+        "你是学术/技术演讲视频的专业听写员。"
+        "根据视频画面与口播内容，输出尽可能完整、忠实的中文或英文讲稿（与视频语言一致）。"
+        "不要总结、不要发挥；尽量保留术语与专有名词原文。"
+        "若听不清可写 [inaudible]。可用时间标记如 [mm:ss] 分段，但主体必须是讲稿正文。"
+    )
+
+    def __init__(
+        self,
+        api_key: str | None = None,
+        model: str | None = None,
+        base_url: str | None = None,
+        max_tokens: int = 8192,
+        timeout_sec: float = 600.0,
+    ) -> None:
+        key = resolve_minimax_api_key(api_key)
+        if not key:
+            raise TranscribeError(E_TR_006, "MiniMax api_key 必填（MINIMAX_API_KEY）")
+        self.api_key = key
+        self.model = model or self.DEFAULT_MODEL
+        self.base_url = resolve_minimax_base_url(base_url)
+        self.max_tokens = max_tokens
+        self.timeout_sec = timeout_sec
+
+    @staticmethod
+    def _file_to_data_url(path: str) -> str:
+        mime, _ = mimetypes.guess_type(path)
+        if not mime:
+            ext = Path(path).suffix.lower()
+            mime = {
+                ".mp4": "video/mp4",
+                ".mov": "video/quicktime",
+                ".mkv": "video/x-matroska",
+                ".avi": "video/x-msvideo",
+                ".webm": "video/webm",
+                ".jpg": "image/jpeg",
+                ".jpeg": "image/jpeg",
+                ".png": "image/png",
+                ".gif": "image/gif",
+                ".webp": "image/webp",
+            }.get(ext, "application/octet-stream")
+        with open(path, "rb") as f:
+            b64 = base64.b64encode(f.read()).decode("ascii")
+        return f"data:{mime};base64,{b64}"
+
+    def _upload_video(self, video_path: str) -> str:
+        """Files API 上传，返回 mm_file://{file_id}。"""
+        import httpx
+
+        url = f"{self.base_url.rstrip('/')}/files/upload"
+        # 兼容部分网关：/v1/files/upload
+        with open(video_path, "rb") as f:
+            files = {"file": (os.path.basename(video_path), f, "application/octet-stream")}
+            data = {"purpose": "video_understanding"}
+            with httpx.Client(
+                timeout=httpx.Timeout(connect=30.0, read=300.0, write=300.0, pool=30.0),
+                trust_env=False,
+                proxy=None,
+            ) as client:
+                resp = client.post(
+                    url,
+                    headers={"Authorization": f"Bearer {self.api_key}"},
+                    files=files,
+                    data=data,
+                )
+        if resp.status_code >= 400:
+            raise TranscribeError(
+                E_TR_006,
+                f"MiniMax 视频上传失败 HTTP {resp.status_code}（响应正文已隐藏）",
+            )
+        payload = resp.json()
+        file_obj = payload.get("file") or payload
+        file_id = file_obj.get("file_id") or file_obj.get("id")
+        if file_id is None:
+            raise TranscribeError(E_TR_006, "MiniMax 上传响应无 file_id（响应正文已隐藏）")
+        return f"mm_file://{file_id}"
+
+    def _video_url_part(self, video_path: str) -> dict[str, Any]:
+        size = os.path.getsize(video_path)
+        if size > MINIMAX_INLINE_VIDEO_MAX_BYTES:
+            ref = self._upload_video(video_path)
+        else:
+            ref = self._file_to_data_url(video_path)
+        return {
+            "type": "video_url",
+            "video_url": {"url": ref, "detail": "default"},
+        }
+
+    def _image_url_part(self, image_path: str) -> dict[str, Any]:
+        return {
+            "type": "image_url",
+            "image_url": {
+                "url": self._file_to_data_url(image_path),
+                "detail": "default",
+            },
+        }
+
+    def _build_user_content(
+        self,
+        *,
+        language: str,
+        video_path: str | None,
+        image_paths: list[str] | None,
+        audio_hint: str | None,
+    ) -> list[dict[str, Any]]:
+        parts: list[dict[str, Any]] = [
+            {
+                "type": "text",
+                "text": (
+                    f"请把下面媒体中的口播转成讲稿。目标语言偏好：{language}。"
+                    "只输出讲稿正文，不要前言后语。"
+                    + (
+                        f"\n（附带本地音频路径仅作提示，勿当可下载 URL：{audio_hint}）"
+                        if audio_hint
+                        else ""
+                    )
+                ),
+            }
+        ]
+        if video_path and os.path.isfile(video_path):
+            parts.append(self._video_url_part(video_path))
+        for ip in image_paths or []:
+            if ip and os.path.isfile(ip):
+                parts.append(self._image_url_part(ip))
+        if len(parts) == 1:
+            raise TranscribeError(
+                E_TR_006,
+                "MiniMax-M3 需要视频文件或关键帧图片（不支持纯音频）。"
+                "请传 video_path / image_paths，或改用 whisper/groq。",
+            )
+        return parts
+
+    @staticmethod
+    def _strip_think(text: str) -> str:
+        # M3 可能把思考包在 <think>…</think>
+        return re.sub(r"<think>[\s\S]*?</think>", "", text or "", flags=re.I).strip()
+
+    def _call_chat(self, user_content: list[dict[str, Any]]) -> str:
+        try:
+            from openai import OpenAI
+        except ImportError as e:
+            raise TranscribeError(E_TR_006, "openai SDK 未安装；pip install openai") from e
+
+        # 强制不走系统代理（与 LLM 客户端同族）
+        client = OpenAI(
+            api_key=self.api_key,
+            base_url=self.base_url,
+            timeout=self.timeout_sec,
+            max_retries=0,
+        )
+        try:
+            resp = client.chat.completions.create(
+                model=self.model,
+                messages=[
+                    {"role": "system", "content": self.TRANSCRIBE_SYSTEM},
+                    {"role": "user", "content": user_content},
+                ],
+                max_tokens=self.max_tokens,
+                temperature=0.2,
+                extra_body={"thinking": {"type": "disabled"}},
+            )
+        except Exception as e:
+            raise TranscribeError(
+                E_TR_006, f"MiniMax 多模态转写失败: {type(e).__name__}（详情已隐藏）"
+            ) from None
+        choice = resp.choices[0].message if resp.choices else None
+        content = getattr(choice, "content", None) if choice else None
+        if not content or not str(content).strip():
+            raise TranscribeError(E_TR_006, "MiniMax 返回空讲稿")
+        return self._strip_think(str(content))
+
+    def transcribe(
+        self,
+        audio_path: str | None = None,
+        language: str = "zh",
+        *,
+        video_path: str | None = None,
+        image_paths: list[str] | None = None,
+    ) -> Transcript:
+        """同步多模态转写。优先 video_path，其次 image_paths。"""
+        # 若只给了「视频后缀」的 audio_path，当作视频
+        vpath = video_path
+        if not vpath and audio_path:
+            if Path(audio_path).suffix.lower() in _VIDEO_EXTS and os.path.isfile(audio_path):
+                vpath = audio_path
+        user_content = self._build_user_content(
+            language=language,
+            video_path=vpath,
+            image_paths=image_paths,
+            audio_hint=audio_path if audio_path and not vpath else None,
+        )
+        text = self._call_chat(user_content)
+        return Transcript(
+            language=language,
+            full_text=text,
+            segments=[],  # M3 不保证时间轴；segments 可空
+            engine="minimax",
+            cer_estimate=0.0,
+            raw={
+                "model": self.model,
+                "base_url": self.base_url,
+                "video_path": vpath,
+                "image_count": len(image_paths or []),
+            },
+        )
 
 
 # --------------------------------------------------------------------------- #
@@ -517,50 +786,45 @@ class GroqEngine:
 # --------------------------------------------------------------------------- #
 
 
-async def transcribe(
+async def transcribe(  # noqa: PLR0915 - provider fallback orchestration kept in one boundary
     audio_path: str,
     audio_fingerprint: str | None = None,
     *,
     language: str = "zh",
-    engine: EngineType = EngineType.WHISPER,
+    engine: EngineType = EngineType.MINIMAX,
     model_size: str = DEFAULT_MODEL_SIZE,
     timeout_sec: int = 1800,
     cache_manager: CacheManager | None = None,
-    preferred_engine: EngineType = EngineType.WHISPER,
+    preferred_engine: EngineType = EngineType.MINIMAX,
     groq_api_key: str | None = None,
+    minimax_api_key: str | None = None,
+    minimax_model: str | None = None,
+    minimax_base_url: str | None = None,
+    video_path: str | None = None,
+    image_paths: list[str] | None = None,
     write_cache: bool = True,
     read_cache: bool = True,
 ) -> Transcript:
-    """转写主入口（带 NFR4 缓存命中短路 + 引擎 fallback + 超时）。
+    """转写主入口（NFR4 缓存 + MiniMax/Whisper/Groq fallback + 超时）。
 
     Args:
-        audio_path: 音频文件绝对路径
-        audio_fingerprint: 音频 sha256 指纹（默认根据路径 + mtime + size 计算）
-        language: 语言代码（zh/en/ja）
-        engine: 主引擎选择（默认 WHISPER）
-        model_size: faster-whisper 模型档位
-        timeout_sec: 单引擎超时（秒）
-        cache_manager: 缓存管理器（None=用全局单例）
-        preferred_engine: EngineSelector 偏好（groq/whisper）
-        groq_api_key: Groq API key
-        write_cache: 是否写入 M-004 缓存（默认 True）
-        read_cache: 是否读取 M-004 缓存（默认 True；False=强制重转，对应 CLI --no-cache）
-
-    Returns:
-        Transcript
-
-    Raises:
-        TranscribeError(E_TR_001): 所有引擎失败
-        TranscribeError(E_TR_004): 超时
+        audio_path: 音频（或视频）文件路径；指纹与 whisper/groq 输入
+        video_path: 视频路径（MiniMax-M3 优先使用）
+        image_paths: 关键帧图片（MiniMax 无视频时可辅以图片理解）
+        preferred_engine: 默认 MINIMAX
+        minimax_api_key: 缺省读 MINIMAX_API_KEY
     """
-    if not audio_path:
-        raise TranscribeError(E_TR_001, "audio_path 必填")
-    if not os.path.exists(audio_path):
+    if not audio_path and not video_path and not image_paths:
+        raise TranscribeError(E_TR_001, "audio_path / video_path / image_paths 至少其一")
+    media_for_fp = video_path or audio_path
+    if media_for_fp and not os.path.exists(media_for_fp):
+        raise TranscribeError(E_TR_001, f"媒体文件不存在: {media_for_fp}")
+    if audio_path and not os.path.exists(audio_path) and not video_path:
         raise TranscribeError(E_TR_001, f"音频文件不存在: {audio_path}")
 
     # 1) 计算 fingerprint
     if not audio_fingerprint:
-        audio_fingerprint = compute_audio_fingerprint(audio_path)
+        audio_fingerprint = compute_audio_fingerprint(media_for_fp or audio_path)
 
     # 2) M-004 缓存命中短路（NFR4：同 URL 二次运行跳过转写）
     cm = cache_manager or await get_cache_manager()
@@ -586,6 +850,7 @@ async def transcribe(
     selector = EngineSelector(
         preferred_engine=preferred_engine,
         groq_api_key=groq_api_key,
+        minimax_api_key=minimax_api_key,
     )
     chain = selector.fallback_chain()
 
@@ -601,7 +866,18 @@ async def transcribe(
         try:
             start = time.monotonic()
             transcript = await asyncio.wait_for(
-                _run_engine(eng, audio_path, language, model_size, groq_api_key),
+                _run_engine(
+                    eng,
+                    audio_path or video_path or "",
+                    language,
+                    model_size,
+                    groq_api_key,
+                    minimax_api_key=minimax_api_key,
+                    minimax_model=minimax_model,
+                    minimax_base_url=minimax_base_url,
+                    video_path=video_path,
+                    image_paths=image_paths,
+                ),
                 timeout=timeout_sec,
             )
             elapsed = time.monotonic() - start
@@ -648,7 +924,7 @@ async def transcribe(
         ErrorCode.E_TR_001.value,
         scene="所有转写引擎失败",
         cause=str(last_err) if last_err else "未知错误",
-        suggestion="检查音频文件；或检查 API key / 模型可用性",
+        suggestion="检查媒体文件、MiniMax/GROQ key、或安装 faster-whisper",
     )
     raise TranscribeError(
         E_TR_001,
@@ -662,16 +938,41 @@ async def _run_engine(
     language: str,
     model_size: str,
     groq_api_key: str | None,
+    *,
+    minimax_api_key: str | None = None,
+    minimax_model: str | None = None,
+    minimax_base_url: str | None = None,
+    video_path: str | None = None,
+    image_paths: list[str] | None = None,
 ) -> Transcript:
     """调单个引擎（在 wait_for 包装内）。"""
+    if engine == EngineType.MINIMAX:
+        me = MiniMaxEngine(
+            api_key=minimax_api_key,
+            model=minimax_model,
+            base_url=minimax_base_url,
+        )
+        return await asyncio.to_thread(
+            me.transcribe,
+            audio_path,
+            language,
+            video_path=video_path,
+            image_paths=image_paths,
+        )
     if engine == EngineType.WHISPER:
         we = WhisperEngine(model_size=model_size)
-        return await asyncio.to_thread(we.transcribe, audio_path, language, model_size)
+        path = audio_path or video_path
+        if not path:
+            raise TranscribeError(E_TR_002, "whisper 需要 audio_path")
+        return await asyncio.to_thread(we.transcribe, path, language, model_size)
     if engine == EngineType.GROQ:
         if not groq_api_key:
             raise TranscribeError(E_TR_003, "Groq api_key 缺失")
         ge = GroqEngine(api_key=groq_api_key)
-        return await asyncio.to_thread(ge.transcribe, audio_path, language)
+        path = audio_path or video_path
+        if not path:
+            raise TranscribeError(E_TR_003, "groq 需要 audio_path")
+        return await asyncio.to_thread(ge.transcribe, path, language)
     raise TranscribeError(E_TR_001, f"不支持的引擎: {engine}")
 
 
@@ -806,6 +1107,8 @@ __all__ = [
     "DOWNGRADE_MODEL_SIZES",
     "SUPPORTED_AUDIO_EXTS",
     "GROQ_MAX_FILE_BYTES",
+    "MINIMAX_INLINE_VIDEO_MAX_BYTES",
+    "MINIMAX_DEFAULT_MODEL",
     "DEFAULT_TRANSCRIPT_TTL_DAYS",
     "DEFAULT_HF_CACHE_DIR",
     # 错误码
@@ -814,6 +1117,7 @@ __all__ = [
     "E_TR_003",
     "E_TR_004",
     "E_TR_005",
+    "E_TR_006",
     # 枚举
     "EngineType",
     # 数据类
@@ -822,10 +1126,13 @@ __all__ = [
     # 类
     "EngineSelector",
     "WhisperEngine",
+    "MiniMaxEngine",
     "GroqEngine",
     # 模板方法
     "transcribe",
     # 工具
+    "resolve_minimax_api_key",
+    "resolve_minimax_base_url",
     "compute_audio_fingerprint",
     "detect_ram_available",
     "estimate_cer",

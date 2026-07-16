@@ -30,7 +30,10 @@ def _build_inner(name: str, config: CollectorConfig) -> SearchBackend:
     if name == "github":
         from .github_backend import GitHubBackend
 
-        return GitHubBackend(config.github_token)
+        return GitHubBackend(
+            config.github_token,
+            enable_code_search=bool(getattr(config, "github_code_search", True)),
+        )
     if name == "pubmed":
         from .pubmed_backend import PubMedBackend
 
@@ -47,10 +50,18 @@ def _build_inner(name: str, config: CollectorConfig) -> SearchBackend:
         from .crossref_backend import CrossrefBackend
 
         return CrossrefBackend(config.openalex_mailto)
+    if name == "cvpr":
+        from .cvpr_backend import CvprBackend
+
+        return CvprBackend()
     if name == "bilibili":
         from .bilibili_backend import BilibiliBackend
 
         return BilibiliBackend()
+    if name == "youtube":
+        from .youtube_backend import YouTubeBackend
+
+        return YouTubeBackend()
     if name in ("x", "twitter"):
         from .x_backend import XBackend
 
