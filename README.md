@@ -14,7 +14,7 @@ topic ─→ Collect ─→ Deepen ─→ Clean ─→ Extract ─→ Organize �
 
 | 阶段 | 职责 | 输出 |
 |------|------|------|
-| Collect | 搜索 14 个后端（另有 2 个别名）+ 抓取（Crawl4AI，回退 httpx）。**P1 两阶段锚定/去锚** + **P2 时间窗口 + deep-search 多排序翻页** | `raw/*.md` + `sources.json` |
+| Collect | 搜索 15 个后端（另有 2 个别名）+ 抓取（Crawl4AI，回退 httpx）。**P1 两阶段锚定/去锚** + **P2 时间窗口 + deep-search 多排序翻页** | `raw/*.md` + `sources.json` |
 | Deepen | 反偏差深挖：实体拆分→多视角搜索 + 缺口/矛盾补搜。**P1 LLM 结构化画像注入英文名去锚** + **P2 时间线回溯 + 同名消歧 + 多轮迭代**（可选，默认开） | 追加 `raw/*.md` + `raw/_disambig/` + `.deepen_done` |
 | Clean | 去 HTML/导航/广告噪音，定位正文。**P2 MinHash 去重 + LLM 相关性过滤** | `clean/*.md` + `quality.json` |
 | Extract | LLM 抽取实体/关系/三元组（可选） | `extracted/*.json` |
@@ -22,64 +22,170 @@ topic ─→ Collect ─→ Deepen ─→ Clean ─→ Extract ─→ Organize �
 | Report | LLM 合成报告（report/feasibility/review/article） | `report.md` |
 | Backward | 反向传播（可选，`max_backward_rounds>0`）：稀疏节点/断层/矛盾 → LLM 生成修正查询 → 追加 raw → 下一轮正向 | 触发循环，无单独产物 |
 
-## 一键启动（Windows，推荐）
+## 交互式部署（推荐）
 
-双击 **`scripts/start.bat`** 即可。首次运行会进入共享部署向导：选择能力档位、创建
-`.venv`、安装对应依赖、配置密钥，并逐项验收模块、系统工具和 LLM 连通性。只有所选
-档位全部通过后才会写入无密钥部署回执；以后每次启动都会先复验该回执，缺项则重新
-进入向导。之后是菜单：
+交互式部署是这条项目的**正式安装与验收入口**，不是附带脚本。Windows 可双击
+`scripts/start.bat`；macOS / Linux 用 `scripts/setup.sh` 或 `research setup`。
+它们最终都进入同一个向导：`scripts/setup_interactive.py`（打包进 wheel 后也可从
+`research setup` 调用）。
 
+### 你实际会跑到什么
+
+```text
+入口
+  Windows: scripts/start.bat
+  macOS/Linux: bash scripts/setup.sh
+  任意平台: research setup
+        │
+        ▼
+scripts/setup_interactive.py          # 交互向导：档位 / 密钥 / 验收
+        │
+        ├─ research_tool/presentation/setup_deployment.py
+        │     · 三档能力契约（minimal / recommended / full）
+        │     · 生成确定性安装计划 build_deployment_plan()
+        │     · fail-fast 执行 execute_deployment()
+        │
+        ├─ 写入项目根 .env（0600，原子替换；wheel 默认 ~/.research/.env）
+        ├─ preflight 验收：模块 import + 系统工具 + LLM/MiniMax PONG
+        └─ 成功后写入无密钥回执 .research-deployment.json
 ```
-1. 可视化界面  浏览器图形界面（推荐）
-2. 网页调研    输入主题 → 自动搜索→清洗→知识树→报告
-3. PDF 调研    选本地 PDF 文件夹 → MinerU 解析（可选翻译）→报告
-4. 查看进度    某主题做到哪一步
-5. 高级命令行  手动敲 research ...
+
+设计原则只有一条：**安装计划与验收清单来自同一份档位能力表**。不能出现
+“pip 装成功了，但 full 档要求的 ffmpeg 没过，却仍显示部署完成”。
+
+### 快速开始
+
+```bash
+# 源码目录
+cd research-tool
+python -m venv .venv
+source .venv/bin/activate            # Windows: .venv\Scripts\activate
+pip install -e ".[llm,search]"       # 先有 research CLI
+
+# 进入交互式部署（首次默认完整档 full）
+research setup
+# 或
+bash scripts/setup.sh
+# Windows 也可：
+#   scripts\setup.bat
+#   双击 scripts\start.bat（部署后继续进菜单）
 ```
+
+向导主菜单：
+
+```text
+1) 完整部署（装依赖 + 全部密钥向导）
+2) 更新密钥（逐步问 LLM / GitHub / Tavily / 代理 / 视频 / X …）
+3) 只更新 GITHUB_TOKEN
+4) 只更新 TAVILY_API_KEY
+5) 自选要更新的密钥（多选编号）
+```
+
+### 档位与能力
+
+| 档位 | 名称 | Python extras | 验收能力 |
+|------|------|---------------|----------|
+| `minimal` | 最小可跑 | `llm,search` | `core` `llm` `search` |
+| `recommended` | 推荐 | `llm,search,ui,crawl` | 上表 + `ui` `crawl` `crawl_browser` |
+| `full` | 完整（首次默认） | `llm,search,ui,video,pdf,crawl` | 上表 + `video` `pdf` `ffmpeg` `deno` `opencli` |
+
+含义简述：
+
+- `core`：能 `import research_tool`
+- `llm`：对应 provider 的 key + SDK；验收时还会做一次真实 PONG
+- `search`：`ddgs` / `tavily` 可用
+- `ui`：Gradio Web UI
+- `crawl` + `crawl_browser`：Crawl4AI 包 + 浏览器资产（`crawl4ai-setup`）
+- `video`：`yt_dlp` / `faster_whisper` + **独立的** `MINIMAX_API_KEY`
+- `pdf`：MinerU
+- `ffmpeg` / `deno` / `opencli`：系统工具，分别要求 ffmpeg ≥ 6、Deno ≥ 2、`opencli doctor` 通过
+
+### 完整部署时向导怎么走
+
+1. **选档位**  
+   有历史回执时默认上次档位；首次默认 `3) 完整`。
+2. **创建 / 复用 `.venv` 并安装依赖**  
+   源码模式：`pip install -e ".[<extras>]"`  
+   wheel 模式：`pip install research-tool[<extras>]`  
+   随后 `pip check`；若档位含 crawl，再跑 `crawl4ai-setup`。  
+   任一步非 0 立即失败，不会假装成功。
+3. **配置 LLM**  
+   选择 DeepSeek / OpenAI 兼容 / Anthropic / MiniMax 后，向导一次写入完整身份：
+   `LLM_PROVIDER` + `LLM_MODEL` + `LLM_BASE_URL` + 对应 key。  
+   不会只改 key 而留下旧 provider/endpoint 混用。
+4. **按档位询问可选密钥**  
+   GitHub / Tavily / S2 / OpenAlex 邮箱 / 代理 / MiniMax 视频 / Groq / X cookie 等。  
+   密钥用 `getpass` 隐藏输入；代理允许写空以清空失效的 `HTTPS_PROXY`。
+5. **原子写 `.env`**  
+   保留注释与未知键；拒绝含换行/NUL 的注入值；POSIX 下权限 `0600`。
+6. **preflight 验收**  
+   检查 import、密钥是否存在、本地代理是否真在监听，以及档位全部能力。  
+   含 `llm` 时做 LLM PONG；含 `video` 时**单独**做 MiniMax PONG（与主管道 LLM 隔离）。
+7. **写回执**  
+   仅当验收通过才写 `.research-deployment.json`：
+   `profile` / `capabilities` / `python` / `verified`。  
+   **回执不含任何密钥。**
+
+Windows `start.bat` 每次启动都会先 `research setup --check-only`；回执缺失或验收失败会重新进入向导。
+
+### 常用命令
+
+```bash
+research setup                         # 交互菜单；完整部署默认 full
+research setup --profile full          # 跳过档位提问，直接完整档
+research setup --profile recommended
+research setup --profile minimal
+research setup --secrets-only          # 只更新密钥，不重装依赖
+research setup --github-only           # 只改 GITHUB_TOKEN
+research setup --tavily-only           # 只改 TAVILY_API_KEY
+research setup --check-only            # 按回执档位复验，不安装、不提问
+research setup --check-only --profile full
+
+# 未装 CLI 时也可直接：
+python scripts/setup_interactive.py
+bash scripts/setup.sh --check-only
+```
+
+约束：
+
+- 需要 Python **3.11+**
+- `--profile` 不能与 `--secrets-only` / `--github-only` / `--tavily-only` 组合
+- 密钥只应出现在本地 `.env` / 终端隐藏输入中，**不要粘贴到聊天、README、issue**
+
+### 产物与位置
+
+| 产物 | 源码 checkout | wheel / 非源码 |
+|------|---------------|----------------|
+| 密钥 | 项目根 `.env` | `~/.research/.env` 或 `$RESEARCH_HOME/.env` |
+| 部署回执 | 项目根 `.research-deployment.json` | 同上目录 |
+| 虚拟环境 | 项目根 `.venv` | 复用当前解释器 |
+
+`.env` 模板见 [`.env.example`](.env.example)。业务配置仍用 `config.yaml`，通过
+`${ENV}` 引用环境变量；一般不必手改密钥字段。
 
 ### 可视化界面（Gradio）
 
+部署 `recommended` / `full`（含 `ui`）后：
+
 ```bash
-pip install -e ".[ui]"   # 或 pip install gradio
 research ui              # 浏览器打开 http://127.0.0.1:7861
 ```
 
 左栏选「网页调研 / PDF 调研」、填主题与选项，右栏实时看进度、读报告、下载知识树文件。
 
-`.env` 示例（放在项目根目录，wheel 安装默认放在 `~/.research/.env`）：
-```
-LLM_PROVIDER=deepseek
-LLM_MODEL=deepseek-chat
-LLM_BASE_URL=https://api.deepseek.com/v1
-DEEPSEEK_API_KEY=sk-xxxx
-TAVILY_API_KEY=tvly-xxxx
-```
-没有 `.env` 时向导会安全隐藏输入并以 `0600` 权限原子写入。LLM 主后端与视频转录
-使用的 MiniMax 密钥相互独立，不会跨供应商复用。
-
----
-
-## 安装（手动 / 非 Windows）
+### 手动安装（调试 / 跳过向导时）
 
 ```bash
 cd research-tool
 python -m venv .venv
-source .venv/bin/activate           # Windows: .venv\Scripts\activate
-pip install -e ".[llm,search]"     # 先安装，才能使用 research 命令
-
-research setup                    # 交互部署（首次默认完整档）
-research setup --profile full     # 直接选择完整档部署
-research setup --check-only       # 按上次档位严格复验，不安装、不提问
-research setup --check-only --profile full
-
-pip install -e ".[all]"        # 全部 Python 能力：LLM/search/UI/video/PDF/Crawl
-crawl4ai-setup               # 安装 Crawl4AI 用的浏览器（用 [crawl] 时）
-# 完整档仍会严格检查系统工具：ffmpeg、Deno、OpenCLI
+source .venv/bin/activate
+pip install -e ".[llm,search]"     # 最小可跑
+# 或
+pip install -e ".[all]"            # 全部 Python 能力
+crawl4ai-setup                     # 使用 [crawl] 时安装浏览器
+# full 档系统工具仍需本机具备：ffmpeg、Deno、OpenCLI
+research setup --check-only        # 建议仍用同一验收逻辑核对
 ```
-
-部署档位：`minimal`（LLM + 搜索）、`recommended`（再含 UI + Crawl）、`full`
-（再含视频、PDF、ffmpeg、Deno、OpenCLI）。安装命令、Python extras、验收项均由同一份
-能力清单派生，任一步失败都会终止，不再把部分安装显示为成功。
 
 ## 配置
 
@@ -104,7 +210,7 @@ export TAVILY_API_KEY=tvly-...   # 仅用 tavily 搜索时
 ## CLI
 
 ```bash
-research run "Transformer 架构" -s web -s arxiv      # 一键全流程（默认含 Deepen 深挖）
+research run "Transformer 架构" --mode full -s tavily # 强制六阶段；当前受限网络推荐 Tavily
 research run "Transformer 架构" -s tavily -r 3       # 3 轮多关键词搜索（方法论 1.1）
 research collect "Transformer" --dry-run             # 仅看搜索结果（失败源会打印警告）
 research collect "Transformer" -n 8 -d 2 -r 2        # 阶段1，2 轮搜索
@@ -132,29 +238,31 @@ research collect "graph in-context learning" --from-year 2023 --to-year 2027 -s 
 research collect "扩散模型" --deep-search --deep-pages 3 --deep-sorts "relevance,date,citations" -s openalex
 ```
 
-### 调研档位：fast / standard / deep
+### 两种推荐版本：brief / full
 
-三个档位固定的是成本与质量边界，不是同等质量的速度对比。`fast` 跳过 Deepen，适合
-快速摸底；`standard` 是默认六阶段；`deep` 开启两轮查询、保守的 2 页 × 2 排序深搜、
-两轮画像和一轮反向修正。
+`brief` 与 `full` 是明确的产物契约。`brief` 只跑 Collect → Clean → Report，报告直接
+基于 clean 资料生成，减少 LLM 调用；`full` 强制六阶段，不能与 `--skip` 同用，且
+Extractor 任一块失败都会触发阶段重试，不会把空抽取误记为完成。
 
-| 档位 | 默认行为 | 典型用途 |
+| 版本 | 默认行为 | 典型用途 |
 |------|----------|----------|
-| `fast` | 5 个阶段，`r=1`，无 Deepen/Backward | 先判断主题是否值得深挖 |
-| `standard` | 完整六阶段，`r=1`，无 Backward | 日常调研与报告 |
-| `deep` | 完整六阶段，`r=2`，Deepen 画像迭代，deep-search，Backward 1 轮 | 证据覆盖与矛盾核验优先 |
+| `brief` | `raw/` + `clean/` + 简略 `report.md`；2 次 LLM 阶段尝试 | 多主题快速摸底 |
+| `full` | 六阶段完整产物；3 次 LLM 阶段尝试 + 原子完成标记 | 正式调研与可恢复交付 |
+
+原有 `fast / standard / deep` 继续兼容，表示搜索成本档位；新任务建议直接选择
+`brief / full`，避免“fast 到底是少搜索还是少产物”的歧义。
 
 ```bash
-research run "主题" --mode fast
-research run "主题" --mode standard
-research run "主题" --mode deep
+research run "主题" --mode brief -s tavily
+research run "主题" --mode full -s tavily
 
-# 显式参数仍可覆盖档位；--skip 始终决定最终阶段列表
+# 兼容旧的深搜档位
 research run "主题" --mode deep -r 3 --deep-pages 2 --skip extract
 ```
 
 每次运行都会在主题目录生成 `run-summary.json`，记录总耗时、各阶段耗时、是否启用
-resume/搜索缓存、完成与跳过阶段及来源审计。CLI 的阶段完成事件也会直接打印耗时。
+resume/搜索缓存、`pipeline_complete`、完成与跳过阶段及来源审计。`extract/organize/report`
+只有成功写入 `.stage-complete/<stage>.json` 后，续跑才会跳过；部分文件不再等于完成。
 
 ### 新论文官方源优先流程
 
@@ -188,9 +296,28 @@ resume/搜索缓存、完成与跳过阶段及来源审计。CLI 的阶段完成
 | `github` | GitHub | 可选 | 开源实现、代码、社区活跃度 |
 | `google_news` | Google News | 免 | 最新进展 / 新闻 |
 | `tavily` | Tavily | 需 | LLM 优化的网页搜索 |
+| `opencli` | OpenCLI + Chrome | 需浏览器 | CAPTCHA/403 时的交互式浏览器兜底；默认 Google Scholar adapter |
 | `bilibili` | Bilibili | 免 | B 站视频搜索 |
 | `youtube` | YouTube | 免 | 公开视频与会议演讲发现 |
 | `x` / `twitter` | X/Twitter | 需登录态 | 通过 `twitter-cli` 或 OpenCLI 读取公开推文搜索 |
+
+当前网络环境下，无人值守默认路径应使用 `HTTPS_PROXY= -s tavily`。`web/openalex/
+wikipedia` 若持续 CAPTCHA/403/429，不应通过无限重试拖慢任务。
+
+OpenCLI 复用已登录 Chrome，能够通过浏览器 DOM/网络请求绕过一部分无头反爬；它要求
+Node.js 20+、Browser Bridge 扩展及 `opencli doctor` 通过，因此只作为可选 fallback，
+不替代 Tavily 的批量主路径。安装与验证：
+
+```bash
+npm install -g @jackwener/opencli
+opencli doctor
+research run "主题" --mode full -s tavily -s opencli
+```
+
+默认执行 `opencli google-scholar search`；可在 `collector.opencli_site` 改成已安装且
+支持 `search` 的 adapter。不要把浏览器 cookie 写入仓库。详见
+[OpenCLI 官方仓库](https://github.com/jackwener/opencli)与
+[Browser Bridge 文档](https://opencli.info/docs/guide/browser-bridge.html)。
 
 **论文调研推荐 `openalex`**：覆盖最全、限流最宽、且自动一半按相关性 + 一半按发表日期检索，
 解决 arxiv/semantic_scholar 默认按相关性排序「搜不到近期论文」的问题。
@@ -254,7 +381,7 @@ timeline_backtrack/disambiguation/min_profile_confidence 等），`--skip deepen
 
 ```bash
 research config                       # 查看脱敏后的生效配置
-HTTPS_PROXY= research run "主题" --mode fast   # 本次进程明确直连
+HTTPS_PROXY= research run "主题" --mode full -s tavily  # 当前环境的稳定全量路径
 ```
 
 长期直连请在配置中设置 `collector.proxy: null`，并删除或清空 `.env` 中失效的
