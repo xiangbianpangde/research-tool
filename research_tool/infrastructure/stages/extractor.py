@@ -14,11 +14,11 @@ from pathlib import Path
 from pydantic import BaseModel, Field
 
 from ..llm.base import LLMClient, gather_fail_fast
-from ...domain.errors import LLMAuthenticationError
+from ...domain.errors import LLMAuthenticationError, StageError
 from ...domain.models import Entity, ExtractorConfig, ExtractResult, Relation, Triple
 from .base import ensure_dir, write_json
 
-_CONCURRENCY = 4
+_CONCURRENCY = 1
 
 _SYSTEM = (
     "你是信息抽取专家。从给定文本中精确抽取知识，只依据文本本身，不臆造。" "所有输出为合法 JSON。"
@@ -131,17 +131,23 @@ class Extractor:
                 except LLMAuthenticationError:
                     raise
                 except Exception:  # noqa: BLE001 - 非鉴权单块失败不应整批中断
-                    return source_file, file_lines, _ChunkResult()
-                return source_file, file_lines, res
+                    return source_file, file_lines, _ChunkResult(), True
+                return source_file, file_lines, res, False
 
         results = await gather_fail_fast(_do(job) for job in jobs)
+        failed_chunks = sum(1 for *_rest, failed in results if failed)
+        if self.config.fail_on_chunk_error and failed_chunks:
+            raise StageError(
+                "extract",
+                f"LLM 块抽取失败 {failed_chunks}/{len(results)}；未写入完成产物，可安全续跑",
+            )
 
         entities: list[Entity] = []
         relations: list[Relation] = []
         triples: list[Triple] = []
         e_seen, r_seen, t_seen = set(), set(), set()
 
-        for source_file, file_lines, res in results:
+        for source_file, file_lines, res, _failed in results:
             for e in res.entities:
                 key = (e.name.lower(), e.type.lower())
                 if key in e_seen:

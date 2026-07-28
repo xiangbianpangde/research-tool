@@ -24,6 +24,23 @@ from .models import PipelineConfig
 
 _STANDARD_STAGES = ["collect", "deepen", "clean", "extract", "organize", "report"]
 _MODE_DEFAULTS: dict[str, dict[str, Any]] = {
+    "brief": {
+        "mode": "brief",
+        "stages": ["collect", "clean", "report"],
+        "collector": {"search_rounds": 1, "deep_search": False},
+        "deepen": {"profile_iterations": 1},
+        "max_backward_rounds": 0,
+        "llm_stage_attempts": 2,
+    },
+    "full": {
+        "mode": "full",
+        "stages": list(_STANDARD_STAGES),
+        "collector": {"search_rounds": 1, "deep_search": False},
+        "deepen": {"profile_iterations": 1},
+        "extractor": {"enabled": True, "fail_on_chunk_error": True},
+        "max_backward_rounds": 0,
+        "llm_stage_attempts": 3,
+    },
     "fast": {
         "mode": "fast",
         "stages": [stage for stage in _STANDARD_STAGES if stage != "deepen"],
@@ -101,7 +118,9 @@ def mode_defaults(mode: str) -> dict[str, Any]:
     """Return a fresh cost/quality preset without sharing mutable values."""
     preset = _MODE_DEFAULTS.get(mode)
     if preset is None:
-        raise ConfigValidationError(f"未知调研模式: {mode}（可选 fast/standard/deep）")
+        raise ConfigValidationError(
+            f"未知调研模式: {mode}（推荐 brief/full；兼容 fast/standard/deep）"
+        )
     return deepcopy(preset)
 
 
@@ -148,7 +167,15 @@ def _flatten_to_pipeline(raw: dict) -> dict:
     pipeline = raw.get("pipeline") or {}
     # 把 yaml 的 pipeline 段下字段提升到 PipelineConfig 顶层；新增 PipelineConfig
     # 字段必须在这里登记，否则 yaml 值被静默丢弃（如 P2-6 的 max_backward_rounds）
-    for key in ("mode", "work_dir", "stages", "resume", "max_backward_rounds"):
+    for key in (
+        "mode",
+        "work_dir",
+        "stages",
+        "resume",
+        "max_backward_rounds",
+        "llm_stage_attempts",
+        "llm_retry_backoff_sec",
+    ):
         if key in pipeline:
             data[key] = pipeline[key]
     if "topic" in raw:
@@ -300,7 +327,7 @@ def load_config(
 
     flattened = _flatten_to_pipeline(raw)
     override_mode = overrides.get("mode") if isinstance(overrides, dict) else None
-    selected_mode = str(override_mode or flattened.get("mode") or "standard")
+    selected_mode = str(override_mode or flattened.get("mode") or "full")
     data = _deep_merge(mode_defaults(selected_mode), flattened)
     previous_identity = _llm_identity(data)
     data = _apply_env_overrides(data)
@@ -314,6 +341,16 @@ def load_config(
             data,
             previous_identity,
             explicit_replacement=explicit_key,
+        )
+    if data.get("mode") == "full":
+        # full 是产物契约，不允许 config.yaml 或 CLI 静默裁掉中间阶段。
+        data = _deep_merge(
+            data,
+            {
+                "stages": list(_STANDARD_STAGES),
+                "deepen": {"enabled": True},
+                "extractor": {"enabled": True, "fail_on_chunk_error": True},
+            },
         )
     _validate_mapping_sections(data)
     # 密钥必须根据最终 provider/base_url 选择；CLI overrides 可能刚切换

@@ -25,7 +25,11 @@ R = TypeVar("R")
 
 
 async def gather_fail_fast(awaitables: Iterable[Awaitable[R]]) -> list[R]:
-    """首个异常即取消并等待所有兄弟任务，避免 401 后仍有请求在飞。"""
+    """首个异常即取消并等待所有兄弟任务，避免 401 后仍有请求在飞。
+
+    extractor 等“单块容错”场景必须在任务内部吞掉非鉴权异常，再交给本函数；
+    不要把本函数改成 return_exceptions=True，否则 organizer/translate 的鉴权熔断会失效。
+    """
     tasks = [asyncio.ensure_future(awaitable) for awaitable in awaitables]
     if not tasks:
         return []

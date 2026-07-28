@@ -19,6 +19,10 @@ def _build_inner(name: str, config: CollectorConfig) -> SearchBackend:
         from .tavily import TavilyBackend
 
         return TavilyBackend(config.tavily_api_key)
+    if name == "opencli":
+        from .opencli_backend import OpenCLISearchBackend
+
+        return OpenCLISearchBackend(config)
     if name == "semantic_scholar":
         from .semantic_scholar import SemanticScholarBackend
 

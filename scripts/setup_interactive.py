@@ -4,7 +4,7 @@
 用法::
 
     conda activate research-tool
-    cd /Volumes/项目/research-tool
+    cd /Users/xbpd/Projects/research-tool
     research setup
     research setup --secrets-only
     research setup --tavily-only

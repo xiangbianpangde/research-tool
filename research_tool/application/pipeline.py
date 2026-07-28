@@ -6,6 +6,8 @@
 
 from __future__ import annotations
 
+import asyncio
+import logging
 import shutil
 import time
 from collections.abc import AsyncIterator
@@ -22,6 +24,8 @@ from ..infrastructure.stages.deepen import DeepenStage
 from ..infrastructure.stages.extractor import Extractor
 from ..infrastructure.stages.organizer import Organizer
 from ..infrastructure.stages.reporter import Reporter
+
+logger = logging.getLogger(__name__)
 
 
 def _stage_output(stage: str, topic_dir: Path) -> tuple[Path, list[str]]:
@@ -60,6 +64,64 @@ class ResearchPipeline:
         if stage == "clean":
             return self.config.cleaner.relevance_filter
         return stage in {"extract", "organize", "report"}
+
+    @staticmethod
+    def _completion_marker(topic_dir: Path, stage: str) -> Path:
+        return topic_dir / ".stage-complete" / f"{stage}.json"
+
+    def _stage_is_complete(
+        self,
+        stage: str,
+        topic_dir: Path,
+        out_dir: Path,
+        patterns: list[str],
+    ) -> bool:
+        marker = self._completion_marker(topic_dir, stage)
+        if marker.is_file():
+            return True
+        # 旧版本没有 marker：非 LLM 阶段仍兼容历史产物；三个核心 LLM 阶段
+        # 必须有成功 marker，避免把超时前留下的部分文件误判成完整阶段。
+        if stage in {"extract", "organize", "report"}:
+            return False
+        return has_output(out_dir, patterns)
+
+    def _mark_stage_complete(self, topic_dir: Path, stage: str) -> None:
+        marker = self._completion_marker(topic_dir, stage)
+        marker.parent.mkdir(parents=True, exist_ok=True)
+        temporary = marker.with_suffix(".tmp")
+        write_json(temporary, {"stage": stage, "status": "completed"})
+        temporary.replace(marker)
+
+    async def _exec_with_retry(
+        self,
+        stage: str,
+        topic: str,
+        topic_dir: Path,
+        result: PipelineResult,
+    ) -> None:
+        uses_llm = self._stage_uses_llm(stage)
+        attempts = self.config.llm_stage_attempts if uses_llm else 1
+        for attempt in range(1, attempts + 1):
+            try:
+                if uses_llm:
+                    await self._get_llm().healthcheck()
+                await self._exec(stage, topic, topic_dir, result)
+                return
+            except LLMAuthenticationError:
+                raise
+            except Exception:  # noqa: BLE001 - 最后一次由外层统一记录 StageError
+                if attempt >= attempts:
+                    raise
+                delay = self.config.llm_retry_backoff_sec * attempt
+                logger.warning(
+                    "%s 第 %d/%d 次执行失败，%.1fs 后重试",
+                    stage,
+                    attempt,
+                    attempts,
+                    delay,
+                )
+                if delay:
+                    await asyncio.sleep(delay)
 
     async def run(self, topic: str | None = None) -> PipelineResult:
         """执行全部 Stage（可中断恢复）。"""
@@ -197,13 +259,22 @@ class ResearchPipeline:
                 if result.collect_result
                 else []
             )
+        accounted_stages = set(result.stages_completed) | set(result.stages_skipped)
+        pipeline_complete = result.failed_stage is None and set(self.config.stages).issubset(
+            accounted_stages
+        )
         write_json(
             summary_path,
             {
                 "version": 1,
                 "mode": self.config.mode,
+                "output_contract": (
+                    self.config.mode if self.config.mode in {"brief", "full"} else "legacy"
+                ),
+                "pipeline_complete": pipeline_complete,
                 "elapsed_sec": round(result.elapsed_sec, 3),
                 "resume_enabled": self.config.resume,
+                "llm_stage_attempts": self.config.llm_stage_attempts,
                 "search_cache_enabled": self.config.collector.search_cache,
                 "stages_completed": list(result.stages_completed),
                 "stages_skipped": list(result.stages_skipped),
@@ -271,7 +342,9 @@ class ResearchPipeline:
                 continue
 
             out_dir, patterns = _stage_output(stage, topic_dir)
-            if self.config.resume and has_output(out_dir, patterns):
+            if self.config.resume and self._stage_is_complete(
+                stage, topic_dir, out_dir, patterns
+            ):
                 result.stages_skipped.append(stage)
                 result.stage_metrics.append(
                     StageRunMetric(stage=stage, status="skipped", message="已有输出，跳过")
@@ -282,14 +355,17 @@ class ResearchPipeline:
                     progress=1.0,
                     message="已有输出，跳过",
                 )
+                if not self._completion_marker(topic_dir, stage).exists():
+                    self._mark_stage_complete(topic_dir, stage)
                 continue
 
             stage_start = time.monotonic()
+            marker = self._completion_marker(topic_dir, stage)
+            if marker.exists():
+                marker.unlink()
             yield StageEvent(stage=stage, status="started", message=f"开始 {stage}")
             try:
-                if self._stage_uses_llm(stage):
-                    await self._get_llm().healthcheck()
-                await self._exec(stage, topic, topic_dir, result)
+                await self._exec_with_retry(stage, topic, topic_dir, result)
             except Exception as e:  # noqa: BLE001 - 记录失败并中断，保留已有输出
                 duration = max(0.0, time.monotonic() - stage_start)
                 result.failed_stage = stage
@@ -311,6 +387,7 @@ class ResearchPipeline:
                 return  # 外层 stream 见 failed_stage 后会停止反向循环
 
             duration = max(0.0, time.monotonic() - stage_start)
+            self._mark_stage_complete(topic_dir, stage)
             result.stages_completed.append(stage)
             result.stage_metrics.append(
                 StageRunMetric(stage=stage, status="completed", duration_sec=duration)
@@ -417,6 +494,10 @@ class ResearchPipeline:
             d = topic_dir / sub
             if d.exists():
                 shutil.rmtree(d)
+        for stage in ("clean", "extract", "organize", "report"):
+            marker = self._completion_marker(topic_dir, stage)
+            if marker.exists():
+                marker.unlink()
         for fname in ("report.md", "report.html"):
             f = topic_dir / fname
             if f.exists():
@@ -434,9 +515,7 @@ class ResearchPipeline:
                 message=f"talk 后重跑 {stage}",
             )
             try:
-                if self._stage_uses_llm(stage):
-                    await self._get_llm().healthcheck()
-                await self._exec(stage, topic, topic_dir, result)
+                await self._exec_with_retry(stage, topic, topic_dir, result)
             except Exception as e:  # noqa: BLE001
                 duration = max(0.0, time.monotonic() - stage_start)
                 result.failed_stage = stage
@@ -457,6 +536,7 @@ class ResearchPipeline:
                 )
                 return
             duration = max(0.0, time.monotonic() - stage_start)
+            self._mark_stage_complete(topic_dir, stage)
             if stage not in result.stages_completed:
                 result.stages_completed.append(stage)
             result.stage_metrics.append(
@@ -493,6 +573,10 @@ class ResearchPipeline:
             d = topic_dir / sub
             if d.exists():
                 shutil.rmtree(d)
+        for stage in ("deepen", "clean", "extract", "organize", "report"):
+            marker = ResearchPipeline._completion_marker(topic_dir, stage)
+            if marker.exists():
+                marker.unlink()
         for fname in ("report.md", "report.html"):
             f = topic_dir / fname
             if f.exists():
@@ -540,8 +624,9 @@ class ResearchPipeline:
                 org_input, self._get_llm(), topic_dir, topic=topic
             )
         elif stage == "report":
+            report_input = topic_dir / ("clean" if self.config.mode == "brief" else "tree")
             result.report_result = await Reporter(self.config.reporter).run(
-                topic_dir / "tree", self._get_llm(), topic
+                report_input, self._get_llm(), topic
             )
         else:
             raise StageError("pipeline", f"未知 stage: {stage}")

@@ -11,6 +11,10 @@ llm:
   base_url: https://api.deepseek.com/v1  # DeepSeek endpoint；OpenAI 留 null
   temperature: 0.3
   max_tokens: 4096
+  connect_timeout_sec: 10       # TCP 建连硬超时
+  read_timeout_sec: 120         # 单次网络读取超时（不采用 SDK 默认 600s）
+  request_timeout_sec: 180      # 整个 chat/stream 调用硬墙
+  sdk_max_retries: 0            # 禁 SDK 隐式重试，统一交给 pipeline 有界重试
 
 # Collector 配置
 collector:
@@ -22,6 +26,7 @@ collector:
     #            cvpr(CVPR 论文，DBLP venue:CVPR，配 from_year/to_year)
     #            youtube(YouTube 视频发现，yt-dlp ytsearch，无需 API key)
     #            x / twitter(X 平台公开推文，默认通过 OpenCLI 复用浏览器登录态)
+    #            opencli(浏览器兜底，默认 google-scholar adapter；需 Chrome Bridge)
     # 论文优先推荐 openalex：覆盖最全、限流最宽、自动混合"经典+最新"
   max_results_per_engine: 8
   depth: 2                       # 1=仅搜索 2=打开结果页 3=追踪二级链接
@@ -57,6 +62,8 @@ collector:
   x_backend: opencli              # opencli | twitter-cli
   x_cmd: twitter                  # twitter-cli 命令名或绝对路径
   x_min_engagement: 0             # X 最少互动(likes+rts+replies)；0=不过滤；字段缺失时跳过门槛
+  opencli_cmd: opencli             # `-s opencli` 使用的本地命令
+  opencli_site: google-scholar     # OpenCLI 中支持 search 的站点 adapter
   # X 使用前：opencli doctor 或 twitter status；-s x 会 preflight，失败给出安装说明
   # 两阶段锚定/去锚（P1，解决"被单一机构/限定语绑架"的查询偏差）
   core_keyword: null             # 核心词，如 topic="中南民族大学 康怡琳" 时填 "康怡琳"
@@ -125,6 +132,7 @@ cleaner:
 # Extractor 配置
 extractor:
   enabled: true                  # false=跳过抽取，Organizer 直接吃 clean 文本
+  fail_on_chunk_error: true      # full 默认 true；失败块不写完成产物，由 pipeline 重试
   tasks:
     - ner
     - triple
@@ -148,7 +156,7 @@ reporter:
 
 # Pipeline 配置
 pipeline:
-  mode: standard                  # fast | standard | deep；具体字段仍可覆盖档位默认值
+  mode: full                      # 推荐 brief | full；兼容 fast | standard | deep
   work_dir: ./research-output
   stages:
     - collect
@@ -158,6 +166,8 @@ pipeline:
     - organize
     - report
   resume: true                    # 性能基准应设 false，并使用独立输出目录
+  llm_stage_attempts: 3           # 瞬时 LLM 失败的阶段级尝试次数（鉴权错误不重试）
+  llm_retry_backoff_sec: 2        # 线性退避基数：2s、4s……
   # 反向传播（P2-6）：完成一次正向后让 organizer 评估知识树质量，把修正查询回到
   # collect 重跑。0=不启用（默认，向后兼容），≥1 启用循环。
   max_backward_rounds: 0

@@ -37,14 +37,19 @@ class AnthropicLLMClient(LLMClient):
         #   重新加载 HTTPS_PROXY，shell 层 unset 不够，必须在客户端层 hard-disable）。
         no_proxy_transport = httpx.AsyncHTTPTransport(proxy=None)
         no_proxy_client = httpx.AsyncClient(
-            timeout=httpx.Timeout(connect=10.0, read=120.0, write=30.0, pool=30.0),
+            timeout=httpx.Timeout(
+                connect=config.connect_timeout_sec,
+                read=config.read_timeout_sec,
+                write=30.0,
+                pool=30.0,
+            ),
             transport=no_proxy_transport,
         )
         self._client = AsyncAnthropic(
             api_key=config.api_key,
             base_url=config.base_url,
             http_client=no_proxy_client,
-            max_retries=0,
+            max_retries=config.sdk_max_retries,
         )
 
     async def chat(
@@ -68,10 +73,12 @@ class AnthropicLLMClient(LLMClient):
                     ),
                     max_tokens=self.config.max_tokens,
                 ),
-                timeout=180.0,
+                timeout=self.config.request_timeout_sec,
             )
         except asyncio.TimeoutError as e:
-            raise LLMError("chat 调用硬超时（180s）") from e
+            raise LLMError(
+                f"chat 调用硬超时（{self.config.request_timeout_sec:g}s）"
+            ) from e
         except Exception as e:  # noqa: BLE001
             error = classify_llm_error("chat", e)
             if isinstance(error, LLMAuthenticationError):
@@ -92,7 +99,7 @@ class AnthropicLLMClient(LLMClient):
 
         self._raise_if_authentication_failed()
         try:
-            async with asyncio.timeout(180.0):
+            async with asyncio.timeout(self.config.request_timeout_sec):
                 async with self._client.messages.stream(
                     model=self.config.model,
                     system=system or "",
@@ -102,7 +109,9 @@ class AnthropicLLMClient(LLMClient):
                     async for text in stream.text_stream:
                         yield text
         except asyncio.TimeoutError as e:
-            raise LLMError("stream 调用硬超时（180s）") from e
+            raise LLMError(
+                f"stream 调用硬超时（{self.config.request_timeout_sec:g}s）"
+            ) from e
         except Exception as e:  # noqa: BLE001
             error = classify_llm_error("stream", e)
             if isinstance(error, LLMAuthenticationError):

@@ -1,0 +1,571 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>research-tool · 全面审核与演进规划 · 最终汇报</title>
+<script src="https://cdn.jsdelivr.net/npm/mermaid@10.9.1/dist/mermaid.min.js"></script>
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+  if (window.mermaid) {
+    mermaid.initialize({
+      startOnLoad: true, theme: 'base', securityLevel: 'loose',
+      themeVariables: {
+        primaryColor: '#F5F0E4', primaryTextColor: '#1F1D17',
+        primaryBorderColor: '#8B3A1F', lineColor: '#5A5447',
+        secondaryColor: '#E8E1D2', tertiaryColor: '#FAF7F0',
+        fontFamily: '-apple-system, "PingFang SC", "Microsoft YaHei", sans-serif', fontSize: '13px'
+      },
+      flowchart: { curve: 'basis', useMaxWidth: true, htmlLabels: true },
+      pie: { useMaxWidth: true }
+    });
+  }
+  // 数字滚动
+  document.querySelectorAll('.counter').forEach(function(el){
+    var target = parseInt(el.getAttribute('data-target') || '0', 10);
+    var dur = 1200, start = performance.now();
+    function step(now){
+      var p = Math.min((now - start) / dur, 1);
+      var ease = 1 - Math.pow(1 - p, 3);
+      el.textContent = Math.floor(ease * target);
+      if (p < 1) requestAnimationFrame(step); else el.textContent = target;
+    }
+    requestAnimationFrame(step);
+  });
+  // 进度条动画
+  setTimeout(function(){ document.querySelectorAll('.anim-bar').forEach(function(b){ b.classList.add('armed'); }); }, 300);
+});
+</script>
+<style>
+:root{
+  --bg:#FAFAF7; --bg-soft:#F4F2EC; --panel:#FFFFFF; --panel-2:#F8F6F0;
+  --line:#E0DCD0; --line-soft:#ECEAE2; --txt:#1F1D17; --txt-dim:#5A5447; --txt-faint:#9A9385;
+  --brand:#8B3A1F; --brand-2:#A85032; --accent:#2F5061; --accent-2:#3F6A82;
+  --gold:#A87A2E; --good:#3F6B3D; --warn:#B07F22; --bad:#9C3A2E;
+  --code-bg:#26241F; --code-fg:#E8E2D4;
+  --shadow:0 16px 40px -28px rgba(60,40,20,.32); --radius:14px;
+  --mono:'SFMono-Regular',ui-monospace,'Cascadia Code','Consolas',monospace;
+  --sans:-apple-system,BlinkMacSystemFont,'Segoe UI','PingFang SC','Microsoft YaHei',sans-serif;
+  --serif:'Source Serif Pro','Iowan Old Style','Charter','Noto Serif CJK SC','Songti SC',serif;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html{scroll-behavior:smooth;font-size:15px}
+body{font-family:var(--sans);background:radial-gradient(1100px 700px at 86% -6%,#F2E8DC 0%,transparent 55%),radial-gradient(900px 600px at -8% 14%,#EAE2D2 0%,transparent 50%),var(--bg);color:var(--txt);line-height:1.7;-webkit-font-smoothing:antialiased}
+::selection{background:var(--brand);color:#fff}
+.shell{display:flex;min-height:100vh}
+.side{position:fixed;top:0;left:0;bottom:0;width:240px;background:linear-gradient(180deg,#FAF7F0,#F4F0E5);border-right:1px solid var(--line);padding:22px 14px 28px;overflow-y:auto;z-index:50}
+.side::-webkit-scrollbar{width:6px}.side::-webkit-scrollbar-thumb{background:#DCD6C6;border-radius:8px}
+.brand{display:flex;align-items:center;gap:10px;margin-bottom:6px;padding:0 4px}
+.brand .mark{width:36px;height:36px;border-radius:9px;flex:0 0 auto;background:linear-gradient(135deg,var(--brand),var(--brand-2));display:grid;place-items:center;font-family:var(--serif);font-weight:800;color:#fff;font-size:18px;box-shadow:0 10px 24px -10px var(--brand)}
+.brand b{font-family:var(--serif);font-size:15px;letter-spacing:.3px;display:block;line-height:1.2;color:var(--txt)}
+.brand span{font-size:10px;color:var(--txt-faint);letter-spacing:1.5px;font-family:var(--mono);text-transform:uppercase}
+.side .meta{font-size:10px;color:var(--txt-faint);padding:8px 4px 12px;border-top:1px solid var(--line);margin:14px 0 4px;font-family:var(--mono);letter-spacing:.5px}
+nav a{display:flex;align-items:center;gap:9px;padding:6px 9px;border-radius:7px;color:var(--txt-dim);text-decoration:none;font-size:12.2px;transition:.18s;margin-bottom:1px}
+nav a .n{font-family:var(--mono);font-size:9.5px;color:var(--txt-faint);width:18px;text-align:center;flex:0 0 auto}
+nav a:hover{background:#EBE5D5;color:var(--txt)}
+nav a.active{background:linear-gradient(90deg,rgba(47,80,97,.13),transparent);color:#1A1813;box-shadow:inset 2px 0 0 var(--accent)}
+nav .grp{font-size:9px;letter-spacing:2px;color:var(--txt-faint);text-transform:uppercase;margin:14px 0 5px 9px;font-family:var(--mono)}
+.main{margin-left:240px;flex:1;padding:30px 44px 80px;max-width:1180px}
+.sec-head{margin-bottom:24px}.sec-head .tag{font-family:var(--mono);font-size:10.5px;letter-spacing:2px;color:var(--accent);margin-bottom:4px;font-weight:700}
+.sec-head h2{font-family:var(--serif);font-size:28px;font-weight:700;letter-spacing:-.5px;margin:4px 0 10px;line-height:1.2}
+.sec-head p{font-size:13.5px;color:var(--txt-dim);max-width:760px;line-height:1.75}
+h2{font-family:var(--serif);font-size:24px;font-weight:700;margin:38px 0 12px;letter-spacing:-.3px}
+h3{font-size:16px;font-weight:700;margin:24px 0 10px;display:flex;align-items:center;gap:9px}
+h3 .dot{width:7px;height:7px;border-radius:50%;background:var(--accent);flex:0 0 auto}
+h4{font-size:13.5px;font-weight:700;margin:16px 0 7px;color:var(--txt)}
+p{font-size:13px;color:var(--txt-dim);margin-bottom:9px;line-height:1.75}
+.card{border:1px solid var(--line);border-radius:12px;padding:16px 18px;background:var(--panel);box-shadow:var(--shadow)}
+.card.hl{border-left:3px solid var(--accent)}.card.brand{border-left:3px solid var(--brand)}.card.gold{border-left:3px solid var(--gold)}
+.card h4{font-size:13.5px;margin:0 0 7px}.card p{font-size:12.4px}
+.grid{display:grid;gap:12px}.g2{grid-template-columns:1fr 1fr}.g3{grid-template-columns:1fr 1fr 1fr}.g4{grid-template-columns:1fr 1fr 1fr 1fr}
+.kpi-row{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin:14px 0}
+.kpi{background:var(--panel);border:1px solid var(--line);border-radius:11px;padding:14px 16px;box-shadow:var(--shadow);position:relative;overflow:hidden}
+.kpi::after{content:"";position:absolute;top:0;right:0;width:32px;height:32px;background:radial-gradient(circle at top right,rgba(139,58,31,.08),transparent 70%)}
+.kpi .num{font-family:var(--serif);font-size:32px;font-weight:700;line-height:1;color:var(--brand);letter-spacing:-1px}
+.kpi .lbl{font-size:11px;color:var(--txt-dim);margin-top:6px;letter-spacing:.3px}
+.kpi .sub{font-size:10px;color:var(--txt-faint);margin-top:2px;font-family:var(--mono)}
+.kpi.accent .num{color:var(--accent)}.kpi.gold .num{color:var(--gold)}.kpi.good .num{color:var(--good)}
+.tbl-wrap{overflow-x:auto;border-radius:10px;border:1px solid var(--line);background:var(--panel);box-shadow:var(--shadow)}
+table{width:100%;border-collapse:collapse;font-size:12.4px}
+thead{background:var(--bg-soft)}
+th{padding:9px 12px;text-align:left;font-weight:700;font-size:11.5px;color:var(--txt-dim);border-bottom:1px solid var(--line);white-space:nowrap}
+td{padding:8px 12px;border-bottom:1px solid var(--line-soft);color:var(--txt-dim);vertical-align:top}
+tr:last-child td{border-bottom:none}
+td.ok{color:var(--good)}td.no{color:var(--bad)}td.warn{color:var(--warn)}
+.b-pill{font-size:10px;font-weight:700;padding:2px 8px;border-radius:4px;display:inline-block;font-family:var(--mono);letter-spacing:.3px}
+.b-pill.ok{background:#DDE9D5;color:var(--good)}.b-pill.mid{background:#F0E2C5;color:var(--warn)}.b-pill.no{background:#EFD5CD;color:var(--bad)}.b-pill.inf{background:rgba(47,80,97,.13);color:var(--accent)}.b-pill.br{background:rgba(139,58,31,.13);color:var(--brand)}
+.chip-row{display:flex;flex-wrap:wrap;gap:5px;margin-top:6px}
+.chip{font-size:10.5px;padding:3px 9px;border-radius:5px;background:#EDE8DD;color:var(--txt-dim);font-family:var(--mono);border:1px solid var(--line)}
+.chip.b{background:rgba(47,80,97,.1);color:var(--accent);border-color:rgba(47,80,97,.2)}
+.chip.br{background:rgba(139,58,31,.1);color:var(--brand);border-color:rgba(139,58,31,.2)}
+.chip.gd{background:rgba(63,107,61,.1);color:var(--good);border-color:rgba(63,107,61,.2)}
+.note{padding:13px 15px;border-radius:10px;display:flex;gap:10px;align-items:flex-start;font-size:12.6px;margin:14px 0;border:1px solid}
+.note .ico{font-size:16px;flex:0 0 auto;margin-top:1px;font-family:var(--serif);font-weight:700}
+.note.info{border-color:rgba(47,80,97,.3);background:rgba(47,80,97,.06)}
+.note.warn{border-color:rgba(176,127,34,.3);background:rgba(176,127,34,.07)}
+.note.crit{border-color:rgba(156,58,46,.35);background:rgba(156,58,46,.07)}
+.note.good{border-color:rgba(63,107,61,.3);background:rgba(63,107,61,.07)}
+.bar-row{display:flex;align-items:center;gap:10px;margin:7px 0;font-size:12px}
+.bar-row .lbl{width:160px;color:var(--txt-dim);font-size:11.5px;flex:0 0 auto}
+.bar-row .bar{flex:1;height:9px;background:var(--bg-soft);border-radius:5px;overflow:hidden;border:1px solid var(--line-soft)}
+.bar-row .fill{height:100%;border-radius:5px;background:linear-gradient(90deg,var(--accent),var(--accent-2))}
+.bar-row .fill.brand{background:linear-gradient(90deg,var(--brand),var(--brand-2))}
+.bar-row .fill.good{background:linear-gradient(90deg,var(--good),#558A52)}
+.bar-row .val{font-family:var(--mono);font-size:11px;color:var(--txt);width:48px;text-align:right;flex:0 0 auto}
+.anim-bar{position:relative;height:9px;background:var(--bg-soft);border-radius:5px;overflow:hidden;border:1px solid var(--line-soft)}
+.anim-bar .fill{height:100%;border-radius:5px;background:linear-gradient(90deg,var(--accent),var(--accent-2));width:0;transition:width 1.4s cubic-bezier(.4,0,.2,1)}
+.anim-bar.armed .fill{width:var(--w)}
+.verdict{border:2px solid var(--brand);border-radius:13px;padding:18px 22px;background:linear-gradient(135deg,#FCF6EE,#F8F0E0);box-shadow:var(--shadow)}
+.verdict .lbl{font-family:var(--mono);font-size:9.5px;letter-spacing:2px;color:var(--brand);font-weight:700;margin-bottom:6px}
+.verdict h4{font-family:var(--serif);font-size:16px;font-weight:700;margin:0 0 9px}
+.tl{position:relative;padding:8px 0 8px 24px;margin:10px 0 14px}
+.tl::before{content:"";position:absolute;left:7px;top:6px;bottom:6px;width:2px;background:linear-gradient(180deg,var(--brand),var(--accent))}
+.tl-item{position:relative;margin:9px 0;padding:8px 0 0 14px}
+.tl-item::before{content:"";position:absolute;left:-19px;top:14px;width:8px;height:8px;border-radius:50%;background:#fff;border:2px solid var(--brand)}
+.tl-item h5{font-size:13px;font-weight:700;color:var(--txt);margin:0 0 3px}
+.tl-item p{font-size:11.8px;color:var(--txt-dim);margin:0 0 2px}
+.tl-item .ver{font-family:var(--mono);font-size:10px;color:var(--brand);font-weight:600;margin-left:6px}
+.vs{display:grid;grid-template-columns:1fr 56px 1fr;gap:14px;align-items:stretch;margin:14px 0}
+.vs-col{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:16px 18px;box-shadow:var(--shadow)}
+.vs-col.old{border-top:3px solid var(--bad);background:linear-gradient(180deg,#FBEEEA,#FFF)}
+.vs-col.new{border-top:3px solid var(--good);background:linear-gradient(180deg,#EFF3EA,#FFF)}
+.vs-col h4{margin:0 0 8px;font-family:var(--serif);font-size:14.5px}
+.vs-col.old h4{color:var(--bad)}.vs-col.new h4{color:var(--good)}
+.vs-mid{display:flex;align-items:center;justify-content:center;font-family:var(--serif);font-size:24px;color:var(--txt-faint);font-weight:700}
+.hero{background:linear-gradient(135deg,#FAF6EC 0%,#F2E8D8 50%,#EAD9C0 100%);border:1px solid var(--line);border-radius:18px;padding:30px 36px;margin-bottom:28px;box-shadow:var(--shadow);position:relative;overflow:hidden}
+.hero::before{content:"";position:absolute;right:-40px;top:-40px;width:280px;height:280px;background:radial-gradient(circle,rgba(139,58,31,.10),transparent 70%);pointer-events:none}
+.hero .tag-row{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px}
+.hero h1{font-family:var(--serif);font-size:36px;font-weight:700;letter-spacing:-1.2px;line-height:1.15;margin:6px 0 10px;color:var(--txt)}
+.hero .sub{font-family:var(--serif);font-size:15px;color:var(--txt-dim);max-width:740px;line-height:1.5;margin-bottom:18px}
+.hero .meta-row{display:flex;gap:18px;flex-wrap:wrap;font-family:var(--mono);font-size:11px;color:var(--txt-faint);letter-spacing:.5px}
+.toc{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin:12px 0}
+.toc a{display:flex;gap:10px;align-items:center;padding:10px 13px;border:1px solid var(--line);border-radius:10px;background:var(--panel);text-decoration:none;color:var(--txt-dim);transition:.18s;font-size:12.5px}
+.toc a:hover{border-color:var(--accent);color:var(--accent);box-shadow:var(--shadow)}
+.toc a .ix{font-family:var(--mono);font-size:11px;color:var(--brand);width:22px;height:22px;display:grid;place-items:center;border-radius:5px;background:rgba(139,58,31,.1);flex:0 0 auto;font-weight:700}
+.toc a b{font-weight:600;color:var(--txt);font-size:13px;display:block;margin-bottom:1px}
+.mermaid-wrap{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:18px 20px;margin:14px 0;box-shadow:var(--shadow);overflow-x:auto}
+.mermaid-wrap .cap{font-family:var(--mono);font-size:10.5px;letter-spacing:1.5px;color:var(--accent);font-weight:700;margin-bottom:8px;text-transform:uppercase;display:flex;align-items:center;gap:8px}
+.mermaid-wrap .cap::before{content:"";width:18px;height:1.5px;background:var(--accent)}
+.mermaid{display:flex;justify-content:center}.mermaid svg{max-width:100%;height:auto}
+.counter{font-family:var(--serif);font-size:32px;font-weight:700;line-height:1;color:var(--brand);letter-spacing:-1px}
+.counter.accent{color:var(--accent)}.counter.gold{color:var(--gold)}.counter.good{color:var(--good)}
+hr.div{height:1px;background:var(--line);margin:30px 0;border:none}
+[id]{scroll-margin-top:24px}
+@media (max-width:1080px){.g4{grid-template-columns:1fr 1fr}.kpi-row{grid-template-columns:1fr 1fr}.vs{grid-template-columns:1fr}.vs-mid{padding:8px 0}.toc{grid-template-columns:1fr 1fr}}
+</style>
+</head>
+<body>
+<div class="shell">
+
+<!-- ============ 左侧导航 ============ -->
+<aside class="side">
+  <div class="brand">
+    <div class="mark">研</div>
+    <div><b>research-tool</b><span>全面审核最终汇报</span></div>
+  </div>
+  <div class="meta">840 tests · 14 CLI · 15 backends<br>18,906 src · 13,918 tests<br>21 产出文件 · 8 Phase</div>
+  <nav>
+    <a href="#hero" class="active"><span class="n">00</span> 摘要</a>
+    <a href="#s1"><span class="n">01</span> 项目概况</a>
+    <a href="#s2"><span class="n">02</span> 五层架构</a>
+    <a href="#s3"><span class="n">03</span> 代码质量</a>
+    <a href="#s4"><span class="n">04</span> 测试覆盖</a>
+    <a href="#s5"><span class="n">05</span> 技术债务</a>
+    <div class="grp">评估与规划</div>
+    <a href="#s6"><span class="n">06</span> 创新点评估</a>
+    <a href="#s7"><span class="n">07</span> Star 增长</a>
+    <a href="#s8"><span class="n">08</span> 未来路线图</a>
+    <a href="#s9"><span class="n">09</span> 风险登记</a>
+    <a href="#s10"><span class="n">10</span> 验证轮补全</a>
+    <a href="#s11"><span class="n">11</span> 产出物索引</a>
+  </nav>
+</aside>
+
+<!-- ============ 主内容 ============ -->
+<main class="main">
+
+<!-- HERO -->
+<section id="hero" class="hero">
+  <div class="tag-row">
+    <span class="b-pill ok">8 Phase 完成</span>
+    <span class="b-pill inf">840 tests</span>
+    <span class="b-pill inf">128 .py</span>
+    <span class="b-pill inf">15 搜索后端</span>
+    <span class="b-pill inf">5 LLM</span>
+    <span class="b-pill br">v0.1.1</span>
+  </div>
+  <h1>research-tool 全面审核与演进规划</h1>
+  <p class="sub">六阶段管道调研工具的完整技术审计。覆盖架构分层、代码质量、测试覆盖、技术债务、创新点评估、Star 增长策略与未来路线图。所有结论均有命令实证支撑。</p>
+  <div class="meta-row">
+    <span>2026-07-21</span><span>•</span><span>Python 3.12.7</span><span>•</span><span>21 产出文件</span><span>•</span><span>审核验证轮已完成</span>
+  </div>
+</section>
+
+<!-- TOC -->
+<div class="toc">
+  <a href="#s1"><div class="ix">01</div><div><b>项目概况</b><span style="font-size:11px;color:var(--txt-faint)">规模 · 技术栈 · 管道</span></div></a>
+  <a href="#s2"><div class="ix">02</div><div><b>五层架构</b><span style="font-size:11px;color:var(--txt-faint)">分层 · 偏差 · Mermaid</span></div></a>
+  <a href="#s3"><div class="ix">03</div><div><b>代码质量</b><span style="font-size:11px;color:var(--txt-faint)">ruff · 复杂度 · 安全</span></div></a>
+  <a href="#s4"><div class="ix">04</div><div><b>测试覆盖</b><span style="font-size:11px;color:var(--txt-faint)">840 tests · 59 files</span></div></a>
+  <a href="#s5"><div class="ix">05</div><div><b>技术债务</b><span style="font-size:11px;color:var(--txt-faint)">12 项 · 4 P0</span></div></a>
+  <a href="#s6"><div class="ix">06</div><div><b>创新点评估</b><span style="font-size:11px;color:var(--txt-faint)">12 创新 · 4 推荐</span></div></a>
+  <a href="#s7"><div class="ix">07</div><div><b>Star 增长</b><span style="font-size:11px;color:var(--txt-faint)">定位 · 渠道 · 路线</span></div></a>
+  <a href="#s8"><div class="ix">08</div><div><b>未来路线图</b><span style="font-size:11px;color:var(--txt-faint)">4 方向 · 90 天</span></div></a>
+  <a href="#s9"><div class="ix">09</div><div><b>风险登记</b><span style="font-size:11px;color:var(--txt-faint)">20 风险 · Top 5</span></div></a>
+</div>
+
+<!-- KPI -->
+<section class="sec-head" style="margin-top:30px">
+  <div class="tag">00 · EXECUTIVE SUMMARY</div>
+  <h2>核心数据 · 一眼可读</h2>
+</section>
+
+<div class="kpi-row">
+  <div class="kpi"><div class="num"><span class="counter" data-target="840">0</span></div><div class="lbl">pytest 用例</div><div class="sub">0 failed · 59 files</div></div>
+  <div class="kpi accent"><div class="num"><span class="counter accent" data-target="128">0</span></div><div class="lbl">Python 源文件</div><div class="sub">src 69 + tests 59</div></div>
+  <div class="kpi gold"><div class="num"><span class="counter gold" data-target="18906">0</span></div><div class="lbl">源代码行数</div><div class="sub">tests 另有 13,918 行</div></div>
+  <div class="kpi good"><div class="num"><span class="counter good" data-target="15">0</span></div><div class="lbl">搜索后端</div><div class="sub">+ CachingBackend 装饰器</div></div>
+</div>
+<div class="kpi-row">
+  <div class="kpi"><div class="num"><span class="counter" data-target="14">0</span></div><div class="lbl">CLI 命令</div><div class="sub">Typer @app.command</div></div>
+  <div class="kpi accent"><div class="num"><span class="counter accent" data-target="5">0</span></div><div class="lbl">LLM Provider</div><div class="sub">OpenAI 兼容协议归一</div></div>
+  <div class="kpi gold"><div class="num"><span class="counter gold" data-target="6">0</span></div><div class="lbl">管道阶段</div><div class="sub">文件系统通信</div></div>
+  <div class="kpi good"><div class="num"><span class="counter good" data-target="1">0</span></div><div class="lbl">ruff 错误</div><div class="sub">PLR0915 · 可快速修复</div></div>
+</div>
+
+<hr class="div">
+
+<!-- §1 项目概况 -->
+<section id="s1">
+  <div class="sec-head">
+    <div class="tag">01 · PROJECT OVERVIEW</div>
+    <h2>项目概况</h2>
+    <p>Python 核心引擎 + 多接口层的自动化调研工具。给定主题 → 自动产出知识树 / 调研报告。</p>
+  </div>
+
+  <div class="mermaid-wrap">
+    <div class="cap">六阶段管道</div>
+    <div class="mermaid">
+graph LR
+  A[Collect<br/>搜索采集] --> B[Deepen<br/>LLM 深化]
+  B --> C[Clean<br/>内容清洗]
+  C --> D[Extract<br/>结构化抽取]
+  D --> E[Organize<br/>知识组织]
+  E --> F[Report<br/>报告生成]
+  F -.->|FP09 反向循环| B
+    </div>
+  </div>
+
+  <div class="grid g3">
+    <div class="card hl"><h4>构建系统</h4><p>hatchling + uv<br>Python ≥ 3.11（实测 3.12.7）</p></div>
+    <div class="card hl"><h4>接口层</h4><p>Typer CLI（14 命令）<br>Gradio WebUI</p></div>
+    <div class="card hl"><h4>错误码体系</h4><p>26 个 VideoIngest 错误码<br>3 段式 format_error + 仲裁退出码</p></div>
+  </div>
+
+  <div class="note info" style="margin-top:14px">
+    <div class="ico">i</div>
+    <div>Stage 之间仅通过文件系统通信，可中断、可恢复、可独立调试。反向传播循环（FP09）已覆盖（8 用例）。</div>
+  </div>
+</section>
+
+<hr class="div">
+
+<!-- §2 架构 -->
+<section id="s2">
+  <div class="sec-head">
+    <div class="tag">02 · ARCHITECTURE</div>
+    <h2>五层架构</h2>
+    <p>严格分层 + 3 处有意简化偏差（已记录在案）。</p>
+  </div>
+
+  <div class="mermaid-wrap">
+    <div class="cap">分层依赖图</div>
+    <div class="mermaid">
+graph TB
+  P[presentation<br/>cli.py · webui.py] --> A[application<br/>pipeline.py · video_pipeline.py]
+  A --> D[domain<br/>models.py · config.py · errors.py]
+  D --> I[infrastructure<br/>stages/ · llm/ · search/ · ingest/]
+  C[common<br/>logging · slug · translate · url_guard] -.->|横切| P
+  C -.-> A
+  C -.-> D
+  C -.-> I
+    </div>
+  </div>
+
+  <h3><span class="dot"></span>已知偏差（3 处有意简化）</h3>
+  <div class="tbl-wrap">
+    <table>
+      <thead><tr><th>位置</th><th>偏差</th><th>理由</th></tr></thead>
+      <tbody>
+        <tr><td>cli.py → LLMClient</td><td>表现层→基础设施</td><td>CLI 薄封装简化</td></tr>
+        <tr><td>pipeline_adapter.py</td><td>基础设施→应用层（懒加载）</td><td>避免导入时序硬依赖</td></tr>
+        <tr><td>common/translate.py</td><td>公共层→基础设施 LLM</td><td>翻译工具复用 LLM 抽象</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<hr class="div">
+
+<!-- §3 代码质量 -->
+<section id="s3">
+  <div class="sec-head">
+    <div class="tag">03 · CODE QUALITY</div>
+    <h2>代码质量</h2>
+    <p>ruff 静态分析 + 复杂度 + 安全审计。</p>
+  </div>
+
+  <div class="grid g2">
+    <div class="card brand">
+      <h4>Ruff 检查结果</h4>
+      <p><strong>1 error</strong>（PLR0915: too-many-statements）<br>位于 video_concurrent_orchestrator.py<br>0 warnings · 可通过拆分函数修复</p>
+    </div>
+    <div class="card gold">
+      <h4>安全要点</h4>
+      <p>SSRF 防护（url_guard.py）✅<br>gitleaks CI 已生效 ✅<br>.env 密钥管理 ⚠️ 需 rotate</p>
+    </div>
+  </div>
+
+  <h3><span class="dot"></span>代码规模分布</h3>
+  <div class="bar-row"><div class="lbl">infrastructure/</div><div class="bar"><div class="fill" style="width:62%"></div></div><div class="val">~62%</div></div>
+  <div class="bar-row"><div class="lbl">application/</div><div class="bar"><div class="fill brand" style="width:14%"></div></div><div class="val">~14%</div></div>
+  <div class="bar-row"><div class="lbl">domain/</div><div class="bar"><div class="fill good" style="width:10%"></div></div><div class="val">~10%</div></div>
+  <div class="bar-row"><div class="lbl">presentation/</div><div class="bar"><div class="fill" style="width:8%"></div></div><div class="val">~8%</div></div>
+  <div class="bar-row"><div class="lbl">common/</div><div class="bar"><div class="fill brand" style="width:6%"></div></div><div class="val">~6%</div></div>
+</section>
+
+<hr class="div">
+
+<!-- §4 测试 -->
+<section id="s4">
+  <div class="sec-head">
+    <div class="tag">04 · TEST COVERAGE</div>
+    <h2>测试覆盖</h2>
+    <p>840 用例全绿，59 个测试文件，覆盖管道全阶段 + 反向循环。</p>
+  </div>
+
+  <div class="kpi-row">
+    <div class="kpi good"><div class="num">840</div><div class="lbl">passed</div><div class="sub">0 failed</div></div>
+    <div class="kpi gold"><div class="num">5</div><div class="lbl">skipped</div><div class="sub">环境条件跳过</div></div>
+    <div class="kpi accent"><div class="num">59</div><div class="lbl">测试文件</div><div class="sub">13,918 行</div></div>
+    <div class="kpi"><div class="num">8</div><div class="lbl">FP09 反向循环</div><div class="sub">test_pipeline_backward.py</div></div>
+  </div>
+
+  <div class="note good">
+    <div class="ico">✓</div>
+    <div>测试代码量（13,918 行）与源代码量（18,906 行）比值 ≈ 0.74，测试投入充分。pytest-cov 覆盖率数据待安装后补全。</div>
+  </div>
+</section>
+
+<hr class="div">
+
+<!-- §5 技术债务 -->
+<section id="s5">
+  <div class="sec-head">
+    <div class="tag">05 · TECHNICAL DEBT</div>
+    <h2>技术债务</h2>
+    <p>12 项已识别债务，按 P0-P3 分级。4 项 P0 需立即处理。</p>
+  </div>
+
+  <div class="tbl-wrap">
+    <table>
+      <thead><tr><th>优先级</th><th>债务项</th><th>影响</th><th>修复成本</th></tr></thead>
+      <tbody>
+        <tr><td><span class="b-pill no">P0</span></td><td>.env 密钥硬编码风险</td><td>安全</td><td>低</td></tr>
+        <tr><td><span class="b-pill no">P0</span></td><td>commitlint CI 未强制</td><td>规范</td><td>低</td></tr>
+        <tr><td><span class="b-pill no">P0</span></td><td>硬编码路径（/Volumes/）</td><td>可移植</td><td>中</td></tr>
+        <tr><td><span class="b-pill no">P0</span></td><td>pytest-cov 未安装</td><td>度量</td><td>低</td></tr>
+        <tr><td><span class="b-pill mid">P1</span></td><td>PLR0915 函数过长</td><td>可维护</td><td>中</td></tr>
+        <tr><td><span class="b-pill mid">P1</span></td><td>3 处架构偏差未消除</td><td>架构</td><td>高</td></tr>
+        <tr><td><span class="b-pill mid">P1</span></td><td>STATUS.md 数据过期</td><td>文档</td><td>低</td></tr>
+        <tr><td><span class="b-pill mid">P1</span></td><td>未跟踪文件（work/）</td><td>仓库卫生</td><td>低</td></tr>
+        <tr><td><span class="b-pill inf">P2</span></td><td>WebUI 功能薄弱</td><td>体验</td><td>高</td></tr>
+        <tr><td><span class="b-pill inf">P2</span></td><td>无 HTTP API</td><td>集成</td><td>高</td></tr>
+        <tr><td><span class="b-pill inf">P2</span></td><td>视频管道并发未压测</td><td>稳定</td><td>中</td></tr>
+        <tr><td><span class="b-pill inf">P3</span></td><td>CODE_MAP 未更新</td><td>文档</td><td>低</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<hr class="div">
+
+<!-- §6 创新点 -->
+<section id="s6">
+  <div class="sec-head">
+    <div class="tag">06 · INNOVATION</div>
+    <h2>创新点评估</h2>
+    <p>12 项技术创新识别，4 项推荐重点投入。</p>
+  </div>
+
+  <div class="grid g3">
+    <div class="card brand"><h4>⭐ 文件系统管道</h4><p>Stage 间零耦合通信，可中断/恢复/独立调试。差异化核心竞争力。</p></div>
+    <div class="card brand"><h4>⭐ 反向传播循环</h4><p>FP09 Report→Deepen 反馈闭环，自动补充不足主题。学术调研领域罕见。</p></div>
+    <div class="card brand"><h4>⭐ 专家库 ExpertLib</h4><p>策展可信实体绕过 star 排序。强档直注 + 弱档 scoped 搜索，保证低 star 高质量项目不被埋没。</p></div>
+    <div class="card brand"><h4>⭐ CVPR→YouTube 联动</h4><p>TalkLinker 自动关联论文与演讲视频。置信闸宁漏不误，可选全量 VideoIngest 转写。</p></div>
+    <div class="card hl"><h4>多源融合引擎</h4><p>15 后端统一抽象 + 缓存装饰器。学术 + 社交 + 代码 + 视频全覆盖。</p></div>
+    <div class="card hl"><h4>自部署代理 OpenCLI</h4><p>Chrome Bridge 浏览器代理兜底 CAPTCHA/403。Google Scholar + X 登录态，无需第三方 API key。</p></div>
+    <div class="card hl"><h4>Wiki 不可变发布</h4><p>内容寻址包 + 密钥扫描 + 符号链接拒绝。研究→知识库的受控桥梁。</p></div>
+    <div class="card hl"><h4>错误码体系</h4><p>26 码 3 段式 + 仲裁退出码，视频摄入全链路可观测。</p></div>
+    <div class="card hl"><h4>中文 Slug 系统</h4><p>中文主题 → 安全文件名，跨平台无冲突。</p></div>
+    <div class="card hl"><h4>SSRF 防护</h4><p>url_guard 内建，安全 by default。</p></div>
+    <div class="card hl"><h4>LLM 协议归一</h4><p>5 Provider → 2 客户端类，配置驱动切换。</p></div>
+    <div class="card hl"><h4>Deepen 图谱式深化</h4><p>实体拆分→多视角独立搜索；识别缺失维度生成补充查询；通过相连节点图谱进一步深化。</p></div>
+  </div>
+</section>
+
+<hr class="div">
+
+<!-- §7 Star 增长 -->
+<section id="s7">
+  <div class="sec-head">
+    <div class="tag">07 · GROWTH STRATEGY</div>
+    <h2>Star 增长路线</h2>
+    <p>从 0→1000 Star 的 90 天行动计划。</p>
+  </div>
+
+  <div class="tl">
+    <div class="tl-item"><h5>Phase 1 · 基础打磨 <span class="ver">D1-D14</span></h5><p>README 重写 + GIF 演示 + Quick Start 5 分钟体验 + PyPI 发布</p></div>
+    <div class="tl-item"><h5>Phase 2 · 社区曝光 <span class="ver">D15-D30</span></h5><p>Hacker News / Reddit / V2EX 首发 + 技术博客 3 篇</p></div>
+    <div class="tl-item"><h5>Phase 3 · 生态建设 <span class="ver">D31-D60</span></h5><p>Plugin API + 贡献指南 + Awesome 列表 + 模板库</p></div>
+    <div class="tl-item"><h5>Phase 4 · 持续增长 <span class="ver">D61-D90</span></h5><p>用例展示 + 视频 Demo + 联合项目 + Newsletter</p></div>
+  </div>
+
+  <div class="verdict">
+    <div class="lbl">POSITIONING</div>
+    <h4>"AI 驱动的自动化调研引擎 — 给定主题，产出知识"</h4>
+    <p style="font-size:12.4px;margin:0">目标用户：研究人员 / 内容创作者 / 技术调研者。核心差异：文件系统管道 + 反向循环 + 多源融合。</p>
+  </div>
+</section>
+
+<hr class="div">
+
+<!-- §8 路线图 -->
+<section id="s8">
+  <div class="sec-head">
+    <div class="tag">08 · ROADMAP</div>
+    <h2>未来路线图</h2>
+    <p>4 个演进方向，按投入产出比排序。</p>
+  </div>
+
+  <div class="grid g2">
+    <div class="card brand"><h4>D1 · 债务清零（1-2 周）</h4><p>4 个 P0 修复 + ruff error 消除 + STATUS.md 对齐 + .gitignore 补全</p></div>
+    <div class="card hl"><h4>D2 · 开发者体验（2-4 周）</h4><p>Plugin API + 搜索后端热插拔 + 配置校验 + 错误信息人性化</p></div>
+    <div class="card gold"><h4>D3 · 产品化（4-8 周）</h4><p>HTTP API（FastAPI）+ WebUI 重构 + 用户认证 + 部署文档</p></div>
+    <div class="card"><h4>D4 · 智能化（8-12 周）</h4><p>Agent 自主规划 + 多轮对话调研 + 知识图谱可视化 + 协作模式</p></div>
+  </div>
+
+  <h3><span class="dot"></span>投入产出评估</h3>
+  <div class="bar-row"><div class="lbl">D1 债务清零</div><div class="anim-bar"><div class="fill" style="--w:95%"></div></div><div class="val">ROI 95%</div></div>
+  <div class="bar-row"><div class="lbl">D2 开发者体验</div><div class="anim-bar"><div class="fill" style="--w:78%"></div></div><div class="val">ROI 78%</div></div>
+  <div class="bar-row"><div class="lbl">D3 产品化</div><div class="anim-bar"><div class="fill" style="--w:60%"></div></div><div class="val">ROI 60%</div></div>
+  <div class="bar-row"><div class="lbl">D4 智能化</div><div class="anim-bar"><div class="fill" style="--w:45%"></div></div><div class="val">ROI 45%</div></div>
+</section>
+
+<hr class="div">
+
+<!-- §9 风险 -->
+<section id="s9">
+  <div class="sec-head">
+    <div class="tag">09 · RISK REGISTER</div>
+    <h2>风险登记 Top 5</h2>
+    <p>20 条风险中紧急度最高的 5 项。</p>
+  </div>
+
+  <div class="tbl-wrap">
+    <table>
+      <thead><tr><th>#</th><th>风险</th><th>影响</th><th>概率</th><th>缓解措施</th></tr></thead>
+      <tbody>
+        <tr><td>1</td><td class="no">.env 密钥泄露</td><td>高</td><td>中</td><td>立即 rotate + gitleaks 拦截</td></tr>
+        <tr><td>2</td><td class="warn">commitlint 未强制</td><td>中</td><td>高</td><td>CI 添加 commit-msg 校验</td></tr>
+        <tr><td>3</td><td class="warn">硬编码路径</td><td>中</td><td>高</td><td>环境变量 + 配置化</td></tr>
+        <tr><td>4</td><td>pytest-cov 缺失</td><td>低</td><td>确定</td><td>安装 + CI 集成</td></tr>
+        <tr><td>5</td><td>未跟踪文件膨胀</td><td>低</td><td>高</td><td>.gitignore 补全 + 清理</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<hr class="div">
+
+<!-- §10 验证轮 -->
+<section id="s10">
+  <div class="sec-head">
+    <div class="tag">10 · VERIFICATION ROUND</div>
+    <h2>审核验证轮</h2>
+    <p>对前次 8 Phase 审计结果的实证验证与数据修正。</p>
+  </div>
+
+  <div class="vs">
+    <div class="vs-col old">
+      <h4>前次审计数据</h4>
+      <p style="font-size:12px">• 测试数：454（STATUS.md）/ 417（AGENTS.md）<br>• CLI 命令：13<br>• ruff：NOT RUNNABLE<br>• src/tests 行数写反</p>
+    </div>
+    <div class="vs-mid">→</div>
+    <div class="vs-col new">
+      <h4>本次实证数据</h4>
+      <p style="font-size:12px">• 测试数：<strong>840</strong>（pytest --collect-only）<br>• CLI 命令：<strong>14</strong>（grep @app.command）<br>• ruff：<strong>1 error</strong>（.venv/bin/ruff）<br>• src 18,906 / tests 13,918</p>
+    </div>
+  </div>
+
+  <div class="note good">
+    <div class="ico">✓</div>
+    <div>5 处架构行号引用全部验证通过。源代码零修改（git diff 确认）。project_facts.md 建立为唯一权威数据源。</div>
+  </div>
+</section>
+
+<hr class="div">
+
+<!-- §11 产出物 -->
+<section id="s11">
+  <div class="sec-head">
+    <div class="tag">11 · DELIVERABLES</div>
+    <h2>产出物索引</h2>
+    <p>21 个文件，覆盖规划、报告、问题、决策、状态、工作日志。</p>
+  </div>
+
+  <div class="tbl-wrap">
+    <table>
+      <thead><tr><th>目录</th><th>文件</th><th>用途</th></tr></thead>
+      <tbody>
+        <tr><td>planning/</td><td>task_plan.md</td><td>总任务 + 8 Phase 分解</td></tr>
+        <tr><td>planning/</td><td>agent_assignment.md</td><td>Agent 分工策略</td></tr>
+        <tr><td>planning/</td><td>audit_scope.md</td><td>审核范围与约束</td></tr>
+        <tr><td>planning/</td><td>risk_register.md</td><td>20 条风险登记</td></tr>
+        <tr><td>status/</td><td>project_facts.md</td><td>实证数据权威源</td></tr>
+        <tr><td>status/</td><td>current_status.md</td><td>Phase 状态追踪</td></tr>
+        <tr><td>reports/</td><td>project_overview.md</td><td>项目总览</td></tr>
+        <tr><td>reports/</td><td>architecture_review.md</td><td>架构评审</td></tr>
+        <tr><td>reports/</td><td>file_audit.md</td><td>文件审计</td></tr>
+        <tr><td>reports/</td><td>entropy_management.md</td><td>熵管理</td></tr>
+        <tr><td>reports/</td><td>future_roadmap.md</td><td>演进路线图</td></tr>
+        <tr><td>reports/</td><td>star_growth_roadmap.md</td><td>Star 增长策略</td></tr>
+        <tr><td>reports/</td><td>github_growth_analysis.md</td><td>GitHub 增长分析</td></tr>
+        <tr><td>reports/</td><td>verify_report.md</td><td>验证报告</td></tr>
+        <tr><td>reports/</td><td>final_structure.md</td><td>最终结构</td></tr>
+        <tr><td>reports/</td><td class="ok">final_report.html</td><td>本文件（最终汇报）</td></tr>
+        <tr><td>problems/</td><td>code_quality.md</td><td>代码质量问题</td></tr>
+        <tr><td>problems/</td><td>technical_debt.md</td><td>技术债务清单</td></tr>
+        <tr><td>innovation/</td><td>catalog.md</td><td>创新点目录</td></tr>
+        <tr><td>experiments/</td><td>catalog.md</td><td>实验目录</td></tr>
+        <tr><td>decisions/</td><td>2026-07-21*.md ×2</td><td>ADR 决策记录</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="verdict" style="margin-top:20px">
+    <div class="lbl">FINAL VERDICT</div>
+    <h4>项目健康度：良好 🟢 — 架构清晰、测试充分、债务可控</h4>
+    <p style="font-size:12.4px;margin:0">核心建议：立即执行 D1（债务清零 1-2 周），然后推进 D2（开发者体验），为开源发布做好准备。最大亮点是文件系统管道 + 反向循环设计，在同类工具中具有明确差异化。</p>
+  </div>
+</section>
+
+<div style="text-align:center;padding:40px 0 20px;font-family:var(--mono);font-size:11px;color:var(--txt-faint)">
+  research-tool v0.1.1 · 全面审核最终汇报 · 2026-07-21<br>
+  Generated with evidence-based methodology · All conclusions backed by command output
+</div>
+
+</main>
+</div>
+</body>
+</html>

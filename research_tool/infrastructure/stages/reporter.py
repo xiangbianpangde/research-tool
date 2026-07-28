@@ -79,6 +79,19 @@ class Reporter:
             nodes.append(md.read_text(encoding="utf-8"))
         return main, "\n\n---\n\n".join(nodes)
 
+    def _read_clean_material(self, clean_dir: Path) -> str:
+        """简略版直接读取 clean/，避免为一份摘要触发 extract/organize。"""
+        documents: list[str] = []
+        remaining = 60000
+        for md in sorted(clean_dir.glob("*.md")):
+            if remaining <= 0:
+                break
+            text = md.read_text(encoding="utf-8")
+            piece = text[:remaining]
+            documents.append(f"## {md.name}\n\n{piece}")
+            remaining -= len(piece)
+        return "\n\n---\n\n".join(documents)
+
     def _load_sources(self, tree_dir: Path) -> list[dict]:
         """读 raw/sources.json，返回 [{sid, title, url}]，sid 与采集文件序号一致。"""
         sources = tree_dir.parent / "raw" / "sources.json"
@@ -134,8 +147,14 @@ class Reporter:
         output_path: Path | None = None,
     ) -> ReportResult:
         tree_dir = Path(tree_dir)
-        main, nodes_text = self._read_tree(tree_dir)
-        node_count = len(list(tree_dir.glob("N*.md")))
+        is_brief = tree_dir.name == "clean"
+        if is_brief:
+            main = ""
+            nodes_text = self._read_clean_material(tree_dir)
+            node_count = 0
+        else:
+            main, nodes_text = self._read_tree(tree_dir)
+            node_count = len(list(tree_dir.glob("N*.md")))
         refs = self._load_sources(tree_dir)
         audits = self._load_source_audits(tree_dir)
         source_count = len(refs)
@@ -144,29 +163,37 @@ class Reporter:
             f"- 来源{r['sid']}：{r['title'] or '(无标题)'} — {r['url']}" for r in refs
         )
 
+        material_name = "清洗后的原始资料" if is_brief else "知识树"
+        detail_requirement = (
+            "按主要观点归纳，突出结论、证据与不确定性；不要求构建知识树。"
+            if is_brief
+            else "正文按知识树节点逐一展开，每节点至少一节，充分展开论据与细节。"
+        )
         prompt = (
-            f"基于以下知识树，撰写一篇**详实**的「{self.config.style}」风格调研报告。\n"
+            f"基于以下{material_name}，撰写一篇「{self.config.style}」风格调研报告。\n"
             f"主题：{topic or '（见内容）'}\n"
             f"章节结构参考：{struct}\n"
             "硬性要求：\n"
-            "1. 含摘要；正文按知识树节点逐一展开，每节点至少一节，充分展开论据与细节，"
-            "不要只写一两句结论；\n"
+            f"1. 含摘要；{detail_requirement}\n"
             "2. 涉及具体论文/资料时，**说明该来源讲了什么**（研究问题、方法/模型名、"
             "关键发现与数据），并在句末用 (来源NN) 标注，让读者知道结论出自哪篇；\n"
             "3. 正文用 (来源NN) 标注每条结论出处；**不要自己编写参考资料列表**"
             "（系统会自动附上完整的来源清单）；\n"
             f"4. 总长度尽量充分，但不超过约 {self.config.max_length} 字符；输出 Markdown。\n\n"
             f"=== 来源清单（编号→标题→链接）===\n{ref_block}\n\n"
-            f"=== 知识树主表 ===\n{main}\n\n=== 知识树分表（含各 S1 来源依据）===\n{nodes_text}"
+            f"=== 主表 ===\n{main}\n\n=== {material_name} ===\n{nodes_text}"
         )
         body = await llm.chat(prompt, system=_SYSTEM)
 
         header = (
             f"# {topic or '调研'} — 调研报告\n\n"
             f"> 生成日期: {date.today().isoformat()}\n"
+            f"> 报告版本: {'简略版' if is_brief else '全量版'}\n"
             f"> 数据来源: {source_count} 篇/个\n"
-            f"> 知识节点: {node_count} 个\n\n"
         )
+        if not is_brief:
+            header += f"> 知识节点: {node_count} 个\n"
+        header += "\n"
         # 去掉模型可能自行写的(常不全的)参考资料，统一用程序生成的权威完整列表
         body = re.split(r"\n#{1,6}\s*参考资料", body)[0].rstrip()
         audit_block = self._audit_markdown(audits)

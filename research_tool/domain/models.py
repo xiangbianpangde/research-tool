@@ -18,6 +18,7 @@ from pydantic import BaseModel, Field, model_validator
 Provider = Literal["openai", "deepseek", "ollama", "anthropic", "minimax"]
 SearchEngine = Literal[
     "web",
+    "opencli",
     "arxiv",
     "tavily",
     "scholar",
@@ -36,7 +37,7 @@ SearchEngine = Literal[
 ]
 ExtractTask = Literal["ner", "re", "triple"]
 StageName = Literal["collect", "deepen", "clean", "extract", "organize", "report"]
-ResearchMode = Literal["fast", "standard", "deep"]
+ResearchMode = Literal["brief", "full", "fast", "standard", "deep"]
 
 
 class LLMConfig(BaseModel):
@@ -48,6 +49,10 @@ class LLMConfig(BaseModel):
     base_url: str | None = None
     temperature: float = Field(default=0.3, ge=0.0, le=2.0)
     max_tokens: int = Field(default=4096, gt=0)
+    connect_timeout_sec: float = Field(default=10.0, gt=0)
+    read_timeout_sec: float = Field(default=120.0, gt=0)
+    request_timeout_sec: float = Field(default=180.0, gt=0)
+    sdk_max_retries: int = Field(default=0, ge=0, le=5)
 
 
 class ExpertEntry(BaseModel):
@@ -142,6 +147,10 @@ class CollectorConfig(BaseModel):
     x_cmd: str = "twitter"
     # X 结果最少互动量（likes+rts+replies 合计）；0=不过滤。CLI 字段缺失时跳过门槛。
     x_min_engagement: int = Field(default=0, ge=0)
+    # 浏览器搜索兜底：复用 OpenCLI + 已登录 Chrome，默认调用 Google Scholar
+    # adapter。适合 CAPTCHA/403 场景，不建议作为无人值守默认主源。
+    opencli_cmd: str = "opencli"
+    opencli_site: str = "google-scholar"
     # 专家库（ExpertLib）：已知 URL 直塞抓取队列，跳过搜索、绕过默认排序，保证纳入。
     # 专家 seed_urls 与 CVPR 论文的已知 arXiv 链接共用此 hook（最高优先级）。
     extra_urls: list[str] = Field(default_factory=list)
@@ -229,6 +238,9 @@ class ExtractorConfig(BaseModel):
     relation_types: list[str] | None = None
     chunk_size: int = Field(default=4000, gt=0)
     overlap: int = Field(default=200, ge=0)
+    # full 模式设为 true：任一块失败即让阶段失败并由 pipeline 重试，禁止把全空
+    # 抽取误写成“成功”。旧档位保持 false 以兼容历史容错语义。
+    fail_on_chunk_error: bool = False
 
 
 class OrganizerConfig(BaseModel):
@@ -302,7 +314,7 @@ class PipelineConfig(BaseModel):
     """管道总配置。依据 01 §7.3 + 03 §2。"""
 
     topic: str = ""
-    mode: ResearchMode = "standard"
+    mode: ResearchMode = "full"
     work_dir: Path = Path("./research-output")
     stages: list[StageName] = Field(
         default_factory=lambda: ["collect", "deepen", "clean", "extract", "organize", "report"]
@@ -318,6 +330,10 @@ class PipelineConfig(BaseModel):
     talk: TalkConfig = Field(default_factory=TalkConfig)
     llm: LLMConfig = Field(default_factory=LLMConfig)
     resume: bool = True  # 幂等跳过已完成 Stage（05 §5）
+    # LLM 阶段级恢复：SDK 层默认不重试，统一由 pipeline 做有界重试，避免 SDK
+    # 默认 600s 超时叠加隐式重试。鉴权错误永不重试。
+    llm_stage_attempts: int = Field(default=2, ge=1, le=5)
+    llm_retry_backoff_sec: float = Field(default=2.0, ge=0, le=60)
     # 反向传播（P2-6）：完成一次正向后，让 organizer 评估知识树质量，把稀疏节点/
     # 知识断层/矛盾产出修正查询回到 collect 重跑。0=不启用（向后兼容）。
     max_backward_rounds: int = Field(default=0, ge=0, le=3)

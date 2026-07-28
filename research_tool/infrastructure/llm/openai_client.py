@@ -35,14 +35,19 @@ class OpenAILLMClient(LLMClient):
         # 与 anthropic_client 对齐（P10/P12）：显式超时 + 禁 SDK 重试 + 禁隐式代理。
         # dotenv 会把 HTTPS_PROXY=127.0.0.1:10809 注入环境；trust_env 默认 True 会踩死连接。
         no_proxy_client = httpx.AsyncClient(
-            timeout=httpx.Timeout(connect=10.0, read=120.0, write=30.0, pool=30.0),
+            timeout=httpx.Timeout(
+                connect=config.connect_timeout_sec,
+                read=config.read_timeout_sec,
+                write=30.0,
+                pool=30.0,
+            ),
             transport=httpx.AsyncHTTPTransport(proxy=None),
         )
         self._client = AsyncOpenAI(
             api_key=config.api_key or "ollama",
             base_url=config.base_url,
             http_client=no_proxy_client,
-            max_retries=0,
+            max_retries=config.sdk_max_retries,
         )
 
     def _messages(self, prompt: str, system: str | None) -> list[ChatCompletionMessageParam]:
@@ -71,10 +76,12 @@ class OpenAILLMClient(LLMClient):
                     ),
                     max_tokens=self.config.max_tokens,
                 ),
-                timeout=180.0,
+                timeout=self.config.request_timeout_sec,
             )
         except asyncio.TimeoutError as e:
-            raise LLMError("chat 调用硬超时（180s）") from e
+            raise LLMError(
+                f"chat 调用硬超时（{self.config.request_timeout_sec:g}s）"
+            ) from e
         except Exception as e:  # noqa: BLE001 - 统一包装为 LLMError
             error = classify_llm_error("chat", e)
             if isinstance(error, LLMAuthenticationError):
@@ -105,10 +112,13 @@ class OpenAILLMClient(LLMClient):
                     max_tokens=self.config.max_tokens,
                     response_format={"type": "json_object"},
                 ),
-                timeout=180.0,
+                timeout=self.config.request_timeout_sec,
             )
         except asyncio.TimeoutError as e:
-            raise LLMError("chat_structured 调用硬超时（180s）") from e
+            raise LLMError(
+                "chat_structured 调用硬超时"
+                f"（{self.config.request_timeout_sec:g}s）"
+            ) from e
         except Exception as e:  # noqa: BLE001
             error = classify_llm_error("chat_structured", e)
             if isinstance(error, LLMAuthenticationError):
@@ -123,7 +133,7 @@ class OpenAILLMClient(LLMClient):
         self._raise_if_authentication_failed()
         think_filter = _ThinkStreamFilter()
         try:
-            async with asyncio.timeout(180.0):
+            async with asyncio.timeout(self.config.request_timeout_sec):
                 stream = await self._client.chat.completions.create(
                     model=self.config.model,
                     messages=self._messages(prompt, system),
@@ -139,7 +149,9 @@ class OpenAILLMClient(LLMClient):
                 for visible in think_filter.finish():
                     yield visible
         except asyncio.TimeoutError as e:
-            raise LLMError("stream 调用硬超时（180s）") from e
+            raise LLMError(
+                f"stream 调用硬超时（{self.config.request_timeout_sec:g}s）"
+            ) from e
         except Exception as e:  # noqa: BLE001
             error = classify_llm_error("stream", e)
             if isinstance(error, LLMAuthenticationError):

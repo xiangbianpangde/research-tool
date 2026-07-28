@@ -34,6 +34,11 @@ from ..application.pipeline import ResearchPipeline
 from ..common.slug import slugify
 from ..infrastructure.stages import Cleaner, Collector, Extractor, Organizer, Reporter
 from ..infrastructure.export.wiki_publisher import publish as publish_to_wiki
+from ..infrastructure.export.wiki_stage import (
+    PackageStageError,
+    build_stage_package,
+    plan_stage_package,
+)
 
 logger = get_logger(__name__)
 
@@ -678,7 +683,6 @@ def _build_run_overrides(  # noqa: PLR0915
         "stages": stages,
         "resume": resume,
         "collector": {
-            "search_engines": source,
             "max_results_per_engine": max_results,
             "llm_query_expansion": llm_expand,
             "extra_queries": list(query),
@@ -687,6 +691,11 @@ def _build_run_overrides(  # noqa: PLR0915
             "to_year": to_year,
         },
     }
+    if source:
+        overrides["collector"]["search_engines"] = source
+    if mode == "full":
+        overrides["deepen"] = {"enabled": True}
+        overrides["extractor"] = {"enabled": True, "fail_on_chunk_error": True}
     if rounds is not None:
         overrides["collector"]["search_rounds"] = rounds
     if facets:
@@ -706,7 +715,7 @@ def _build_run_overrides(  # noqa: PLR0915
     if relevance_filter:
         overrides["cleaner"] = {"relevance_filter": True}
     if profile_iterations is not None:
-        overrides["deepen"] = {"profile_iterations": profile_iterations}
+        overrides.setdefault("deepen", {})["profile_iterations"] = profile_iterations
     if max_backward_rounds is not None:
         overrides["max_backward_rounds"] = max_backward_rounds
     if mineru_cmd:
@@ -748,7 +757,12 @@ def _build_run_overrides(  # noqa: PLR0915
 def run(
     topic: str = typer.Argument(..., help="调研主题"),
     # --- 常用 5 项（问题 5：run 主面板只留最常用，调优归 config.yaml）--- #
-    source: list[str] = typer.Option(["web"], "-s", "--source", help="搜索来源（可多次）"),
+    source: list[str] = typer.Option(
+        [],
+        "-s",
+        "--source",
+        help="搜索来源（可多次；不传则使用 config.yaml，默认 Tavily 建议显式配置）",
+    ),
     output: Optional[Path] = typer.Option(
         None,
         "-o",
@@ -759,7 +773,7 @@ def run(
     mode: Optional[str] = typer.Option(
         None,
         "--mode",
-        help="调研档位：fast（跳过 Deepen）| standard | deep（深搜+反向一轮）",
+        help="输出版本：brief（简略）| full（强制全流程）；兼容 fast/standard/deep",
     ),
     resume: bool = typer.Option(True, "--resume/--no-resume", help="跳过已完成阶段"),
     dry_run: bool = typer.Option(False, "--dry-run", help="仅打印将执行的步骤"),
@@ -957,17 +971,23 @@ def run(
 
     configured = load_config(_state["config_path"])
     effective_mode = mode or configured.mode
-    if effective_mode not in {"fast", "standard", "deep"}:
-        _fail(f"未知调研模式: {effective_mode}（可选 fast/standard/deep）")
+    if effective_mode not in {"brief", "full", "fast", "standard", "deep"}:
+        _fail(
+            f"未知调研模式: {effective_mode}（推荐 brief/full；兼容 fast/standard/deep）"
+        )
     all_stages = ["collect", "deepen", "clean", "extract", "organize", "report"]
     if mode is None:
         mode_stages = list(configured.stages)
+    elif effective_mode == "brief":
+        mode_stages = ["collect", "clean", "report"]
     else:
         mode_stages = [
             stage
             for stage in all_stages
             if not (effective_mode == "fast" and stage == "deepen")
         ]
+    if effective_mode == "full" and skip:
+        _fail("--mode full 强制执行六阶段，不能同时使用 --skip")
     stages = [s for s in mode_stages if s not in skip]
 
     if dry_run:
@@ -1046,6 +1066,37 @@ def run(
 # --------------------------------------------------------------------------- #
 # status
 # --------------------------------------------------------------------------- #
+@app.command(name="wiki-stage")
+def wiki_stage(
+    source: Path = typer.Argument(..., help="单个 research-output 主题目录"),
+    package_output: Path = typer.Option(
+        Path("./research-packages"),
+        "--package-output",
+        help="Vault 外、受 draft importer 允许的内容寻址研究包目录（默认 ./research-packages）",
+    ),
+    build: bool = typer.Option(False, "--build", help="原子生成不可变包；默认仅预览"),
+) -> None:
+    """生成仅供未验证 Wiki 草稿入口使用的不可变研究包。"""
+    try:
+        if not build:
+            typer.echo(json.dumps(plan_stage_package(source, package_output), ensure_ascii=False))
+            return
+        result = build_stage_package(source, package_output)
+    except PackageStageError as exc:
+        _fail(str(exc))
+        return
+    typer.echo(json.dumps({
+        "status": "success",
+        "packageId": result.package_id,
+        "packageHash": result.package_hash,
+        "packagePath": str(result.package_path),
+        "verification": "unverified",
+        "target": "isolated_research_draft",
+        "promotion": "forbidden",
+        "alreadyExists": result.already_exists,
+    }, ensure_ascii=False))
+
+
 @app.command(name="publish-wiki")
 def publish_wiki(
     slug: str = typer.Argument(..., help="research-output 下的主题目录名"),

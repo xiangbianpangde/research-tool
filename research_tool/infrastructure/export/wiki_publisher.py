@@ -115,13 +115,21 @@ def publish(
     confirm: bool = False,
     dry_run: bool = False,
 ) -> PublishReport:
-    """发布一个 research slug，并严格限制写入 staging vault 白名单。"""
+    """Legacy preview helper; active Obsidian Vault writes are forbidden.
+
+    P1 imports must use ``wiki-stage`` and the governed atomic draft broker.
+    """
     slug = _safe_slug(slug)
     source_dir = (research_output / slug).resolve()
     if not source_dir.is_dir():
         raise ValueError(f"未找到 research 产物：{source_dir}")
     form = probe_form(source_dir)
     vault = vault.resolve()
+    if not dry_run and (vault / ".obsidian").is_dir():
+        raise ValueError(
+            "publish-wiki cannot write an active Vault; "
+            "use wiki-stage and the governed draft importer"
+        )
     target = vault / "05-wiki/research" / slug
     raw_target = vault / "raw" / slug
     status = "verified" if confirm else "draft"
