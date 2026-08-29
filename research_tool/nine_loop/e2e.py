@@ -238,7 +238,7 @@ def _load_input(path: pathlib.Path) -> dict[str, Any]:
 
 def main(argv: list[str] | None = None) -> int:
     """CLI: run the five-stage chain; --resume replays uncommitted stages."""
-    from ..adapters.rt_identity_adapter import AdapterClient  # noqa: E402
+    from .rt_identity_adapter import AdapterClient  # noqa: E402
 
     ap = argparse.ArgumentParser(prog="e2e.py")
     ap.add_argument("--input", required=True,
