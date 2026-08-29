@@ -18,8 +18,6 @@ from ...domain.errors import LLMAuthenticationError, StageError
 from ...domain.models import Entity, ExtractorConfig, ExtractResult, Relation, Triple
 from .base import ensure_dir, write_json
 
-_CONCURRENCY = 1
-
 _SYSTEM = (
     "你是信息抽取专家。从给定文本中精确抽取知识，只依据文本本身，不臆造。" "所有输出为合法 JSON。"
 )
@@ -103,7 +101,7 @@ class Extractor:
     def __init__(self, config: ExtractorConfig | None = None) -> None:
         self.config = config or ExtractorConfig()
 
-    async def run(
+    async def run(  # noqa: PLR0915 - 长函数：抽取管线，历史债
         self, input_dir: Path, llm: LLMClient, work_dir: Path | None = None
     ) -> ExtractResult:
         input_dir = Path(input_dir)
@@ -113,7 +111,7 @@ class Extractor:
             out_dir = input_dir.parent / "extracted"
         ensure_dir(out_dir)
 
-        sem = asyncio.Semaphore(_CONCURRENCY)
+        sem = asyncio.Semaphore(self.config.concurrency)
         jobs: list[tuple[str, list[str], str]] = []  # (source_file, file_lines, chunk)
         for src in sorted(input_dir.glob("*.md")):
             full = _strip_meta(src.read_text(encoding="utf-8"))

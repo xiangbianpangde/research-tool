@@ -598,6 +598,8 @@ class Collector:
             mineru_cmd=self.config.mineru_cmd,
             pdf_dir=raw_dir / "_pdfs",
             proxy=self.config.proxy,
+            originals_dir=(raw_dir / "_originals") if self.config.save_originals else None,
+            arxiv_fulltext=self.config.arxiv_fulltext,
         )
         sem = asyncio.Semaphore(self.config.concurrency)
 

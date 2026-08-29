@@ -11,10 +11,13 @@ P6：``fetch`` 外层 ``asyncio.wait_for`` 硬墙，避免 Crawl4AI/httpx 单页
 from __future__ import annotations
 
 import asyncio
+import hashlib
+import json
 import re
 from dataclasses import dataclass, field
 from html import unescape
 from pathlib import Path
+from typing import Literal
 
 import httpx
 
@@ -135,6 +138,40 @@ def _github_meta_markdown(owner: str, repo: str, url: str, info: object) -> str:
     return "\n".join([*lines, f"- html_url: {url}", ""])
 
 
+# --------------------------------------------------------------------------- #
+# arXiv：abs/pdf 页 → 论文全文（HTML5 优先，PDF 字节兜底）
+# --------------------------------------------------------------------------- #
+# arXiv 的 PDF 链接形如 https://arxiv.org/pdf/2607.02703（无 .pdf 后缀），
+# 搜索后端返回的 abs 页也只有摘要。要拿到论文全文：
+#   1) 优先抓 arXiv HTML5 版（https://arxiv.org/html/<id>，2023-12 后论文都有，纯 HTTP，秒级）
+#   2) 无 HTML 版 → 下载 PDF 字节（存 raw/_pdfs + raw/_originals 供离线 MinerU 解析）
+#   3) 回退 abs 摘要页（与旧行为一致）
+_ARXIV_PAPER_RE = re.compile(
+    r"^https?://(?:www\.)?arxiv\.org/(abs|pdf)/([0-9]{4}\.[0-9]{4,5})(?:v[0-9]+)?(?:\.pdf)?/?([?#].*)?$",
+    re.IGNORECASE,
+)
+
+
+def _arxiv_paper_url(url: str) -> tuple[Literal["abs", "pdf"], str] | None:
+    """arxiv abs/pdf 链接 → (kind, paper_id)；非 arxiv 论文页返回 None。"""
+    m = _ARXIV_PAPER_RE.match((url or "").strip())
+    if not m:
+        return None
+    return m.group(1).lower(), m.group(2)  # type: ignore[return-value]
+
+
+def _arxiv_html_url(paper_id: str) -> str:
+    return f"https://arxiv.org/html/{paper_id}"
+
+
+def _arxiv_pdf_url(paper_id: str) -> str:
+    return f"https://arxiv.org/pdf/{paper_id}"
+
+
+def _arxiv_abs_url(paper_id: str) -> str:
+    return f"https://arxiv.org/abs/{paper_id}"
+
+
 class Fetcher:
     def __init__(
         self,
@@ -145,6 +182,9 @@ class Fetcher:
         mineru_cmd: str | None = None,
         pdf_dir: "Path | None" = None,
         proxy: str | None = None,
+        originals_dir: "Path | None" = None,
+        arxiv_fulltext: bool = True,
+        save_originals: bool = True,
         _transport: httpx.AsyncBaseTransport | None = None,
         hard_timeout_grace_sec: int = HARD_TIMEOUT_GRACE_SEC,
     ) -> None:
@@ -153,6 +193,10 @@ class Fetcher:
         self.parse_pdf = parse_pdf
         self.mineru_cmd = mineru_cmd
         self.pdf_dir = pdf_dir
+        # 原始资料目录：raw/_originals（HTML/PDF 字节 + index.jsonl）
+        self.originals_dir = Path(originals_dir) if originals_dir else None
+        self.arxiv_fulltext = arxiv_fulltext
+        self.save_originals = save_originals
         # 仅 config/Collector 注入的代理；不读 dotenv 死代理（P1/P12/P13 同族）
         self.proxy = proxy
         self._transport = _transport  # test seam; None in production
@@ -187,6 +231,10 @@ class Fetcher:
     async def _fetch_dispatch(self, url: str) -> FetchResult:
         if url.lower().split("?")[0].endswith(".pdf"):
             return await self._fetch_pdf(url)
+        # arXiv 论文（abs/pdf 页）：优先全文（HTML5/PDF），避免只留摘要
+        arxiv = _arxiv_paper_url(url)
+        if arxiv is not None:
+            return await self._fetch_arxiv(arxiv[0], arxiv[1], source_url=url)
         # GitHub 仓页：优先 raw README（干净 Markdown），失败再 HTML/Crawl4AI
         gh = await self._fetch_github_readme(url)
         if gh is not None and gh.ok and gh.markdown.strip():
@@ -194,6 +242,150 @@ class Fetcher:
         if self.use_crawl4ai:
             return await self._fetch_crawl4ai(url)
         return await self._fetch_httpx(url)
+
+    async def _fetch_arxiv(
+        self,
+        kind: Literal["abs", "pdf"],
+        paper_id: str,
+        *,
+        source_url: str,
+    ) -> FetchResult:
+        """arXiv 论文抓取：HTML5 全文 → PDF 字节 → 摘要页回退。
+
+        - HTML5 全文可用：返回全文 markdown（正文+摘要+元数据），并保存原始 HTML。
+        - 无 HTML5：先尽力把 PDF 字节存到 _pdfs/_originals（供离线解析），
+          再回退 abs 摘要页（与旧行为一致，不丢来源）。
+        - parse_pdf 且 MinerU 可用时，PDF 直接解析为全文。
+        """
+        if self.arxiv_fulltext:
+            html_md = await self._arxiv_html_fulltext(paper_id)
+            if html_md is not None:
+                md, raw_html = html_md
+                if self.save_originals and self.originals_dir is not None and raw_html:
+                    self._write_original(
+                        source_url, raw_html.encode("utf-8"), "html", "text/html"
+                    )
+                return FetchResult(
+                    source_url,
+                    md,
+                    ok=bool(md.strip()),
+                    error="" if md.strip() else "arxiv html 全文为空",
+                )
+
+        pdf_url = _arxiv_pdf_url(paper_id)
+        if self.parse_pdf:
+            parsed = await self._fetch_pdf(pdf_url)
+            if parsed.ok and parsed.markdown.strip():
+                return parsed
+        else:
+            await self._save_pdf_bytes(pdf_url, source_url)
+
+        # 回退 abs 摘要页（pdf 页本身无正文，crawl4ai 渲染 PDF 会失败）
+        return await self._fetch_page(_arxiv_abs_url(paper_id))
+
+    async def _arxiv_html_fulltext(
+        self, paper_id: str
+    ) -> tuple[str, str] | None:
+        """抓 arXiv HTML5 全文；返回 (markdown, raw_html)，失败返回 None。
+
+        新版 arXiv HTML 含完整正文（含公式的文本近似），是拿论文全文的最快路径。
+        """
+        for candidate in (_arxiv_html_url(paper_id), _arxiv_html_url(f"{paper_id}v1")):
+            try:
+                async with httpx.AsyncClient(**self._httpx_client_kwargs()) as client:
+                    resp = await client.get(candidate)
+                    if resp.status_code != 200:
+                        continue
+                    raw_html = resp.text
+            except Exception as e:  # noqa: BLE001
+                logger.debug("arxiv html 抓取失败 %s: %s", hash_url(candidate), e)
+                continue
+            if len(raw_html) < 2000:
+                continue  # 404 页/重定向壳
+            md = _html_to_markdown(raw_html)
+            if len(md) < 500:
+                continue
+            return md, raw_html
+        return None
+
+    async def _fetch_page(self, url: str) -> FetchResult:
+        """普通页面抓取（crawl4ai 优先，httpx 兜底）——复用 dispatch 的剩余路径。"""
+        if self.use_crawl4ai:
+            return await self._fetch_crawl4ai(url)
+        return await self._fetch_httpx(url)
+
+    async def _save_pdf_bytes(self, pdf_url: str, source_url: str) -> None:
+        """尽力下载 PDF 原始字节存盘（不解析；解析交给 _fetch_pdf）。"""
+        try:
+            async with httpx.AsyncClient(**self._httpx_client_kwargs()) as client:
+                resp = await client.get(pdf_url)
+                resp.raise_for_status()
+                data = resp.content
+            if data[:5].startswith(b"%PDF"):
+                self._write_original(source_url, data, "pdf", "application/pdf")
+                if self.pdf_dir:
+                    root = Path(self.pdf_dir)
+                    root.mkdir(parents=True, exist_ok=True)
+                    digest = hashlib.sha256(source_url.encode()).hexdigest()[:16]
+                    (root / f"{digest}.pdf").write_bytes(data)
+        except Exception as e:  # noqa: BLE001 - 预下载失败不中断
+            logger.debug("arxiv pdf 预下载失败 %s: %s", hash_url(pdf_url), e)
+
+    # -- 原始资料落盘（raw/_originals/） ---------------------------------- #
+
+    def _write_original(
+        self, url: str, data: bytes, ext: str, content_type: str
+    ) -> Path | None:
+        """把原始字节（HTML/PDF）写 raw/_originals/<url-hash>.<ext> 并记 index。
+
+        失败仅记日志，不中断抓取。URL 哈希命名保证幂等（同一 URL 不重复写）。
+        同步实现：文件级短操作，事件循环内天然原子，threading.Lock 兜底并发调用。
+        """
+        if not self.save_originals or not self.originals_dir or not data:
+            return None
+        try:
+            root = Path(self.originals_dir)
+            root.mkdir(parents=True, exist_ok=True)
+            digest = hashlib.sha256(url.encode("utf-8")).hexdigest()[:16]
+            path = root / f"{digest}.{ext}"
+            if not path.exists():
+                path.write_bytes(data)
+            self._append_original_index(url, path.name, len(data), content_type)
+            return path
+        except Exception as e:  # noqa: BLE001
+            logger.debug("原始资料保存失败 %s: %s", hash_url(url), e)
+            return None
+
+    def _append_original_index(
+        self, url: str, fname: str, size: int, content_type: str
+    ) -> None:
+        """index.jsonl 追加一条 {url → 原始文件}；按 URL 去重（同 URL 保留首条）。"""
+        if not self.originals_dir:
+            return
+        root = Path(self.originals_dir)
+        index = root / "index.jsonl"
+        record = json.dumps(
+            {
+                "url": url,
+                "file": fname,
+                "bytes": size,
+                "content_type": content_type or "",
+            },
+            ensure_ascii=False,
+        )
+        try:
+            if index.exists():
+                for line in index.read_text(encoding="utf-8").splitlines():
+                    if line.strip():
+                        try:
+                            if json.loads(line).get("url") == url:
+                                return  # 已记录
+                        except json.JSONDecodeError:
+                            continue
+            with index.open("a", encoding="utf-8") as fh:
+                fh.write(record + "\n")
+        except OSError as e:
+            logger.debug("原始资料 index 写入失败: %s", e)
 
     async def _fetch_github_readme(self, url: str) -> FetchResult | None:
         """github.com/owner/repo → raw.githubusercontent.com README + API 元数据。
@@ -289,6 +481,15 @@ class Fetcher:
             return FetchResult(url, "", ok=False, error=f"PDF 下载失败: {e}")
         if not data[:5].startswith(b"%PDF"):
             return await self._fetch_httpx(url)  # 不是真 PDF，按 HTML 处理
+        # 原始 PDF 字节落盘（raw/_pdfs + raw/_originals），供离线重解析/溯源
+        if self.pdf_dir:
+            try:
+                root = Path(self.pdf_dir)
+                root.mkdir(parents=True, exist_ok=True)
+                (root / f"{hashlib.sha256(url.encode()).hexdigest()[:16]}.pdf").write_bytes(data)
+            except OSError as e:
+                logger.debug("PDF 落盘失败 %s: %s", hash_url(url), e)
+        self._write_original(url, data, "pdf", "application/pdf")
         return await self._pdf_bytes_to_md(url, data)
 
     async def _pdf_bytes_to_md(self, url: str, data: bytes) -> FetchResult:
@@ -340,6 +541,15 @@ class Fetcher:
                 )
             if not result.success:
                 return FetchResult(url, "", ok=False, error=result.error_message or "crawl 失败")
+            # 原始 HTML 落盘（raw/_originals），供后续重新解析
+            raw_html = getattr(result, "html", None)
+            if raw_html:
+                self._write_original(
+                    url,
+                    raw_html.encode("utf-8") if isinstance(raw_html, str) else raw_html,
+                    "html",
+                    "text/html",
+                )
             md = result.markdown
             md_text = getattr(md, "raw_markdown", None) or str(md or "")
             links = []
@@ -358,9 +568,12 @@ class Fetcher:
                 resp = await client.get(url)
                 resp.raise_for_status()
                 ctype = resp.headers.get("content-type", "").lower()
-                if "application/pdf" in ctype or resp.content[:5].startswith(b"%PDF"):
-                    return await self._pdf_bytes_to_md(url, resp.content)
+                raw = resp.content
+                if "application/pdf" in ctype or raw[:5].startswith(b"%PDF"):
+                    return await self._pdf_bytes_to_md(url, raw)
                 html = resp.text
+            # 原始 HTML 落盘（raw/_originals），供后续重新解析
+            self._write_original(url, raw, "html", ctype or "text/html")
             md = _html_to_markdown(html)
             links = list(dict.fromkeys(_HREF.findall(html)))[:50]
             return FetchResult(url, md, links=links)
