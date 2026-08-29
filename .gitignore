@@ -62,3 +62,6 @@ _xtasks/
 # root-level .py runner scripts (personal scratch)
 /run_*.py
 *.flag
+
+# pi agent runtime artifacts (never in repo)
+.pi-subagents/
