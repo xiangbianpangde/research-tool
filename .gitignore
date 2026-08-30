@@ -65,3 +65,6 @@ _xtasks/
 
 # pi agent runtime artifacts (never in repo)
 .pi-subagents/
+
+# pi agent runtime artifacts
+collect/
