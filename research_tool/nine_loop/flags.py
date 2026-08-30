@@ -183,3 +183,38 @@ def resolve(cfg: dict[str, Any]) -> dict[str, Any]:
 def canonical_bytes(obj: Any) -> bytes:
     return json.dumps(obj, sort_keys=True, ensure_ascii=False,
                       separators=(",", ":")).encode("utf-8")
+
+
+def verify_flags(package_root: "pathlib.Path | None" = None) -> dict[str, Any]:
+    """Single-source assertion: nine_loop/flags.py is the ONLY runtime flags
+    source. Scans the product package for competing FLAG_DEFAULTS definitions
+    (duplicate modules). Loud failure on multi-source detection.
+
+    Returns {"sources": ["research_tool.nine_loop.flags"], "count": 1}.
+    Raises FlagsFault(E_VERSION) if >1 source found.
+    """
+    import importlib
+    import pathlib as _pl
+
+    root = _pl.Path(__file__).resolve().parents[1] if package_root is None         else _pl.Path(package_root)
+    sources = []
+    for p in sorted(root.rglob("*.py")):
+        rel = p.relative_to(root.parent)
+        # tests are not runtime sources; skip them (their FLAG_DEFAULTS mentions
+        # are test fixtures, not loadable flag definitions)
+        if (p.parts[-2] if len(p.parts) >= 2 else "") == "tests":
+            continue
+        if "__pycache__" in p.parts or p.name == "__init__.py":
+            continue
+        try:
+            text = p.read_text(encoding="utf-8")
+        except Exception:
+            continue
+        if "FLAG_DEFAULTS: dict" in text or "FLAG_DEFAULTS =" in text:
+            mod = ".".join(rel.with_suffix("").parts)
+            sources.append(mod)
+    if len(sources) != 1 or sources[0] != "research_tool.nine_loop.flags":
+        raise FlagsFault(E_VERSION,
+                         f"flags multi-source detected: {sources}; "
+                         "single source must be research_tool.nine_loop.flags")
+    return {"sources": sources, "count": len(sources)}
