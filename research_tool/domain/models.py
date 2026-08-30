@@ -136,6 +136,12 @@ class CollectorConfig(BaseModel):
     # 抓到 PDF 时用 MinerU 解析为正文（否则跳过，绝不把二进制塞进 raw）
     parse_pdf: bool = True
     mineru_cmd: str | None = None  # mineru 可执行路径，None=走 PATH
+    # 保存原始资料：把抓到的原始 HTML/PDF 字节落盘到 raw/_originals/（含 index.jsonl），
+    # 供后续重新解析/溯源。关闭则只保留 raw/*.md 正文。
+    save_originals: bool = True
+    # arXiv 论文抓全文：abs/pdf 页优先走 arXiv HTML5 全文；无 HTML 版本时回退摘要页
+    # （并把 PDF 字节存到 _pdfs/_originals 供离线解析）。关闭则保持仅摘要页。
+    arxiv_fulltext: bool = True
     # 垃圾过滤：抓取正文短于此字符数的结果直接丢弃（登录页/导航页等）
     min_doc_chars: int = Field(default=200, ge=0)
     # 轻量搜索结果相关性过滤：在抓取前按 topic/query 与 title/snippet 的词重叠剔除
@@ -238,6 +244,9 @@ class ExtractorConfig(BaseModel):
     relation_types: list[str] | None = None
     chunk_size: int = Field(default=4000, gt=0)
     overlap: int = Field(default=200, ge=0)
+    # LLM 并发块数：并行送块抽取（MiniMax/OpenAI 兼容端点实测 4 并发无限流）；
+    # 并发>1 时单块失败不回滚整阶段（受 fail_on_chunk_error 控制）。
+    concurrency: int = Field(default=4, ge=1)
     # full 模式设为 true：任一块失败即让阶段失败并由 pipeline 重试，禁止把全空
     # 抽取误写成“成功”。旧档位保持 false 以兼容历史容错语义。
     fail_on_chunk_error: bool = False
@@ -310,6 +319,43 @@ class TalkConfig(BaseModel):
     search_results_per_paper: int = Field(default=5, ge=1, le=15)
 
 
+class NineLoopConfig(BaseModel):
+    """九段管线 feature flag 配置。默认 ON（P7-T9 默认切换，所有者终审批准；
+
+    RT-RF-P7-T9-DEFAULT-SWITCH-01）。kill-switch 角色反转：默认=九段路径，
+    enabled=False = legacy 六段回退（逐字节 legacy，P6 演练已证明）。
+    回滚点：git tag pre-p7-default-switch。
+    """
+
+    enabled: bool = True  # 默认切换后：九段为默认路径；False = legacy 回退
+    gate_enabled: bool = False
+    deepen_as_strategy: bool = False
+    adapter_enabled: bool = False
+    shadow_enabled: bool = False
+    shadow_sample_rate: float = 0.0
+    stages: dict[str, bool] = Field(
+        default_factory=lambda: {
+            s: False for s in (
+                "collect", "clean", "extract", "network",
+                "inspect", "delta", "merge", "report",
+            )
+        }
+    )
+
+    @model_validator(mode="after")
+    def _fill_missing_stage_flags(self) -> "NineLoopConfig":
+        """显式 yaml 只声明部分 stage 时，其余补齐默认关（全集恒 8 键）。"""
+        full = {
+            s: False for s in (
+                "collect", "clean", "extract", "network",
+                "inspect", "delta", "merge", "report",
+            )
+        }
+        full.update(self.stages)
+        self.stages = full
+        return self
+
+
 class PipelineConfig(BaseModel):
     """管道总配置。依据 01 §7.3 + 03 §2。"""
 
@@ -329,6 +375,7 @@ class PipelineConfig(BaseModel):
     reporter: ReporterConfig = Field(default_factory=ReporterConfig)
     talk: TalkConfig = Field(default_factory=TalkConfig)
     llm: LLMConfig = Field(default_factory=LLMConfig)
+    nine_loop: NineLoopConfig = Field(default_factory=NineLoopConfig)
     resume: bool = True  # 幂等跳过已完成 Stage（05 §5）
     # LLM 阶段级恢复：SDK 层默认不重试，统一由 pipeline 做有界重试，避免 SDK
     # 默认 600s 超时叠加隐式重试。鉴权错误永不重试。
