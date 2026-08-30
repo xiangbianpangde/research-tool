@@ -35,6 +35,7 @@
   - [3. Python 异步 SDK](#3-python-异步-sdk)
 - [🔍 深度特性与方法论](#-深度特性与方法论)
   - [15+ 搜索后端与学术优先机制](#15-搜索后端与学术优先机制)
+  - [② Clean 清洗工程与 NearDup 近似去重](#-clean-清洗工程与-neardup-近似去重)
   - [两阶段锚定 / 去锚（突破检索偏差）](#两阶段锚定--去锚突破检索偏差)
   - [Deepen 反偏差深挖与时间线回溯](#deepen-反偏差深挖与时间线回溯)
   - [多模态 PDF 综述（MinerU / OCR / 自动翻译）](#多模态-pdf-综述mineru--ocr--自动翻译)
@@ -63,21 +64,20 @@
 
 ### v1.0.0 九段闭环管线（默认路径）
 
-自 `v1.0.0` 起，九段管线（Nine-Loop）成为默认执行路径（经 RT-RF 渐进重构程序全链路演练验证，与顶级 Deep Research 系统配对评测交付完成率达 100% vs 80.5%）：
+自 `v1.0.0` 起，**九段闭环管线（Nine-Loop）成为默认执行路径**（渐进重构程序 RT-RF-2026 交付，经类生产回滚与全链路 Canary 验证，与顶级 Deep Research 系统配对评测交付完成率达 100% vs 80.5%）。
 
-```mermaid
-flowchart LR
-    A["① Collect<br/>多源/官方检索"] --> B["② Clean<br/>MinHash+相关过滤"]
-    B --> C["③ Extract<br/>NER/三元组/关系"]
-    C --> D["④ Knowledge<br/>结构化知识构建"]
-    D --> E["⑤ Inspect<br/>缺口/矛盾检视"]
-    E --> F["⑥ Targeted<br/>定向补充检索"]
-    F --> G["⑦ Merge<br/>增量消歧合并"]
-    G --> H["⑧ Gate<br/>证据链质检闸门"]
-    H --> I["⑨ Report<br/>多风格报告合成"]
-    
-    E -. 发现缺口/矛盾 .-> F
-```
+![research-tool 九段闭环](collect/architecture/system/nine-stage-loop.png)
+
+九段闭环执行流如下：
+1. **① 收集 (Collect)**：多源学术与全网检索、arXiv HTML5 全文解析、PDF/视频摄取与原始资产（`raw/_originals/`）归档。
+2. **② 清洗 (Clean)**：`raw/` 保持只读；去除 HTML/广告噪声并定位正文；MinHash（char-5gram Jaccard 0.85）近似去重；按文件记录清洗指标（`clean/quality.json`）；支持增量 delta 清洗。
+3. **③ 事实抽取 (Extract)**：确定性规则与 LLM 并发抽取实体、关系与三元组，Evidence Span 边界强锚定。
+4. **④ 知识网络 (Knowledge)**：实体/关系拓扑构建、Same-Bytes 等价边计算与 Family 节点聚合。
+5. **⑤ 缺口/矛盾 (Inspect)**：深度反思检视，规则引擎扫描证据空白、时间线断层与事实冲突。
+6. **⑥ 针对性补搜 (Targeted)**：针对检视发现的缺口与矛盾生成精准补搜请求（零外网安全断言，仅处理新增定向资料）。
+7. **⑦ 增量合并 (Merge)**：CAS (Write-if-match) 幂等合并、带出处新事实融合与同名消歧。
+8. **⑧ 质量与预算门 (QGate)**：确定性决策树仲裁（质量达标或预算耗尽：否 → 回 ⑤ 循环补搜，是 → 进入 ⑨）。
+9. **⑨ 核验式报告 (Report)**：严格引用断言（Citation Coverage 1.0），未引用事实自动丢弃，多风格专业组装。
 
 | 阶段 | 核心职责 | 产出物 |
 |---|---|---|
@@ -412,6 +412,17 @@ asyncio.run(main())
 | **浏览器兜底**| `opencli` | OpenCLI + Chrome | 需本地扩展 | 遇反爬/验证码时复用本地 Chrome 会话进行交互式采集 |
 
 > 💡 **学术调研建议**：针对新论文，强烈推荐使用 `--official-url` 传入实验室项目页或官方 PDF。系统将强制优先验证并抓取官方页面，确认无误后再通过 OpenAlex 和 arXiv 进行网状引用扩展。
+
+### ② Clean 清洗工程与 NearDup 近似去重
+
+依据 `clean/architecture/` 规范，清洗阶段在 `raw/` 摄入后立即执行，严格将传输级 raw 转为高信噪比的可抽取正文：
+
+- **输入/输出公开合同**：`CleanRequest(raw_dir, delta_manifest?, policy)` → `CleanResult(clean_dir, kept[], dropped[], quality.json)`。
+- **`raw/` 保持只读存证**：清洗阶段只读 `raw/` 资料，绝对不修改或删除任何原始抓取文件。
+- **TextNormalizer 降噪流水线**：去 HTML 标签、脚本、导航与广告代码，智能识别正文起始点并截尾，在 `quality.json` 中完整记录每步 `dropped_chars`。
+- **NearDup 近似去重**：基于 `char-5gram Jaccard` 相似度（默认阈值 `0.85`）构建指纹索引；相似文档组内保留最长有效正文，其余标记 `dedup_of` 剔除。
+- **增量 Delta 清洗支持**：在补搜或增量运行（`delta_manifest`）时，仅对新增 raw 执行清洗，保留历史 clean 编号与指纹索引，实现增量幂等合并。
+- **LLM 语义相关性评分（可选）**：配置 `cleaner.relevance_filter: true` 时，批量对文档进行 0-1 语义相关性打分，低分文档移出 `clean/` 并记录在 `quality.json`。
 
 ### 两阶段锚定 / 去锚（突破检索偏差）
 

@@ -67,4 +67,5 @@ _xtasks/
 .pi-subagents/
 
 # pi agent runtime artifacts
-collect/
+collect/runtime/
+!collect/architecture/
