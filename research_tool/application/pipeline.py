@@ -47,6 +47,44 @@ class ResearchPipeline:
         self.config = config
         self._llm: LLMClient | None = None
         self._result: PipelineResult | None = None
+        # B8 产品集成装配点：kill-switch=false → 逐字节 legacy（忽略一切子 flag）。
+        # 仅在 nine_loop.* 显式开启时解析 flag 快照；默认全关时为空 dict，
+        # 任何阶段都不读取/不派发 nine 分支（零用户可见变更）。
+        self._nine_loop_flags: dict = {}
+        self._nine_loop_active = False
+        if config.nine_loop.enabled:
+            from ..nine_loop import flags as _flags_mod
+            from ..nine_loop.flags import load, resolve, verify_flags
+            _vs = verify_flags()
+
+            cfg = {
+                "nine_loop.enabled": config.nine_loop.enabled,
+                "nine_loop.gate.enabled": config.nine_loop.gate_enabled,
+                "nine_loop.deepen_as_strategy": config.nine_loop.deepen_as_strategy,
+                "rt_identity.adapter.enabled": config.nine_loop.adapter_enabled,
+                "nine_loop.shadow.enabled": config.nine_loop.shadow_enabled,
+                "nine_loop.shadow.sample_rate": config.nine_loop.shadow_sample_rate,
+            }
+            for _s, _v in config.nine_loop.stages.items():
+                cfg[f"nine_loop.stages.{_s}"] = _v
+            resolved = resolve(load(cfg))
+            if resolved.get("nine_loop_enabled"):
+                self._nine_loop_active = True
+                self._nine_loop_flags = resolved
+
+    def nine_loop_flags(self) -> dict:
+        """当前装配的九段 flag 快照（默认全关时返回空 dict）。只读。"""
+        return dict(self._nine_loop_flags)
+
+    def shadow_root(self) -> Path:
+        """shadow sidecar 根（产品 data dir 旁 shadow/<run_id>/）。
+
+        仅 shadow_enabled 时有效；kill-switch=false 时本方法返回 work_dir 旁
+        的 shadow/ 路径但不创建任何目录，调用方必须先在 flags 里确认
+        shadow.enabled 再写。shadow 产物永不写回 legacy 输出根。
+        """
+        return self.config.work_dir.parent / "shadow" / self.config.work_dir.name
+
 
     def _get_llm(self) -> LLMClient:
         if self._llm is None:
