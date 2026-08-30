@@ -2,7 +2,23 @@
 
 一个 **Python 核心引擎 + 多接口层** 的调研工具：给定主题 → 自动产出知识树 / 调研报告。
 
-实现依据 `../架构设计/` 下 8 份设计文档。六阶段管道，Stage 之间仅通过文件系统通信，可中断、可恢复、可独立调试。
+## 🆕 v1.0.0 — 九段管线成为默认路径
+
+自 `v1.0.0-nine-loop-default` 起，**九段管线（nine-loop）成为默认执行路径**（渐进重构程序 RT-RF-2026 的交付，全程独立审核可审计）：
+
+```
+①collect → ②clean → ③extract → ④knowledge → ⑤inspect → ⑥targeted → ⑦merge → ⑧gate → ⑨report
+```
+
+- **确定性核心（Rust）**：来源身份（canonical URL / stable ID / content hash）由 `rt-identity` 子进程承载（pinned SHA），快 10.8×、省 8.3× 内存
+- **模型链（R4.1）**：paratera `DeepSeek-V4-Flash-0731`（primary）→ `DeepSeek-V4-Flash` → `MiniMax-M3`；key 仅环境变量（`PARATERA_API_KEY`）
+- **kill-switch 回退**：配置 `nine_loop.enabled: false` 即回退 legacy 六段（逐字节等同，演练验证）；回滚点 tag `pre-p7-default-switch`
+- **质量对比**：与 Onyx stock Deep Research 配对确认 41 对任务统计持平（NOT_SURPASSED，CI 含 0 双向），交付完成率 100% vs 80.5%
+- 详见 `docs/reports/`（P7/P8 收束报告）与 nine_loop/ 包内九段实现
+
+---
+
+实现依据 `../架构设计/` 下 8 份设计文档。legacy 六阶段管道（kill-switch 回退路径），Stage 之间仅通过文件系统通信，可中断、可恢复、可独立调试。
 
 ```
 topic ─→ Collect ─→ Deepen ─→ Clean ─→ Extract ─→ Organize ─→ Report ─→ report.md
