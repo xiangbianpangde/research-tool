@@ -294,6 +294,19 @@ def test_cli_output_path_protection(tmp_path: Path) -> None:
     assert res_ingest.exit_code != 0
     assert "安全拦截" in res_ingest.output
 
+    # Sol 第五轮反例：-o ./work 参数看似在白名单，但 stage 对 output.parent 计算后落于 /repo/clean、/repo/extracted、/repo/tree
+    res_clean_work = CliRunner().invoke(app, ["clean", str(docs_raw), "-o", "./work"])
+    assert res_clean_work.exit_code != 0
+    assert "安全拦截" in res_clean_work.output
+
+    res_extract_work = CliRunner().invoke(app, ["extract", str(docs_raw), "-o", "./work"])
+    assert res_extract_work.exit_code != 0
+    assert "安全拦截" in res_extract_work.output
+
+    res_org_work = CliRunner().invoke(app, ["organize", str(docs_raw), "-o", "./work"])
+    assert res_org_work.exit_code != 0
+    assert "安全拦截" in res_org_work.output
+
 
 def test_clean_marker_bound_to_relevance_config_rejects_stale_marker(tmp_path: Path) -> None:
     """Sol 终审 P0-C 反例闭环：先在 relevance_filter=False 下跑出 marker，

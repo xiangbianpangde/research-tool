@@ -410,7 +410,6 @@ def ingest_pdf(
     model: Optional[str] = typer.Option(None, "--model", help="翻译用 LLM 模型"),
 ) -> None:
     """用 MinerU 把本地 PDF 转为 raw/ Markdown（可选翻译），供后续阶段接力。"""
-    _assert_safe_output_dir(output)
     from ..infrastructure.ingest import PdfIngestor
 
     # 读 config.yaml 的 pdf_ingest 作默认，CLI 参数覆盖，确保 backend/cmd 生效。
@@ -428,6 +427,7 @@ def ingest_pdf(
         ocr_model_path=ocr_model_path or _base_pdf.ocr_model_path,
     )
     topic_dir = output / slugify(topic)
+    _assert_safe_output_dir(topic_dir)
 
     async def _go():
         llm = await _make_healthy_llm(model) if translate else None
@@ -474,7 +474,7 @@ def clean(
     min_length: int = typer.Option(200, "--min-length"),
 ) -> None:
     """阶段2：清洗去噪。"""
-    effective_dest = output if output else (input_dir.parent / "clean")
+    effective_dest = (output.parent / "clean") if output else (input_dir.parent / "clean")
     _assert_safe_output_dir(effective_dest)
     cfg = CleanerConfig(
         strip_html=not no_strip_html,
@@ -502,7 +502,7 @@ def extract(
     model: Optional[str] = typer.Option(None, "--model"),
 ) -> None:
     """阶段3：LLM 抽取实体/关系/三元组。"""
-    effective_dest = output if output else (input_dir.parent / "extracted")
+    effective_dest = (output.parent / "extracted") if output else (input_dir.parent / "extracted")
     _assert_safe_output_dir(effective_dest)
     cfg = ExtractorConfig(
         tasks=tasks,
@@ -540,7 +540,7 @@ def organize(
     model: Optional[str] = typer.Option(None, "--model"),
 ) -> None:
     """阶段4：构建知识树。"""
-    effective_dest = output if output else (extracted_dir.parent / "tree")
+    effective_dest = (output.parent / "tree") if output else (extracted_dir.parent / "tree")
     _assert_safe_output_dir(effective_dest)
     cfg = OrganizerConfig(max_nodes=max_nodes, min_nodes=min_nodes)
     work_dir = output.parent if output else None
@@ -1014,7 +1014,8 @@ def run(
         return
 
     configured = load_config(_state["config_path"])
-    _assert_safe_output_dir(output or configured.work_dir)
+    effective_work_dir = (output or configured.work_dir)
+    _assert_safe_output_dir(effective_work_dir / slugify(topic))
     effective_mode = mode or configured.mode
     if effective_mode not in {"brief", "full", "fast", "standard", "deep"}:
         _fail(
