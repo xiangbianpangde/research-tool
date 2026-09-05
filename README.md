@@ -7,7 +7,7 @@
 
 <p align="center">
   <img src="https://img.shields.io/badge/Python-3.11+-3776AB?logo=python&logoColor=white" alt="Python 3.11+">
-  <img src="https://img.shields.io/badge/Pipeline-v1.0.0%20Nine--Loop%20Default-blueviolet" alt="Nine-Loop Pipeline">
+  <img src="https://img.shields.io/badge/Pipeline-v1.0.0%20Decoupled%205--Stage-blueviolet" alt="Pipeline">
   <img src="https://img.shields.io/badge/Tests-850+%20Passed-brightgreen" alt="Tests">
   <img src="https://img.shields.io/badge/Rust%20Core-rt--identity-DEA584?logo=rust&logoColor=white" alt="Rust Core">
   <img src="https://img.shields.io/badge/License-MIT-green" alt="License">
@@ -19,7 +19,7 @@
 
 - [🌟 核心亮点](#-核心亮点)
 - [🏗️ 架构与管线流程](#️-架构与管线流程)
-  - [v1.0.0 九段闭环管线（默认路径）](#v100-九段闭环管线默认路径)
+  - [v1.0.0 文件系统解耦五阶段生产管线与九段闭环 Staging 架构](#v100-文件系统解耦五阶段生产管线cli-主管线与九段闭环-staging-架构)
   - [确定性 Rust 身份核心与模型降级链](#确定性-rust-身份核心与模型降级链)
   - [Legacy 六阶段管线（Kill-Switch 回退）](#legacy-六阶段管线kill-switch-回退)
 - [🚀 快速开始与部署](#-快速开始与部署)
@@ -49,7 +49,7 @@
 
 ## 🌟 核心亮点
 
-- 🔄 **九段闭环调研管线（Nine-Loop）**：从搜集、清洗、抽取、知识整合、检视、定向补搜、合并、质检闸门到报告合成，全流程自主闭环迭代。
+- 🔄 **文件系统解耦五阶段生产管线 + 九段闭环 Staging**：核心生产管线涵盖收集、MinHash清洗、事实抽取、知识拓扑组织与核验报告合成；扩展九段闭环模块处于 shadow 双跑评估。
 - 🦀 **确定性 Rust 身份核心（`rt-identity`）**：URL 规范化、稳定 Hash 与内容去重下沉至 Rust 子进程，性能提升 **10.8×**，内存消耗降低 **8.3×**。
 - 🌐 **15+ 多源学术与全网搜索**：原生集成 OpenAlex（2.5亿+学术文献）、Crossref、arXiv（HTML5 全文 + PDF 回退）、Semantic Scholar、PubMed、DuckDuckGo、Tavily、Google News、GitHub、Wikipedia、X/Twitter、Bilibili、YouTube 及 OpenCLI 浏览器兜底。
 - 🧠 **反偏差深挖（Deepen）与反向自愈**：通过实体拆分、画像注入（英文名去锚）、时间线回溯、同名消歧突破单一锚点偏差；支持按知识树稀疏度自动触发反向补充检索。
@@ -255,7 +255,7 @@ research config
 #### 一键全流程调研（`research run`）
 
 ```bash
-# 1. 基础调研（默认九段管线，使用 Tavily 搜索引擎）
+# 1. 基础全流程调研（默认解耦 5 阶段管线，使用 Tavily 搜索引擎）
 research run "具身智能多模态大模型进展" -s tavily
 
 # 2. 简报模式（brief：快速产出核心报告，减少 LLM 开销）
@@ -326,7 +326,7 @@ research wiki-stage ./research-output/diffusion_policy --build
 research ui --port 7861
 ```
 
-- 🌐 **Web 调研面板**：支持输入主题、配置搜索源、选择产物版本（`brief` / `full`）、实时查看九段执行状态与流式日志。
+- 🌐 **Web 调研面板**：支持输入主题、配置搜索源、选择产物版本（`brief` / `full`）、实时查看执行状态与流式日志。
 - 📄 **PDF 研读面板**：支持批量上传论文 PDF、选择 OCR 引擎与翻译选项、一键生成中文知识树与综述。
 - 📊 **产物管理**：在线浏览知识树节点（`00-主表.md`、`N*.md`）、阅读 Markdown 报告并打包下载。
 

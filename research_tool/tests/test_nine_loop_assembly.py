@@ -431,31 +431,41 @@ def test_tavily_key_rotation_atomic_reservation(monkeypatch) -> None:
 
 
 def test_tavily_concurrent_in_flight_reservation(monkeypatch) -> None:
-    """Sol 终审 P1-D 并发闭环：多并发线程访问 Tavily 时原子按 in-flight 计数分散分配，杜绝撞单 Key。"""
+    """Sol 终审 P1-D 并发闭环：多并发线程访问 Tavily 时，在途请求排他预占 key，
+    杜绝 threads > keys 时多个线程同时撞向同一个 key。"""
     import threading
+    import time
     from unittest.mock import MagicMock
     from research_tool.infrastructure.search.tavily import TavilyBackend
 
     monkeypatch.delenv("TAVILY_KEYS", raising=False)
     backend = TavilyBackend(api_key="key1,key2")
-    allocated_keys = []
-    barrier = threading.Barrier(2)
+    active_in_flight = {"key1": 0, "key2": 0}
+    max_simultaneous = {"key1": 0, "key2": 0}
+    lock = threading.Lock()
 
     def mock_search_with_key(key, query, max_results):
-        allocated_keys.append(key)
-        barrier.wait()  # 让两线程在 HTTP in-flight 阶段保持同步
+        with lock:
+            active_in_flight[key] += 1
+            max_simultaneous[key] = max(max_simultaneous[key], active_in_flight[key])
+        time.sleep(0.03)
+        with lock:
+            active_in_flight[key] -= 1
         hit = MagicMock()
         hit.url = "http://test.com"
         return [hit]
 
     backend._search_with_key = mock_search_with_key
 
-    t1 = threading.Thread(target=backend._search_sync, args=("q1", 5))
-    t2 = threading.Thread(target=backend._search_sync, args=("q2", 5))
-    t1.start()
-    t2.start()
-    t1.join()
-    t2.join()
+    threads = [
+        threading.Thread(target=backend._search_sync, args=(f"q{i}", 5))
+        for i in range(8)
+    ]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
 
-    # 两个并发线程必须分别预占 key1 和 key2，绝不能全部撞向同一个 key
-    assert sorted(allocated_keys) == ["key1", "key2"]
+    # 验证：8 线程并发访问 2 keys，每个 key 同时在途的请求数恒 <= 1（完全排他 reservation）
+    assert max_simultaneous["key1"] <= 1
+    assert max_simultaneous["key2"] <= 1

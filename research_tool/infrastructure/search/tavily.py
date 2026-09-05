@@ -42,8 +42,9 @@ class TavilyBackend(SearchBackend):
         self._keys = pool
         self._idx = 0
         self._lock = threading.Lock()
+        self._cond = threading.Condition(self._lock)
         self._exhausted_keys: set[str] = set()
-        self._inflight: dict[str, int] = {k: 0 for k in pool}
+        self._reserved_keys: set[str] = set()
 
     def _search_with_key(self, key: str, query: str, max_results: int) -> list[SearchHit]:
         from tavily import TavilyClient  # noqa: PLC0415
@@ -74,32 +75,38 @@ class TavilyBackend(SearchBackend):
 
         last_err: Exception | None = None
         while True:
-            with self._lock:
-                available = [k for k in self._keys if k not in self._exhausted_keys]
-                if not available:
-                    break
-                # 原子 in-flight 预占（P1-D 闭环）：优先分配在途并发最少的 key，高并发下分散负载
-                available.sort(key=lambda k: self._inflight.get(k, 0))
-                key = available[0]
-                self._inflight[key] = self._inflight.get(key, 0) + 1
+            with self._cond:
+                while True:
+                    available = [k for k in self._keys if k not in self._exhausted_keys]
+                    if not available:
+                        raise SearchError(
+                            f"Tavily 搜索失败: 所有 {len(self._keys)} 个 key 配额均已耗尽 ({last_err})"
+                        )
+                    unreserved = [k for k in available if k not in self._reserved_keys]
+                    if unreserved:
+                        key = unreserved[0]
+                        self._reserved_keys.add(key)
+                        break
+                    # 所有可用 key 均处于排他 in-flight 预占中，等待在途请求释放（P1-D 真正排他闭环）
+                    self._cond.wait(timeout=10.0)
 
             try:
                 return self._search_with_key(key, query, max_results)
             except UsageLimitExceededError as e:
                 last_err = e
-                with self._lock:
-                    # 发生 429/超额立即原子加入黑名单，后续所有并发线程绝不会再撞该 key
+                with self._cond:
                     self._exhausted_keys.add(key)
+                    self._reserved_keys.discard(key)
+                    self._cond.notify_all()
                 continue
             except SearchError:
                 raise
             except Exception as e:  # noqa: BLE001
                 raise SearchError(f"Tavily 搜索失败: {e}") from e
             finally:
-                with self._lock:
-                    self._inflight[key] = max(0, self._inflight.get(key, 1) - 1)
-
-        raise SearchError(f"Tavily 搜索失败: 所有 {len(self._keys)} 个 key 配额均已耗尽 ({last_err})")
+                with self._cond:
+                    self._reserved_keys.discard(key)
+                    self._cond.notify_all()
 
     async def search(
         self, query: str, max_results: int, language: str = "both", **_kw
