@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 from pathlib import Path
 from typing import Optional
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
@@ -161,20 +162,35 @@ def _fail(msg: str) -> typer.Exit:
     raise typer.Exit(code=1)
 
 
-def _assert_safe_output_dir(output: Path | None, project_root: Path | None = None) -> None:
-    """Zero Workspace Mutation 防护：禁止输出目录指向项目根、源码目录或 Git 内部。"""
-    if output is None:
+def _find_repo_root(start: Path) -> Path | None:
+    cur = start.resolve()
+    for p in [cur, *cur.parents]:
+        if (p / ".git").exists() or (p / "pyproject.toml").exists():
+            return p
+    return None
+
+
+def _assert_safe_output_dir(output: Path | None, configured_dir: Path | None = None) -> None:
+    """Zero Workspace Mutation 硬防护（P1-E 闭环）：
+    禁止将输出目录指定为项目根目录、或仓库内任何源码/文档/测试目录。
+    """
+    target = output or configured_dir
+    if target is None:
         return
-    root = (project_root or Path.cwd()).resolve()
-    resolved_out = output.resolve()
-    if resolved_out == root:
-        _fail("安全拦截：--output 不能直接指向项目根目录，请指定子目录（如 ./research-output）")
-    source_dir = (root / "research_tool").resolve()
-    if resolved_out == source_dir or source_dir in resolved_out.parents:
-        _fail("安全拦截：--output 不能指向 research_tool 源代码目录")
-    git_dir = (root / ".git").resolve()
-    if resolved_out == git_dir or git_dir in resolved_out.parents:
-        _fail("安全拦截：--output 不能指向 .git 目录")
+    resolved_out = target.resolve()
+    repo_root = _find_repo_root(Path.cwd())
+    if repo_root is not None:
+        if resolved_out == repo_root:
+            _fail(f"安全拦截：输出目录不能直接指向项目根目录（{repo_root}），请指定子目录（如 ./research-output）")
+        if resolved_out.is_relative_to(repo_root):
+            rel = resolved_out.relative_to(repo_root)
+            top_part = rel.parts[0] if rel.parts else ""
+            allowed_prefixes = ("research-output", "work", "tmp", "temp", "dist", "build", "out")
+            if not any(top_part.startswith(prefix) for prefix in allowed_prefixes):
+                _fail(f"安全拦截（Zero Workspace Mutation）：禁止向仓库源码/资产/文档目录（{top_part}）输出调研产物！请指定 ./research-output")
+    else:
+        if (resolved_out / "research_tool").exists() or (resolved_out / ".git").exists():
+            _fail("安全拦截：输出目录不能直接指向项目根目录")
 
 
 def _fail_video_ingest(exc: VideoIngestError) -> None:
@@ -987,6 +1003,7 @@ def run(
         return
 
     configured = load_config(_state["config_path"])
+    _assert_safe_output_dir(output, configured.work_dir)
     effective_mode = mode or configured.mode
     if effective_mode not in {"brief", "full", "fast", "standard", "deep"}:
         _fail(
@@ -1019,6 +1036,17 @@ def run(
             f"--mode full 强制执行{'五' if is_deepen_strategy else '六'}阶段，不能同时使用 --skip"
         )
     stages = [s for s in mode_stages if s not in skip]
+
+    # P0-B 闭环：统一在最终 stages 集合上执行 Agent Strict 审查，杜绝任何形式的绕过
+    is_strict_agent = os.environ.get("RESEARCH_AGENT_STRICT", "0") == "1"
+    if is_strict_agent:
+        required_stages = {"collect", "clean", "extract", "organize", "report"}
+        missing = required_stages - set(stages)
+        if missing:
+            _fail(
+                f"安全拦截（RESEARCH_AGENT_STRICT）：严禁缩水或跳过核心阶段！"
+                f"缺失核心阶段：{sorted(missing)}。Agent 调研必须执行完整管线（collect → clean → extract → organize → report）。"
+            )
 
     if dry_run:
         logger.info("mode=%s；将执行的阶段：%s", effective_mode, " → ".join(stages))

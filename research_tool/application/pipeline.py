@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import logging
 import shutil
 import time
@@ -45,7 +46,7 @@ class ResearchPipeline:
 
     def __init__(self, config: PipelineConfig) -> None:
         self.config = config
-        self._validate_stage_dag(config.stages)
+        self._validate_stage_dag(config.stages, mode=config.mode)
         self._llm: LLMClient | None = None
         self._result: PipelineResult | None = None
         # B8 产品集成装配点：kill-switch=false → 逐字节 legacy（忽略一切子 flag）。
@@ -93,9 +94,10 @@ class ResearchPipeline:
         return self._llm
 
     @staticmethod
-    def _validate_stage_dag(stages: list[str]) -> None:
-        """拓扑 DAG 顺序校验：当阶段列表中包含前置与后置阶段时，顺序必须严格满足因果依赖。"""
+    def _validate_stage_dag(stages: list[str], mode: str = "full") -> None:
+        """拓扑 DAG 依赖校验：严格断言相对顺序与必要的前置依赖，禁止倒置或断层依赖。"""
         order = {s: i for i, s in enumerate(stages)}
+        # 1) 倒置依赖硬校验
         if "clean" in order and "extract" in order and order["clean"] > order["extract"]:
             raise StageError("pipeline", "阶段拓扑错误：clean 必须在 extract 之前执行")
         if "clean" in order and "organize" in order and order["clean"] > order["organize"]:
@@ -104,6 +106,15 @@ class ResearchPipeline:
             raise StageError("pipeline", "阶段拓扑错误：extract 必须在 organize 之前执行")
         if "organize" in order and "report" in order and order["organize"] > order["report"]:
             raise StageError("pipeline", "阶段拓扑错误：organize 必须在 report 之前执行")
+
+        # 2) 多阶段链路断层缺失校验（P1/P2-F 闭环）：仅在多阶段管线时检查，保留单阶段独立调试自由度
+        if len(stages) > 1:
+            if "collect" in order and "extract" in order and "clean" not in order:
+                raise StageError("pipeline", "阶段拓扑依赖缺失：从 collect 到 extract 必须经过 clean 阶段清洗")
+            if "clean" in order and "report" in order and "organize" not in order and mode != "brief":
+                raise StageError("pipeline", "阶段拓扑依赖缺失：从 clean 到 report 必须经过 organize 构建知识树")
+            if "collect" in order and "report" in order and "clean" not in order:
+                raise StageError("pipeline", "阶段拓扑依赖缺失：从 collect 到 report 必须经过 clean 阶段清洗")
 
     def _stage_uses_llm(self, stage: str) -> bool:
         if stage == "collect":
@@ -130,8 +141,31 @@ class ResearchPipeline:
     ) -> bool:
         marker = self._completion_marker(topic_dir, stage)
         if marker.is_file():
+            # 契约绑定校验（P0-C 闭环）：Clean 阶段若当前启用了 relevance_filter，
+            # 但旧 marker 是未启用打分时生成的，或者打分阈值/输入变化，旧 marker 立即失效
+            if stage == "clean":
+                try:
+                    data = read_json(marker) or {}
+                    cfg = data.get("cleaner_config", {})
+                    # 当前开启了 relevance_filter，但历史 marker 未开启过滤 → 必须重新打分
+                    if self.config.cleaner.relevance_filter and not cfg.get("relevance_filter"):
+                        return False
+                    # 阈值变化 → 必须重新打分
+                    if (
+                        self.config.cleaner.relevance_filter
+                        and cfg.get("relevance_threshold") != self.config.cleaner.relevance_threshold
+                    ):
+                        return False
+                    # raw 输入文件列表变化 → 必须重新清洗
+                    raw_dir = topic_dir / "raw"
+                    if raw_dir.exists():
+                        raw_names = sorted(f.name for f in raw_dir.glob("*.md"))
+                        cur_hash = hashlib.sha256("::".join(raw_names).encode("utf-8")).hexdigest()[:16]
+                        if data.get("raw_files_hash") and data["raw_files_hash"] != cur_hash:
+                            return False
+                except Exception:
+                    return False
             return True
-        # 旧版本没有 marker：非 LLM 阶段仍兼容历史产物；
         # 核心 LLM 阶段（含开启 relevance_filter 的 clean）必须有成功 marker，
         # 避免把超时/崩溃/鉴权失败前留下的部分文件误判成完整阶段（P0 状态机防护）。
         if stage in {"extract", "organize", "report"} or (
@@ -144,7 +178,23 @@ class ResearchPipeline:
         marker = self._completion_marker(topic_dir, stage)
         marker.parent.mkdir(parents=True, exist_ok=True)
         temporary = marker.with_suffix(".tmp")
-        write_json(temporary, {"stage": stage, "status": "completed"})
+        payload: dict[str, Any] = {
+            "stage": stage,
+            "status": "completed",
+            "timestamp": time.time(),
+        }
+        if stage == "clean":
+            payload["cleaner_config"] = {
+                "relevance_filter": bool(self.config.cleaner.relevance_filter),
+                "relevance_threshold": float(self.config.cleaner.relevance_threshold),
+                "dedup_similarity": float(self.config.cleaner.dedup_similarity),
+                "max_content_length": int(self.config.cleaner.max_content_length),
+            }
+            raw_dir = topic_dir / "raw"
+            if raw_dir.exists():
+                raw_names = sorted(f.name for f in raw_dir.glob("*.md"))
+                payload["raw_files_hash"] = hashlib.sha256("::".join(raw_names).encode("utf-8")).hexdigest()[:16]
+        write_json(temporary, payload)
         temporary.replace(marker)
 
     async def _exec_with_retry(

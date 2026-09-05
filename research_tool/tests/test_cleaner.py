@@ -122,3 +122,34 @@ async def test_clean_filter_relevance_fail_closed(tmp_path):
 
     with pytest.raises(StageError, match="避免 fail-open"):
         await Cleaner(CleanerConfig(relevance_fail_open=False)).filter_relevance(cr, FailingLLM(), "topic")
+
+
+@pytest.mark.asyncio
+async def test_clean_filter_relevance_rejects_cardinality_mismatch(tmp_path):
+    """Sol 终审 P0-A 闭环：LLM 返回打分数量与批次不匹配时，fail-closed 拒绝放行未评分文档。"""
+    from research_tool.domain.errors import StageError
+    from research_tool.domain.models import CleanResult, FileQuality
+    from research_tool.infrastructure.llm.mock import MockLLMClient
+
+    clean_dir = tmp_path / "clean"
+    clean_dir.mkdir()
+    p1 = clean_dir / "01.md"
+    p2 = clean_dir / "02.md"
+    p1.write_text("doc1", encoding="utf-8")
+    p2.write_text("doc2", encoding="utf-8")
+    cr = CleanResult(
+        files=[p1, p2],
+        quality_report={
+            "01": FileQuality(original_size=4, cleaned_size=4, score=1),
+            "02": FileQuality(original_size=4, cleaned_size=4, score=1),
+        },
+        clean_dir=clean_dir,
+    )
+
+    class IncompleteLLM(MockLLMClient):
+        async def chat_structured(self, prompt, schema, system=None):
+            # 2 篇文档仅返回 1 个分数（反例）
+            return schema(scores=[0.1])
+
+    with pytest.raises(StageError, match="返回数量不匹配"):
+        await Cleaner(CleanerConfig(relevance_fail_open=False)).filter_relevance(cr, IncompleteLLM(), "topic")

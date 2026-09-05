@@ -42,6 +42,7 @@ class TavilyBackend(SearchBackend):
         self._keys = pool
         self._idx = 0
         self._lock = threading.Lock()
+        self._exhausted_keys: set[str] = set()
 
     def _search_with_key(self, key: str, query: str, max_results: int) -> list[SearchHit]:
         from tavily import TavilyClient  # noqa: PLC0415
@@ -71,25 +72,29 @@ class TavilyBackend(SearchBackend):
         from tavily import UsageLimitExceededError  # noqa: PLC0415
 
         last_err: Exception | None = None
-        n = len(self._keys)
-        offset = 0  # 已确认耗尽的 key 数（跳过）
-        while offset < n:
+        while True:
             with self._lock:
-                key = self._keys[(self._idx + offset) % n]
+                available = [k for k in self._keys if k not in self._exhausted_keys]
+                if not available:
+                    break
+                # 原子分配当前可用 key 并推进轮转游标（P1-D 闭环：杜绝并发 thundering herd）
+                key = available[self._idx % len(available)]
+                self._idx = (self._idx + 1) % len(available)
+
             try:
-                hits = self._search_with_key(key, query, max_results)
-                with self._lock:
-                    self._idx = (self._idx + offset) % n  # 记住可用 key 位置
-                return hits
+                return self._search_with_key(key, query, max_results)
             except UsageLimitExceededError as e:
                 last_err = e
-                offset += 1  # 跳过此 key，后续调用从它后面开始
+                with self._lock:
+                    # 发生 429/超额立即原子加入黑名单，后续所有并发线程绝不会再撞该 key
+                    self._exhausted_keys.add(key)
                 continue
             except SearchError:
                 raise
             except Exception as e:  # noqa: BLE001
                 raise SearchError(f"Tavily 搜索失败: {e}") from e
-        raise SearchError(f"Tavily 搜索失败: 所有 {n} 个 key 配额耗尽 ({last_err})")
+
+        raise SearchError(f"Tavily 搜索失败: 所有 {len(self._keys)} 个 key 配额均已耗尽 ({last_err})")
 
     async def search(
         self, query: str, max_results: int, language: str = "both", **_kw

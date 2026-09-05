@@ -342,7 +342,7 @@ async def test_cleaner_relevance_scores_delete_keep_and_default_missing_score(tm
     }
     result = CleanResult(files=[low, high], quality_report=quality, clean_dir=clean_dir)
     cleaner = Cleaner(
-        CleanerConfig(relevance_threshold=0.5, relevance_batch_size=2)
+        CleanerConfig(relevance_threshold=0.5, relevance_batch_size=2, relevance_fail_open=True)
     )
 
     filtered = await cleaner.filter_relevance(result, _ScoresLLM([0.1]), "topic")

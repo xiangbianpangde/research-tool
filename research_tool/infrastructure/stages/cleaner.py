@@ -381,8 +381,26 @@ class Cleaner:
                 else:
                     raise StageError("clean", f"LLM 相关性过滤失败（避免 fail-open 放行未打分脏数据）: {last_err}")
 
+            if len(scores) != len(batch):
+                if self.config.relevance_fail_open:
+                    scores = (scores + [1.0] * len(batch))[: len(batch)]
+                else:
+                    raise StageError(
+                        "clean",
+                        f"LLM 相关性过滤返回数量不匹配（期望 {len(batch)}，实际 {len(scores)}），拒绝放行未评分文档",
+                    )
+
+            if any(not (0.0 <= float(s) <= 1.0) for s in scores):
+                if self.config.relevance_fail_open:
+                    scores = [max(0.0, min(1.0, float(s))) for s in scores]
+                else:
+                    raise StageError(
+                        "clean",
+                        f"LLM 相关性过滤返回分数值超出 [0.0, 1.0] 范围: {scores}",
+                    )
+
             for i, path in enumerate(batch):
-                score = scores[i] if i < len(scores) else 1.0
+                score = float(scores[i])
                 stem = path.stem
                 if stem in quality:
                     q = quality[stem]
