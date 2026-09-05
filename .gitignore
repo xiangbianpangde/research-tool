@@ -24,6 +24,13 @@ tests/fixtures/*/extracted/
 tests/fixtures/*/tree/
 tests/fixtures/*/report.md
 
+# LaTeX build artifacts
+*.aux
+*.bbl
+*.blg
+*.out
+docs/paper/*.log
+
 # 工具数据
 .cache/
 .benchmarks/

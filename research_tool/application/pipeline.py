@@ -142,7 +142,9 @@ class ResearchPipeline:
         for attempt in range(1, attempts + 1):
             try:
                 if uses_llm:
-                    await self._get_llm().healthcheck()
+                    await self._get_llm().healthcheck(
+                        timeout_sec=self.config.llm_healthcheck_timeout_sec
+                    )
                 await self._exec(stage, topic, topic_dir, result)
                 return
             except LLMAuthenticationError:
@@ -200,7 +202,9 @@ class ResearchPipeline:
                 message=f"第 {round_n + 1} 轮反向：评估知识树质量",
             )
             try:
-                await self._get_llm().healthcheck()
+                await self._get_llm().healthcheck(
+                    timeout_sec=self.config.llm_healthcheck_timeout_sec
+                )
                 fb = await Organizer(self.config.organizer).assess_and_feedback(
                     result.organize_result,
                     self._get_llm(),
@@ -346,6 +350,26 @@ class ResearchPipeline:
                     status="skipped",
                     progress=1.0,
                     message="extractor.enabled=false，跳过",
+                )
+                continue
+            # 九段策略降级：deepen 降级为收集/补搜策略，不作为独立阶段执行
+            if stage == "deepen" and (
+                self._nine_loop_flags.get("deepen_as_strategy")
+                or (self.config.nine_loop.enabled and self.config.nine_loop.deepen_as_strategy)
+            ):
+                result.stages_skipped.append(stage)
+                result.stage_metrics.append(
+                    StageRunMetric(
+                        stage=stage,
+                        status="skipped",
+                        message="deepen 已降级为策略（deepen_as_strategy），跳过独立阶段",
+                    )
+                )
+                yield StageEvent(
+                    stage=stage,
+                    status="skipped",
+                    progress=1.0,
+                    message="deepen 已降级为策略（deepen_as_strategy），跳过独立阶段",
                 )
                 continue
             # Deepen 可选（默认启用；deepen.enabled=false 或 --skip deepen 关闭）

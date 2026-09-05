@@ -177,6 +177,7 @@ def _flatten_to_pipeline(raw: dict) -> dict:
         "max_backward_rounds",
         "llm_stage_attempts",
         "llm_retry_backoff_sec",
+        "llm_healthcheck_timeout_sec",
         # B8：九段管线 flag 键（默认全关）
         "nine_loop",
     ):
@@ -346,16 +347,37 @@ def load_config(
             previous_identity,
             explicit_replacement=explicit_key,
         )
+    nine_loop_cfg = data.get("nine_loop") or {}
+    is_deepen_strategy = False
+    if isinstance(nine_loop_cfg, dict):
+        is_deepen_strategy = bool(
+            nine_loop_cfg.get("enabled", True)
+            and nine_loop_cfg.get("deepen_as_strategy", False)
+        )
+    elif hasattr(nine_loop_cfg, "enabled") and hasattr(nine_loop_cfg, "deepen_as_strategy"):
+        is_deepen_strategy = bool(
+            nine_loop_cfg.enabled and nine_loop_cfg.deepen_as_strategy
+        )
+
+    if is_deepen_strategy and "stages" in data and isinstance(data["stages"], list):
+        data["stages"] = [s for s in data["stages"] if s != "deepen"]
+
     if data.get("mode") == "full":
         # full 是产物契约，不允许 config.yaml 或 CLI 静默裁掉中间阶段。
-        data = _deep_merge(
-            data,
-            {
-                "stages": list(_STANDARD_STAGES),
-                "deepen": {"enabled": True},
-                "extractor": {"enabled": True, "fail_on_chunk_error": True},
-            },
+        # 当 nine_loop.deepen_as_strategy 生效时，deepen 已降级为策略而非独立顶层阶段，
+        # stages 拓扑严格遵循 ① 收集 → ② 清洗 → ③ 抽取事实，不注入独立 deepen 阶段。
+        full_stages = (
+            [s for s in _STANDARD_STAGES if s != "deepen"]
+            if is_deepen_strategy
+            else list(_STANDARD_STAGES)
         )
+        full_patch: dict[str, Any] = {
+            "stages": full_stages,
+            "extractor": {"enabled": True, "fail_on_chunk_error": True},
+        }
+        if not is_deepen_strategy:
+            full_patch["deepen"] = {"enabled": True}
+        data = _deep_merge(data, full_patch)
     _validate_mapping_sections(data)
     # 密钥必须根据最终 provider/base_url 选择；CLI overrides 可能刚切换
     # provider，若提前注入会把旧 provider 的 key 带到新端点并触发 401。

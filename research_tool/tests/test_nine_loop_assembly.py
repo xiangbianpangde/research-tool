@@ -122,3 +122,89 @@ def test_create_pipeline_preserves_defaults() -> None:
     fl = pipe.nine_loop_flags()
     assert fl.get("nine_loop_enabled") is True
     assert fl.get("legacy") is False
+
+
+# --------------------------------------------------------------------------- #
+# 4) deepen_as_strategy 降级策略测试：剥离独立阶段、跳过执行
+# --------------------------------------------------------------------------- #
+
+def test_deepen_as_strategy_strips_deepen_from_full_mode(tmp_path: Path) -> None:
+    """deepen_as_strategy: true 时，mode: full 自动排除独立 deepen 阶段。"""
+    cfg_path = tmp_path / "config.yaml"
+    cfg_path.write_text(
+        "topic: t\n"
+        "pipeline:\n  mode: full\n  work_dir: ./out\n"
+        "nine_loop:\n  enabled: true\n  deepen_as_strategy: true\n",
+        encoding="utf-8",
+    )
+    cfg = load_config(cfg_path)
+    assert "deepen" not in cfg.stages
+    assert cfg.stages == ["collect", "clean", "extract", "organize", "report"]
+
+
+def test_deepen_as_strategy_strips_deepen_from_explicit_stages(tmp_path: Path) -> None:
+    """deepen_as_strategy: true 时，显式配置残留的 deepen 阶段会被自动净化。"""
+    cfg_path = tmp_path / "config.yaml"
+    cfg_path.write_text(
+        "topic: t\n"
+        "pipeline:\n"
+        "  work_dir: ./out\n"
+        "  stages:\n"
+        "    - collect\n"
+        "    - deepen\n"
+        "    - clean\n"
+        "    - extract\n"
+        "    - organize\n"
+        "    - report\n"
+        "nine_loop:\n  enabled: true\n  deepen_as_strategy: true\n",
+        encoding="utf-8",
+    )
+    cfg = load_config(cfg_path)
+    assert "deepen" not in cfg.stages
+    assert cfg.stages == ["collect", "clean", "extract", "organize", "report"]
+
+
+@pytest.mark.asyncio
+async def test_pipeline_skips_deepen_when_strategy_active(tmp_path: Path, monkeypatch) -> None:
+    """即使 pipeline.stages 残留 deepen，执行引擎也会跳过并记录 skipped，绝不执行 Crawl4AI。"""
+    cfg = PipelineConfig(
+        topic="t",
+        work_dir=tmp_path / "out",
+        stages=["collect", "deepen", "clean"],
+        nine_loop=NineLoopConfig(enabled=True, deepen_as_strategy=True),
+    )
+    pipe = ResearchPipeline(cfg)
+    executed: list[str] = []
+
+    async def fake_exec(stage, topic, topic_dir, result):
+        executed.append(stage)
+
+    monkeypatch.setattr(pipe, "_exec", fake_exec)
+
+    events = []
+    async for ev in pipe.stream("t"):
+        events.append(ev)
+
+    assert "deepen" not in executed
+    assert "deepen" in pipe._result.stages_skipped
+    skip_ev = [ev for ev in events if ev.stage == "deepen" and ev.status == "skipped"]
+    assert len(skip_ev) == 1
+    assert "deepen_as_strategy" in skip_ev[0].message
+
+
+def test_cli_dry_run_with_deepen_as_strategy(tmp_path: Path) -> None:
+    """CLI dry-run 在 deepen_as_strategy: true 下展示 5 阶段拓扑（无 deepen）。"""
+    from typer.testing import CliRunner
+    from research_tool.presentation.cli import app
+
+    cfg_path = tmp_path / "config.yaml"
+    cfg_path.write_text(
+        "topic: t\n"
+        "pipeline:\n  mode: full\n  work_dir: ./out\n"
+        "nine_loop:\n  enabled: true\n  deepen_as_strategy: true\n",
+        encoding="utf-8",
+    )
+    result = CliRunner().invoke(app, ["--config", str(cfg_path), "run", "t", "--dry-run"])
+    assert result.exit_code == 0
+    assert "collect → clean → extract → organize → report" in result.output
+    assert "deepen" not in result.output

@@ -96,10 +96,27 @@ research_tool/common/         公共工具 ← logging_config.py / slug.py / tra
 | 用户说 | AI 做什么 |
 |--------|----------|
 | "修复 bug" | 先跑相关测试确认重现 → 修改 → pytest 全绿 |
+| "执行调研" / "调研xxx" | 使用完整管线 `python -m research_tool.presentation.cli run "<topic>" -s tavily`；严禁使用 `--mode brief`，严禁修改工作区任何源码与配置文件，产物必须输出到指定输出目录 |
 | "添加搜索源" | 参考 `search/` 下现有后端模式：继承 SearchBackend → 注册到 `__init__.py` 工厂 |
 | "新增 Stage" | 参考 `stages/` 下模式：类 + 模块级便捷函数 → `__init__.py` 注册 |
 | "修改配置" | 改 `models.py` 对应 Config → 同步 `config.example.yaml` → 测试 |
 | "重构" | 先读本文件了解架构 → 修改 → pytest + ruff check 全绿 |
+
+---
+
+## ⚠️ AI Agent 运行与使用核心守则（强制执行）
+
+1. **严禁调研偷懒缩水（No Cognitive Shortcuts / No `--mode brief`）**：
+   - 当用户要求调研或测试调研工具时，**必须执行完整的五阶段/九段闭环管线**（`collect → clean → extract → organize → report`）。
+   - **绝对禁止使用 `--mode brief`** 或 `--skip extract` / `--skip organize`！`brief` 模式只会跑 `collect-clean-report`，直接跳过了事实抽取与知识树构建，破坏报告的真实证据链。正式任务一律使用默认模式或 `--mode full`。
+2. **零工作区修改约束（Zero Workspace Mutation on Research）**：
+   - Agent 在使用 `research-tool` 开展调研时，**绝对禁止修改项目源码（`.py` 文件）或任何配置文件（`config.yaml`、`.env`、`pyproject.toml` 等）**。
+   - 所有运行时定制参数（包括 `-s <source>`、`--model <model>`、`--output <dir>`、`--core <keyword>`、`--facets <tags>` 等）**必须全部通过 CLI 命令行选项或临时环境变量注入**，严禁通过直接 `edit`/`write` 代码或配置文件来达到目的。
+   - 严禁在项目根目录下生成任何临时运行脚本（如 `run_test.py`、`demo.sh` 等）。
+3. **严格产物隔离（Output Isolation）**：
+   - 调研产生的所有原始素材、清洗文件、抽取结果和最终报告，必须严格限制在 `--output` 指定的隔离目录（如 `./research-output/`，已在 `.gitignore`），绝不能污染 Git 工作树。
+4. **清洗质量保障（Clean Before Extract）**：
+   - 必须确保 `clean` 阶段生效，先执行广告/导航/cookie/Base64大图剥离、长度硬截断（`max_content_length: 50000`）、MinHash 近似去重及 LLM 语义相关性评分（`relevance_filter: true`），严禁未清洗的超大脏数据冲入后续 LLM 抽取阶段。
 
 ---
 

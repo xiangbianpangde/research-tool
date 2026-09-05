@@ -975,11 +975,20 @@ def run(
         _fail(
             f"未知调研模式: {effective_mode}（推荐 brief/full；兼容 fast/standard/deep）"
         )
+    is_deepen_strategy = bool(
+        configured.nine_loop.enabled and configured.nine_loop.deepen_as_strategy
+    )
     all_stages = ["collect", "deepen", "clean", "extract", "organize", "report"]
     if mode is None:
         mode_stages = list(configured.stages)
     elif effective_mode == "brief":
+        logger.warning(
+            "⚠️ 警告：当前以 --mode brief 运行，仅执行 collect → clean → report（跳过抽取与知识树构建）。"
+            "正式深度调研请使用默认九段管线或 --mode full。"
+        )
         mode_stages = ["collect", "clean", "report"]
+    elif effective_mode == "full" and is_deepen_strategy:
+        mode_stages = ["collect", "clean", "extract", "organize", "report"]
     else:
         mode_stages = [
             stage
@@ -987,7 +996,9 @@ def run(
             if not (effective_mode == "fast" and stage == "deepen")
         ]
     if effective_mode == "full" and skip:
-        _fail("--mode full 强制执行六阶段，不能同时使用 --skip")
+        _fail(
+            f"--mode full 强制执行{'五' if is_deepen_strategy else '六'}阶段，不能同时使用 --skip"
+        )
     stages = [s for s in mode_stages if s not in skip]
 
     if dry_run:

@@ -33,3 +33,39 @@ def test_disable_all():
     )
     out = Cleaner(cfg).clean_text(NOISY)
     assert "Home" in out  # nav kept when disabled
+
+
+def test_clean_strips_base64_data_uris():
+    noisy_with_image = (
+        "<!-- title: Image Test -->\n\n"
+        "This is a real substantial paragraph that has enough length to qualify as the start of the body content for this document.\n"
+        "![diagram](data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==)\n"
+        "Following discussion after the stripped embedded base64 image data."
+    )
+    out = Cleaner(CleanerConfig()).clean_text(noisy_with_image)
+    assert "data:image/png;base64" not in out
+    assert "[embedded image removed]" in out
+    assert "Following discussion" in out
+
+
+def test_clean_strips_cookie_banners():
+    noisy_with_cookie = (
+        "<!-- title: Cookie Test -->\n\n"
+        "This is a real substantial paragraph that has enough length to qualify as the start of the body content for this document.\n"
+        "We use cookies to improve your experience. Accept all cookies\n"
+        "Important research findings that should definitely be kept in the output."
+    )
+    out = Cleaner(CleanerConfig()).clean_text(noisy_with_cookie)
+    assert "Accept all cookies" not in out
+    assert "Important research findings" in out
+
+
+def test_clean_truncates_oversized_content():
+    huge_body = (
+        "<!-- title: Huge Test -->\n\n"
+        + ("Substantial paragraph with facts and data points. " * 50 + "\n\n") * 20
+    )
+    cfg = CleanerConfig(max_content_length=1500)
+    out = Cleaner(cfg).clean_text(huge_body)
+    assert len(out) < 2000
+    assert "truncated to max_content_length" in out

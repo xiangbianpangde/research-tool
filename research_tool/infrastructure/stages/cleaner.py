@@ -28,6 +28,14 @@ _BLOCK_TAGS = re.compile(
 _ANY_TAG = re.compile(r"<[^>]+>")
 # 广告关键词（01 §3.4 规则4）
 _AD = re.compile(r"\b(advertisement|sponsored|promoted|ad[_\-]?block|adsbygoogle)\b", re.IGNORECASE)
+# 内联 Base64 图片数据（避免超大图片塞爆下游 LLM 上下文）
+_DATA_URI = re.compile(r"data:image/[^;]+;base64,[A-Za-z0-9+/=]+", re.IGNORECASE)
+# Cookie/GDPR 声明与提示噪音
+_COOKIE_BANNER = re.compile(
+    r"\b(cookie policy|privacy policy|accept (all )?cookies|we use cookies|manage cookies|"
+    r"cookie preferences|consent preferences|本网站使用cookies|隐私政策|同意所有cookies|关闭提示)\b",
+    re.IGNORECASE,
+)
 # 尾部截断标题（01 §3.4 规则6）
 _TAIL = re.compile(
     r"^\s*#{1,6}\s*(Contributing|License|References|参考文献|致谢|License & Credits)\b",
@@ -220,13 +228,22 @@ class Cleaner:
         if _looks_binary(body):
             return header
 
+        # 剥离巨大的内联 base64 图片数据，避免 context 爆炸
+        if "data:image/" in body:
+            body = _DATA_URI.sub("[embedded image removed]", body)
+
         if cfg.strip_html:
             body = _strip_html(body)
 
         lines = body.splitlines()
 
         if cfg.strip_ads:
-            lines = [ln for ln in lines if not _AD.search(ln)]
+            lines = [
+                ln
+                for ln in lines
+                if not _AD.search(ln)
+                and not (len(ln.strip()) < 200 and _COOKIE_BANNER.search(ln))
+            ]
 
         if cfg.strip_nav:
             lines = _remove_nav_blocks(lines)
@@ -238,6 +255,10 @@ class Cleaner:
         lines = _truncate_tail(lines)
 
         cleaned = _BLANKS.sub("\n\n", "\n".join(lines)).strip()
+        if len(cleaned) > cfg.max_content_length:
+            cleaned = cleaned[: cfg.max_content_length].rsplit("\n", 1)[0]
+            cleaned += "\n\n<!-- [clean: truncated to max_content_length] -->"
+
         if header:
             cleaned = header + "\n\n" + cleaned
         return cleaned

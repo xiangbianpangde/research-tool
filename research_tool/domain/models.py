@@ -225,6 +225,7 @@ class CleanerConfig(BaseModel):
     strip_ads: bool = True
     find_content_start: bool = True
     min_content_length: int = Field(default=200, ge=0)
+    max_content_length: int = Field(default=50000, ge=1000)
     # MinHash 去重（P2-5）：char n-gram Jaccard 相似度 ≥阈值视为重复，组内保留
     # 最长文本，其余标 dedup_of。0=关闭去重。
     dedup_similarity: float = Field(default=0.85, ge=0.0, le=1.0)
@@ -381,6 +382,9 @@ class PipelineConfig(BaseModel):
     # 默认 600s 超时叠加隐式重试。鉴权错误永不重试。
     llm_stage_attempts: int = Field(default=2, ge=1, le=5)
     llm_retry_backoff_sec: float = Field(default=2.0, ge=0, le=60)
+    # LLM 健康检查探针超时（秒）。慢端点（如 Paratera/代理链路）可调大，
+    # 避免“健康检查超时”误杀阶段（默认 10s 偏紧）。
+    llm_healthcheck_timeout_sec: float = Field(default=10.0, ge=1, le=300)
     # 反向传播（P2-6）：完成一次正向后，让 organizer 评估知识树质量，把稀疏节点/
     # 知识断层/矛盾产出修正查询回到 collect 重跑。0=不启用（向后兼容）。
     max_backward_rounds: int = Field(default=0, ge=0, le=3)
