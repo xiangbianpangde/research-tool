@@ -162,11 +162,13 @@ def _fail(msg: str) -> typer.Exit:
     raise typer.Exit(code=1)
 
 
-def _find_repo_root(start: Path) -> Path | None:
-    cur = start.resolve()
-    for p in [cur, *cur.parents]:
-        if (p / ".git").exists() or (p / "pyproject.toml").exists():
-            return p
+def _find_repo_root(start: Path | None = None) -> Path | None:
+    candidates = [start or Path.cwd(), Path(__file__).resolve().parent]
+    for start_dir in candidates:
+        cur = start_dir.resolve()
+        for p in [cur, *cur.parents]:
+            if (p / ".git").exists() or (p / "pyproject.toml").exists():
+                return p
     return None
 
 
@@ -178,7 +180,7 @@ def _assert_safe_output_dir(output: Path | None, configured_dir: Path | None = N
     if target is None:
         return
     resolved_out = target.resolve()
-    repo_root = _find_repo_root(Path.cwd())
+    repo_root = _find_repo_root()
     if repo_root is not None:
         if resolved_out == repo_root:
             _fail(f"安全拦截：输出目录不能直接指向项目根目录（{repo_root}），请指定子目录（如 ./research-output）")
@@ -328,6 +330,7 @@ def collect(
     dry_run: bool = typer.Option(False, "--dry-run", help="仅搜索不抓取"),
 ) -> None:
     """阶段1：搜索并抓取原始资料。"""
+    _assert_safe_output_dir(output)
     cfg = CollectorConfig(
         search_engines=source,
         max_results_per_engine=max_results,
@@ -471,6 +474,7 @@ def clean(
     min_length: int = typer.Option(200, "--min-length"),
 ) -> None:
     """阶段2：清洗去噪。"""
+    _assert_safe_output_dir(output)
     cfg = CleanerConfig(
         strip_html=not no_strip_html,
         strip_nav=not no_strip_nav,
@@ -497,6 +501,7 @@ def extract(
     model: Optional[str] = typer.Option(None, "--model"),
 ) -> None:
     """阶段3：LLM 抽取实体/关系/三元组。"""
+    _assert_safe_output_dir(output)
     cfg = ExtractorConfig(
         tasks=tasks,
         entity_types=entity_types.split(",") if entity_types else None,
@@ -533,6 +538,7 @@ def organize(
     model: Optional[str] = typer.Option(None, "--model"),
 ) -> None:
     """阶段4：构建知识树。"""
+    _assert_safe_output_dir(output)
     cfg = OrganizerConfig(max_nodes=max_nodes, min_nodes=min_nodes)
     work_dir = output.parent if output else None
     topic_hint = topic or input_topic_from_dir(extracted_dir)
@@ -558,6 +564,7 @@ def report(
     model: Optional[str] = typer.Option(None, "--model"),
 ) -> None:
     """阶段5：合成调研报告。"""
+    _assert_safe_output_dir(output)
     cfg = ReporterConfig(format=format, style=style)
     topic_hint = topic or input_topic_from_dir(tree_dir)
 

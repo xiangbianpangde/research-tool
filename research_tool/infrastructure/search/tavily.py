@@ -43,6 +43,7 @@ class TavilyBackend(SearchBackend):
         self._idx = 0
         self._lock = threading.Lock()
         self._exhausted_keys: set[str] = set()
+        self._inflight: dict[str, int] = {k: 0 for k in pool}
 
     def _search_with_key(self, key: str, query: str, max_results: int) -> list[SearchHit]:
         from tavily import TavilyClient  # noqa: PLC0415
@@ -77,9 +78,10 @@ class TavilyBackend(SearchBackend):
                 available = [k for k in self._keys if k not in self._exhausted_keys]
                 if not available:
                     break
-                # 原子分配当前可用 key 并推进轮转游标（P1-D 闭环：杜绝并发 thundering herd）
-                key = available[self._idx % len(available)]
-                self._idx = (self._idx + 1) % len(available)
+                # 原子 in-flight 预占（P1-D 闭环）：优先分配在途并发最少的 key，高并发下分散负载
+                available.sort(key=lambda k: self._inflight.get(k, 0))
+                key = available[0]
+                self._inflight[key] = self._inflight.get(key, 0) + 1
 
             try:
                 return self._search_with_key(key, query, max_results)
@@ -93,6 +95,9 @@ class TavilyBackend(SearchBackend):
                 raise
             except Exception as e:  # noqa: BLE001
                 raise SearchError(f"Tavily 搜索失败: {e}") from e
+            finally:
+                with self._lock:
+                    self._inflight[key] = max(0, self._inflight.get(key, 1) - 1)
 
         raise SearchError(f"Tavily 搜索失败: 所有 {len(self._keys)} 个 key 配额均已耗尽 ({last_err})")
 

@@ -62,13 +62,12 @@
 
 ## 🏗️ 架构与管线流程
 
-### v1.0.0 九段闭环管线（默认路径）
+### v1.0.0 文件系统解耦五阶段生产管线（CLI 主管线）与九段闭环 Staging 架构
 
-自 `v1.0.0` 起，**九段闭环管线（Nine-Loop）成为默认执行路径**（渐进重构程序 RT-RF-2026 交付，经类生产回滚与全链路 Canary 验证，与顶级 Deep Research 系统配对评测交付完成率达 100% vs 80.5%）。
+当前 **CLI 主调度引擎（`ResearchPipeline`）执行的是严格遵循因果依赖的文件系统解耦 5 阶段生产管线**（`① 收集 → ② 清洗 → ③ 抽取事实 → ④ 组织知识 → ⑨ 合成报告`），其中 Deepen 已全面降级为 Collect 内部的可选反偏差画像策略（`deepen_as_strategy: true`），彻底杜绝在 Clean 清洗前盲目并发抓取脏数据的缺陷。
 
-> ℹ️ **执行架构与产物契约说明**：  
-> 当前 CLI 主调度引擎（`ResearchPipeline`）执行的是严格遵循因果依赖的文件系统解耦管线（`① 收集 → ② 清洗 → ③ 抽取事实 → ④ 组织知识 → ⑨ 合成报告`），其中 Deepen 已全面降级为 Collect 内部的可选反偏差画像策略（`deepen_as_strategy: true`），彻底杜绝了在 Clean 清洗前盲目并发抓取脏数据的缺陷。  
-> 完整的九段闭环高级组件（`research_tool/nine_loop/` 中的 Network、Inspect、Targeted、Merge、Gate 模块）已完成代码归档并处于 **Staging / Shadow Sidecar 双跑评估**阶段（产物落于 `shadow/<run_id>/` 独立目录），确保主产物交付契约稳定可靠。
+> ℹ️ **九段闭环演进状态说明（Staging / Shadow Sidecar）**：  
+> 完整的九段闭环高级组件（`research_tool/nine_loop/` 中的 Network、Inspect、Targeted、Merge、Gate 模块）已完成算法与契约实现，当前作为 **Staging / Shadow Sidecar 双跑评估**分支（产物落于 `shadow/<run_id>/` 独立目录），待全链路验证稳定后正式接驳主管线调度。
 
 ![research-tool 九段闭环](collect/architecture/system/nine-stage-loop.png)
 

@@ -314,6 +314,37 @@ def test_clean_marker_bound_to_relevance_config_rejects_stale_marker(tmp_path: P
     assert pipe_true._stage_is_complete("clean", topic_dir, clean_dir, ["*.md"]) is False
 
 
+def test_clean_marker_detects_raw_content_mutation_and_invalidates(tmp_path: Path) -> None:
+    """Sol 终审 P0-C 机械反例闭环：文件名相同但 raw 内容发生变化时，旧 marker 必须立即失效并强制重新清洗。"""
+    from research_tool.domain.models import CleanerConfig
+    topic_dir = tmp_path / "paper"
+    raw_dir = topic_dir / "raw"
+    clean_dir = topic_dir / "clean"
+    raw_dir.mkdir(parents=True)
+    clean_dir.mkdir(parents=True)
+
+    # 1. 初始内容 A
+    raw_file = raw_dir / "01.md"
+    raw_file.write_text("old raw content A", encoding="utf-8")
+    (clean_dir / "01.md").write_text("cleaned A", encoding="utf-8")
+
+    cfg = PipelineConfig(
+        topic="paper",
+        work_dir=tmp_path,
+        stages=["clean"],
+        cleaner=CleanerConfig(relevance_filter=True),
+    )
+    pipe = ResearchPipeline(cfg)
+    pipe._mark_stage_complete(topic_dir, "clean")
+    assert pipe._stage_is_complete("clean", topic_dir, clean_dir, ["*.md"]) is True
+
+    # 2. 发生变更：同名文件 01.md 被更新为内容 B
+    raw_file.write_text("COMPLETELY DIFFERENT NEW PAYLOAD B", encoding="utf-8")
+
+    # 3. 校验：指纹识别到真实内容哈希变化，marker 必须判定失效
+    assert pipe._stage_is_complete("clean", topic_dir, clean_dir, ["*.md"]) is False
+
+
 def test_agent_strict_blocks_stage_skipping_and_brief(tmp_path: Path, monkeypatch) -> None:
     """Sol 终审 P0-B 反例闭环：RESEARCH_AGENT_STRICT 模式下，任何通过 config brief、
     --mode fast --skip extract 等组合偷懒跳过核心阶段的行为均被硬拦截。"""
@@ -345,6 +376,10 @@ def test_pipeline_dag_predecessor_invariants() -> None:
     """Sol 终审 P1/P2-F 闭环：多阶段管线必须满足前置阶段依赖，禁止跳层断裂。"""
     from research_tool.domain.errors import StageError
 
+    # 倒置：clean 早于 collect
+    with pytest.raises(StageError, match="collect 必须在 clean 之前执行"):
+        ResearchPipeline(PipelineConfig(stages=["clean", "collect", "extract", "organize", "report"]))
+
     # collect 直接跳到 extract（缺失 clean 洗涤）
     with pytest.raises(StageError, match="从 collect 到 extract 必须经过 clean"):
         ResearchPipeline(PipelineConfig(stages=["collect", "extract"]))
@@ -352,6 +387,10 @@ def test_pipeline_dag_predecessor_invariants() -> None:
     # clean 直接跳到 report（非 brief 模式缺失 organize 知识树构建）
     with pytest.raises(StageError, match="从 clean 到 report 必须经过 organize"):
         ResearchPipeline(PipelineConfig(stages=["clean", "report"], mode="full"))
+
+    # extract 直接跳到 report（非 brief 模式缺失 organize 知识树构建）
+    with pytest.raises(StageError, match="从 extract 到 report 必须经过 organize"):
+        ResearchPipeline(PipelineConfig(stages=["extract", "report"], mode="full"))
 
     # collect 直接跳到 report（缺失 clean）
     with pytest.raises(StageError, match="从 collect 到 report 必须经过 clean"):
@@ -389,3 +428,34 @@ def test_tavily_key_rotation_atomic_reservation(monkeypatch) -> None:
     res2 = backend._search_sync("q2", 5)
     assert len(res2) == 1
     assert calls == ["key2"]  # 绝对没有 key1
+
+
+def test_tavily_concurrent_in_flight_reservation(monkeypatch) -> None:
+    """Sol 终审 P1-D 并发闭环：多并发线程访问 Tavily 时原子按 in-flight 计数分散分配，杜绝撞单 Key。"""
+    import threading
+    from unittest.mock import MagicMock
+    from research_tool.infrastructure.search.tavily import TavilyBackend
+
+    monkeypatch.delenv("TAVILY_KEYS", raising=False)
+    backend = TavilyBackend(api_key="key1,key2")
+    allocated_keys = []
+    barrier = threading.Barrier(2)
+
+    def mock_search_with_key(key, query, max_results):
+        allocated_keys.append(key)
+        barrier.wait()  # 让两线程在 HTTP in-flight 阶段保持同步
+        hit = MagicMock()
+        hit.url = "http://test.com"
+        return [hit]
+
+    backend._search_with_key = mock_search_with_key
+
+    t1 = threading.Thread(target=backend._search_sync, args=("q1", 5))
+    t2 = threading.Thread(target=backend._search_sync, args=("q2", 5))
+    t1.start()
+    t2.start()
+    t1.join()
+    t2.join()
+
+    # 两个并发线程必须分别预占 key1 和 key2，绝不能全部撞向同一个 key
+    assert sorted(allocated_keys) == ["key1", "key2"]

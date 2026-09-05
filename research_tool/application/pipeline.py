@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import json
 import logging
 import shutil
 import time
@@ -97,7 +98,9 @@ class ResearchPipeline:
     def _validate_stage_dag(stages: list[str], mode: str = "full") -> None:
         """拓扑 DAG 依赖校验：严格断言相对顺序与必要的前置依赖，禁止倒置或断层依赖。"""
         order = {s: i for i, s in enumerate(stages)}
-        # 1) 倒置依赖硬校验
+        # 1) 倒置依赖硬校验：任何前置阶段不得出现在后置阶段之后（P1/P2-F 闭环）
+        if "collect" in order and "clean" in order and order["collect"] > order["clean"]:
+            raise StageError("pipeline", "阶段拓扑错误：collect 必须在 clean 之前执行")
         if "clean" in order and "extract" in order and order["clean"] > order["extract"]:
             raise StageError("pipeline", "阶段拓扑错误：clean 必须在 extract 之前执行")
         if "clean" in order and "organize" in order and order["clean"] > order["organize"]:
@@ -113,8 +116,34 @@ class ResearchPipeline:
                 raise StageError("pipeline", "阶段拓扑依赖缺失：从 collect 到 extract 必须经过 clean 阶段清洗")
             if "clean" in order and "report" in order and "organize" not in order and mode != "brief":
                 raise StageError("pipeline", "阶段拓扑依赖缺失：从 clean 到 report 必须经过 organize 构建知识树")
+            if "extract" in order and "report" in order and "organize" not in order and mode != "brief":
+                raise StageError("pipeline", "阶段拓扑依赖缺失：从 extract 到 report 必须经过 organize 构建知识树")
             if "collect" in order and "report" in order and "clean" not in order:
                 raise StageError("pipeline", "阶段拓扑依赖缺失：从 collect 到 report 必须经过 clean 阶段清洗")
+
+    def _clean_input_fingerprint(self, topic_dir: Path) -> str:
+        """生成 Clean 阶段完整输入+契约的 SHA-256 签名（P0-C 终极闭环）。
+        涵盖全部 cleaner 配置字段以及 raw/*.md 的真实文件内容字节哈希。
+        """
+        cfg_data = {
+            "relevance_filter": bool(self.config.cleaner.relevance_filter),
+            "relevance_threshold": float(self.config.cleaner.relevance_threshold),
+            "dedup_similarity": float(self.config.cleaner.dedup_similarity),
+            "max_content_length": int(self.config.cleaner.max_content_length),
+            "strip_html": bool(self.config.cleaner.strip_html),
+            "strip_ads": bool(self.config.cleaner.strip_ads),
+        }
+        raw_dir = topic_dir / "raw"
+        raw_hashes: list[str] = []
+        if raw_dir.exists():
+            for p in sorted(raw_dir.glob("*.md")):
+                try:
+                    content_hash = hashlib.sha256(p.read_bytes()).hexdigest()
+                    raw_hashes.append(f"{p.name}:{content_hash}")
+                except OSError:
+                    pass
+        blob = json.dumps({"config": cfg_data, "raw_content": raw_hashes}, sort_keys=True)
+        return hashlib.sha256(blob.encode("utf-8")).hexdigest()
 
     def _stage_uses_llm(self, stage: str) -> bool:
         if stage == "collect":
@@ -141,28 +170,13 @@ class ResearchPipeline:
     ) -> bool:
         marker = self._completion_marker(topic_dir, stage)
         if marker.is_file():
-            # 契约绑定校验（P0-C 闭环）：Clean 阶段若当前启用了 relevance_filter，
-            # 但旧 marker 是未启用打分时生成的，或者打分阈值/输入变化，旧 marker 立即失效
+            # 契约绑定校验（P0-C 终极闭环）：Clean 阶段严格校验完整输入内容哈希与配置签名
             if stage == "clean":
                 try:
                     data = read_json(marker) or {}
-                    cfg = data.get("cleaner_config", {})
-                    # 当前开启了 relevance_filter，但历史 marker 未开启过滤 → 必须重新打分
-                    if self.config.cleaner.relevance_filter and not cfg.get("relevance_filter"):
+                    saved_fp = data.get("clean_input_fingerprint")
+                    if not saved_fp or saved_fp != self._clean_input_fingerprint(topic_dir):
                         return False
-                    # 阈值变化 → 必须重新打分
-                    if (
-                        self.config.cleaner.relevance_filter
-                        and cfg.get("relevance_threshold") != self.config.cleaner.relevance_threshold
-                    ):
-                        return False
-                    # raw 输入文件列表变化 → 必须重新清洗
-                    raw_dir = topic_dir / "raw"
-                    if raw_dir.exists():
-                        raw_names = sorted(f.name for f in raw_dir.glob("*.md"))
-                        cur_hash = hashlib.sha256("::".join(raw_names).encode("utf-8")).hexdigest()[:16]
-                        if data.get("raw_files_hash") and data["raw_files_hash"] != cur_hash:
-                            return False
                 except Exception:
                     return False
             return True
@@ -184,16 +198,7 @@ class ResearchPipeline:
             "timestamp": time.time(),
         }
         if stage == "clean":
-            payload["cleaner_config"] = {
-                "relevance_filter": bool(self.config.cleaner.relevance_filter),
-                "relevance_threshold": float(self.config.cleaner.relevance_threshold),
-                "dedup_similarity": float(self.config.cleaner.dedup_similarity),
-                "max_content_length": int(self.config.cleaner.max_content_length),
-            }
-            raw_dir = topic_dir / "raw"
-            if raw_dir.exists():
-                raw_names = sorted(f.name for f in raw_dir.glob("*.md"))
-                payload["raw_files_hash"] = hashlib.sha256("::".join(raw_names).encode("utf-8")).hexdigest()[:16]
+            payload["clean_input_fingerprint"] = self._clean_input_fingerprint(topic_dir)
         write_json(temporary, payload)
         temporary.replace(marker)
 
