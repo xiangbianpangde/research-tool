@@ -161,6 +161,22 @@ def _fail(msg: str) -> typer.Exit:
     raise typer.Exit(code=1)
 
 
+def _assert_safe_output_dir(output: Path | None, project_root: Path | None = None) -> None:
+    """Zero Workspace Mutation 防护：禁止输出目录指向项目根、源码目录或 Git 内部。"""
+    if output is None:
+        return
+    root = (project_root or Path.cwd()).resolve()
+    resolved_out = output.resolve()
+    if resolved_out == root:
+        _fail("安全拦截：--output 不能直接指向项目根目录，请指定子目录（如 ./research-output）")
+    source_dir = (root / "research_tool").resolve()
+    if resolved_out == source_dir or source_dir in resolved_out.parents:
+        _fail("安全拦截：--output 不能指向 research_tool 源代码目录")
+    git_dir = (root / ".git").resolve()
+    if resolved_out == git_dir or git_dir in resolved_out.parents:
+        _fail("安全拦截：--output 不能指向 .git 目录")
+
+
 def _fail_video_ingest(exc: VideoIngestError) -> None:
     """VideoIngestError 失败路径：渲染 M-010 3 段式 + 仲裁退出码。
 
@@ -959,6 +975,7 @@ def run(
     V1.1 扩展：传 --video-url 时进入 VideoIngest 流程（下载→转写→总结→raw/）。
     """
     # V1.1 VideoIngest 入口：--video-url 优先于其他 stage
+    _assert_safe_output_dir(output)
     if video_url:
         _run_video_ingest(
             topic=topic,
@@ -982,6 +999,8 @@ def run(
     if mode is None:
         mode_stages = list(configured.stages)
     elif effective_mode == "brief":
+        if os.environ.get("RESEARCH_AGENT_STRICT", "0") == "1":
+            _fail("安全拦截：当前环境开启了 RESEARCH_AGENT_STRICT，严禁使用 --mode brief 偷懒缩水，必须执行完整管线！")
         logger.warning(
             "⚠️ 警告：当前以 --mode brief 运行，仅执行 collect → clean → report（跳过抽取与知识树构建）。"
             "正式深度调研请使用默认九段管线或 --mode full。"

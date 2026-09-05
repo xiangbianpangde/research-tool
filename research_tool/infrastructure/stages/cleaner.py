@@ -7,6 +7,7 @@ async filter_relevance() 是可选 LLM 过滤步骤，pipeline 在 process 之�
 
 from __future__ import annotations
 
+import asyncio
 import re
 from html import unescape
 from pathlib import Path
@@ -14,7 +15,7 @@ from pathlib import Path
 from pydantic import BaseModel, Field
 
 from ..llm.base import LLMClient
-from ...domain.errors import LLMAuthenticationError
+from ...domain.errors import LLMAuthenticationError, StageError
 from ...domain.models import CleanerConfig, CleanResult, FileQuality
 from .base import ensure_dir, write_json, write_text
 
@@ -154,9 +155,11 @@ def _dedup_groups(
 ) -> dict[str, str]:
     """items: [(name, shingles, length)]；返回 {被丢弃 name → 胜出 name}。
 
-    union-find 合并相似文档，组内保留 length 最大者。文档数 typically <200，
-    O(n²) Jaccard 在 ms 级别，无需额外依赖。
+    union-find 合并相似文档，组内保留 length 最大者。
+    当 threshold <= 0 时表示关闭去重，必须直接返回空字典（防止误合并全部文档）。
     """
+    if threshold <= 0.0 or threshold > 1.0 or not items:
+        return {}
     n = len(items)
     parent = list(range(n))
 
@@ -256,7 +259,15 @@ class Cleaner:
 
         cleaned = _BLANKS.sub("\n\n", "\n".join(lines)).strip()
         if len(cleaned) > cfg.max_content_length:
-            cleaned = cleaned[: cfg.max_content_length].rsplit("\n", 1)[0]
+            limit = cfg.max_content_length
+            # 仅在尾部 1000 字符的有限窗口内搜寻断段边界，避免退回过早换行清空正文（P1 反例保护）
+            window_start = max(0, limit - 1000)
+            window = cleaned[window_start:limit]
+            last_nl = window.rfind("\n")
+            if last_nl != -1:
+                cleaned = cleaned[: window_start + last_nl].rstrip()
+            else:
+                cleaned = cleaned[:limit]
             cleaned += "\n\n<!-- [clean: truncated to max_content_length] -->"
 
         if header:
@@ -303,12 +314,12 @@ class Cleaner:
                 score=round(len(cleaned) / orig_size, 3) if orig_size else 0.0,
                 issues=issues,
             )
-            # 只把"非过短"的纳入去重：避免空壳/全是元数据被错配
-            if self.config.dedup_similarity < 1.0 and body_len >= self.config.min_content_length:
+            # 只把"非过短"且开启去重的纳入去重：0=关闭去重，避免全量文档合并
+            if 0.0 < self.config.dedup_similarity < 1.0 and body_len >= self.config.min_content_length:
                 dedup_items.append((src.stem, _shingles(cleaned_body), body_len))
 
         # MinHash 去重：相似组保留最长，其余从 clean/ 删除并标 dedup_of:<胜者>
-        if dedup_items:
+        if self.config.dedup_similarity > 0.0 and dedup_items:
             losers = _dedup_groups(dedup_items, self.config.dedup_similarity)
             for loser_name, winner_name in losers.items():
                 loser_path = clean_dir / f"{loser_name}.md"
@@ -332,7 +343,7 @@ class Cleaner:
         """LLM 批量给 clean/*.md 打 0-1 相关性分；低于阈值的从 clean/ 删除
         （raw/ 保留以便溯源），quality.json 加 relevance_score 并标 low_relevance。
 
-        失败回退：单批 LLM 异常 → 该批全部默认通过（不误杀），下批继续。
+        失败策略：默认 fail_closed（抛出 StageError）防止在 429/超时时无脑放行未打分脏数据。
         """
         threshold = self.config.relevance_threshold
         batch_size = self.config.relevance_batch_size
@@ -350,13 +361,25 @@ class Cleaner:
                 + "\n\n".join(f"[{i}] 《{t}》\n{e}" for i, (t, e) in enumerate(entries))
                 + f"\n\n返回 JSON：{{scores:[{len(entries)} 个浮点数，顺序对应]}}。"
             )
-            try:
-                res = await llm.chat_structured(prompt, _Scores, system=_SCORE_SYSTEM)
-                scores = list(res.scores)
-            except LLMAuthenticationError:
-                raise
-            except Exception:  # noqa: BLE001 - 非鉴权失败时全批默认通过
-                scores = [1.0] * len(batch)
+            # 有界重试（最多 2 次），严禁在 429/超时异常下无脑 fail-open 返回 1.0 放行
+            scores: list[float] | None = None
+            last_err: Exception | None = None
+            for attempt in range(1, 3):
+                try:
+                    res = await llm.chat_structured(prompt, _Scores, system=_SCORE_SYSTEM)
+                    scores = list(res.scores)
+                    break
+                except LLMAuthenticationError:
+                    raise
+                except Exception as e:
+                    last_err = e
+                    if attempt < 2:
+                        await asyncio.sleep(1.0)
+            if scores is None:
+                if self.config.relevance_fail_open:
+                    scores = [1.0] * len(batch)
+                else:
+                    raise StageError("clean", f"LLM 相关性过滤失败（避免 fail-open 放行未打分脏数据）: {last_err}")
 
             for i, path in enumerate(batch):
                 score = scores[i] if i < len(scores) else 1.0

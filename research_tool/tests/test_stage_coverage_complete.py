@@ -364,7 +364,7 @@ async def test_cleaner_relevance_non_auth_error_defaults_to_keep(tmp_path):
         clean_dir=clean_dir,
     )
 
-    filtered = await Cleaner().filter_relevance(
+    filtered = await Cleaner(CleanerConfig(relevance_fail_open=True)).filter_relevance(
         result, _ScoresLLM(error=RuntimeError("temporary")), "topic"
     )
 

@@ -37,6 +37,7 @@ _MODE_DEFAULTS: dict[str, dict[str, Any]] = {
         "stages": list(_STANDARD_STAGES),
         "collector": {"search_rounds": 1, "deep_search": False},
         "deepen": {"profile_iterations": 1},
+        "cleaner": {"relevance_filter": True},
         "extractor": {"enabled": True, "fail_on_chunk_error": True},
         "max_backward_rounds": 0,
         "llm_stage_attempts": 3,

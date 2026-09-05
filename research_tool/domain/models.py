@@ -230,10 +230,11 @@ class CleanerConfig(BaseModel):
     # 最长文本，其余标 dedup_of。0=关闭去重。
     dedup_similarity: float = Field(default=0.85, ge=0.0, le=1.0)
     # LLM 相关性过滤（P2-5）：批量对清洗后文档评 0-1 分，低分剔出 clean/（raw/
-    # 保留以便溯源）。默认关——开启会显著增加 LLM 调用。
+    # 保留以便溯源）。由 mode resolver（full/nine-loop）统一开启，类默认保持 false 兼容纯算法场景。
     relevance_filter: bool = False
     relevance_threshold: float = Field(default=0.4, ge=0.0, le=1.0)
     relevance_batch_size: int = Field(default=10, gt=0)
+    relevance_fail_open: bool = False  # 严禁 fail-open 默认 1.0 放行未打分脏数据；仅兼容历史单测模拟
 
 
 class ExtractorConfig(BaseModel):

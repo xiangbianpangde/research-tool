@@ -208,3 +208,68 @@ def test_cli_dry_run_with_deepen_as_strategy(tmp_path: Path) -> None:
     assert result.exit_code == 0
     assert "collect → clean → extract → organize → report" in result.output
     assert "deepen" not in result.output
+
+
+# --------------------------------------------------------------------------- #
+# 5) Sol 终审闭环测试：Clean 状态机 Marker、DAG 依赖、Protected Output Path
+# --------------------------------------------------------------------------- #
+
+def test_clean_requires_completion_marker_when_relevance_filter_active(tmp_path: Path) -> None:
+    """Sol 终审 P0 闭环：当 clean.relevance_filter=True 时，即使已有 clean/*.md 文件，
+    若无 .stage-complete/clean.json marker，禁止误判为已完成。"""
+    from research_tool.domain.models import CleanerConfig
+    topic_dir = tmp_path / "paper"
+    clean_dir = topic_dir / "clean"
+    clean_dir.mkdir(parents=True)
+    (clean_dir / "01.md").write_text("clean text", encoding="utf-8")
+
+    cfg = PipelineConfig(
+        topic="paper",
+        work_dir=tmp_path,
+        stages=["clean"],
+        cleaner=CleanerConfig(relevance_filter=True),
+    )
+    pipe = ResearchPipeline(cfg)
+    # 无 marker 时必须判定未完成，重新执行以确保语义打分闭环
+    assert pipe._stage_is_complete("clean", topic_dir, clean_dir, ["*.md"]) is False
+
+    # 写入成功 marker 后，resume 正确判定为已完成
+    pipe._mark_stage_complete(topic_dir, "clean")
+    assert pipe._stage_is_complete("clean", topic_dir, clean_dir, ["*.md"]) is True
+
+
+def test_pipeline_stage_dag_invariants_reject_invalid_orders() -> None:
+    """Sol 终审 P2 闭环：Pipeline 构造时严格校验 DAG 拓扑顺序，禁止倒置依赖。"""
+    from research_tool.domain.errors import StageError
+
+    # 倒置：extract 早于 clean
+    with pytest.raises(StageError, match="clean 必须在 extract 之前执行"):
+        ResearchPipeline(PipelineConfig(stages=["extract", "clean"]))
+
+    # 倒置：organize 早于 clean
+    with pytest.raises(StageError, match="clean 必须在 organize 之前执行"):
+        ResearchPipeline(PipelineConfig(stages=["organize", "clean"]))
+
+    # 倒置：organize 早于 extract
+    with pytest.raises(StageError, match="extract 必须在 organize 之前执行"):
+        ResearchPipeline(PipelineConfig(stages=["organize", "extract"]))
+
+    # 倒置：report 早于 organize
+    with pytest.raises(StageError, match="organize 必须在 report 之前执行"):
+        ResearchPipeline(PipelineConfig(stages=["report", "organize"]))
+
+
+def test_cli_output_path_protection(tmp_path: Path) -> None:
+    """Sol 终审 P1 闭环：Zero Workspace Mutation 工程防线，拦截指向项目根或源码目录的 --output。"""
+    from typer.testing import CliRunner
+    from research_tool.presentation.cli import app
+
+    # 指向根目录拦截
+    res_root = CliRunner().invoke(app, ["run", "topic", "-o", ".", "--dry-run"])
+    assert res_root.exit_code != 0
+    assert "安全拦截" in res_root.output
+
+    # 指向源码目录拦截
+    res_src = CliRunner().invoke(app, ["run", "topic", "-o", "./research_tool", "--dry-run"])
+    assert res_src.exit_code != 0
+    assert "安全拦截" in res_src.output

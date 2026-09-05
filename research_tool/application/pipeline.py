@@ -45,6 +45,7 @@ class ResearchPipeline:
 
     def __init__(self, config: PipelineConfig) -> None:
         self.config = config
+        self._validate_stage_dag(config.stages)
         self._llm: LLMClient | None = None
         self._result: PipelineResult | None = None
         # B8 产品集成装配点：kill-switch=false → 逐字节 legacy（忽略一切子 flag）。
@@ -91,6 +92,19 @@ class ResearchPipeline:
             self._llm = LLMClient.from_config(self.config.llm)
         return self._llm
 
+    @staticmethod
+    def _validate_stage_dag(stages: list[str]) -> None:
+        """拓扑 DAG 顺序校验：当阶段列表中包含前置与后置阶段时，顺序必须严格满足因果依赖。"""
+        order = {s: i for i, s in enumerate(stages)}
+        if "clean" in order and "extract" in order and order["clean"] > order["extract"]:
+            raise StageError("pipeline", "阶段拓扑错误：clean 必须在 extract 之前执行")
+        if "clean" in order and "organize" in order and order["clean"] > order["organize"]:
+            raise StageError("pipeline", "阶段拓扑错误：clean 必须在 organize 之前执行")
+        if "extract" in order and "organize" in order and order["extract"] > order["organize"]:
+            raise StageError("pipeline", "阶段拓扑错误：extract 必须在 organize 之前执行")
+        if "organize" in order and "report" in order and order["organize"] > order["report"]:
+            raise StageError("pipeline", "阶段拓扑错误：organize 必须在 report 之前执行")
+
     def _stage_uses_llm(self, stage: str) -> bool:
         if stage == "collect":
             return bool(
@@ -117,9 +131,12 @@ class ResearchPipeline:
         marker = self._completion_marker(topic_dir, stage)
         if marker.is_file():
             return True
-        # 旧版本没有 marker：非 LLM 阶段仍兼容历史产物；三个核心 LLM 阶段
-        # 必须有成功 marker，避免把超时前留下的部分文件误判成完整阶段。
-        if stage in {"extract", "organize", "report"}:
+        # 旧版本没有 marker：非 LLM 阶段仍兼容历史产物；
+        # 核心 LLM 阶段（含开启 relevance_filter 的 clean）必须有成功 marker，
+        # 避免把超时/崩溃/鉴权失败前留下的部分文件误判成完整阶段（P0 状态机防护）。
+        if stage in {"extract", "organize", "report"} or (
+            stage == "clean" and self.config.cleaner.relevance_filter
+        ):
             return False
         return has_output(out_dir, patterns)
 

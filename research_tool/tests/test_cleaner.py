@@ -1,3 +1,5 @@
+import pytest
+
 from research_tool.domain.models import CleanerConfig
 from research_tool.infrastructure.stages.cleaner import Cleaner
 
@@ -69,3 +71,54 @@ def test_clean_truncates_oversized_content():
     out = Cleaner(cfg).clean_text(huge_body)
     assert len(out) < 2000
     assert "truncated to max_content_length" in out
+
+
+def test_clean_truncation_does_not_overtruncate_when_newline_is_early():
+    """Sol 终审反例验证：当 50k 之前唯一的换行很靠前时，严禁无限向前回退导致正文被清空。"""
+    # 前 10 字符有唯一换行，后续 60,000 字符为长段文本无任何换行
+    body_content = "Hello\n" + ("A" * 60000)
+    cfg = CleanerConfig(max_content_length=50000)
+    out = Cleaner(cfg).clean_text(body_content)
+    # 必须保留接近 50,000 字符，绝对不能退回 index 5 只剩下 'Hello'
+    assert len(out) >= 49000
+    assert "truncated to max_content_length" in out
+
+
+def test_clean_dedup_similarity_zero_disables_deduplication(tmp_path):
+    """Sol 终审 P1 验证：dedup_similarity=0 表示关闭去重，严禁误将所有文档合并。"""
+    raw_dir = tmp_path / "raw"
+    raw_dir.mkdir()
+    doc1 = raw_dir / "01.md"
+    doc2 = raw_dir / "02.md"
+    content = "Substantial text paragraph with distinct data and keywords. " * 10
+    doc1.write_text(content, encoding="utf-8")
+    doc2.write_text(content, encoding="utf-8")
+
+    cfg = CleanerConfig(min_content_length=50, dedup_similarity=0.0)
+    res = Cleaner(cfg).process(raw_dir, tmp_path)
+    # 两篇相同内容的文档均应保留，不触发任何 dedup 合并
+    assert len(res.files) == 2
+    assert (tmp_path / "clean" / "01.md").exists()
+    assert (tmp_path / "clean" / "02.md").exists()
+
+
+@pytest.mark.asyncio
+async def test_clean_filter_relevance_fail_closed(tmp_path):
+    """Sol 终审 P1 验证：默认 fail_closed，当 LLM 抛出异常时抛出 StageError，严禁无脑返回 1.0 放行脏数据。"""
+    import pytest
+    from research_tool.domain.errors import StageError
+    from research_tool.domain.models import CleanResult, FileQuality
+    from research_tool.infrastructure.llm.mock import MockLLMClient
+
+    clean_dir = tmp_path / "clean"
+    clean_dir.mkdir()
+    p = clean_dir / "01.md"
+    p.write_text("content", encoding="utf-8")
+    cr = CleanResult(files=[p], quality_report={"01": FileQuality(original_size=7, cleaned_size=7, score=1)}, clean_dir=clean_dir)
+
+    class FailingLLM(MockLLMClient):
+        async def chat_structured(self, prompt, schema, system=None):
+            raise RuntimeError("MiniMax 429 RateLimit")
+
+    with pytest.raises(StageError, match="避免 fail-open"):
+        await Cleaner(CleanerConfig(relevance_fail_open=False)).filter_relevance(cr, FailingLLM(), "topic")

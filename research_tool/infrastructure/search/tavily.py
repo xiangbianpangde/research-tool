@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+import threading
 
 from ...domain.errors import SearchError
 from ._http import get_default_proxy
@@ -40,6 +41,7 @@ class TavilyBackend(SearchBackend):
             )
         self._keys = pool
         self._idx = 0
+        self._lock = threading.Lock()
 
     def _search_with_key(self, key: str, query: str, max_results: int) -> list[SearchHit]:
         from tavily import TavilyClient  # noqa: PLC0415
@@ -72,10 +74,12 @@ class TavilyBackend(SearchBackend):
         n = len(self._keys)
         offset = 0  # 已确认耗尽的 key 数（跳过）
         while offset < n:
-            key = self._keys[(self._idx + offset) % n]
+            with self._lock:
+                key = self._keys[(self._idx + offset) % n]
             try:
                 hits = self._search_with_key(key, query, max_results)
-                self._idx = (self._idx + offset) % n  # 记住可用 key 位置
+                with self._lock:
+                    self._idx = (self._idx + offset) % n  # 记住可用 key 位置
                 return hits
             except UsageLimitExceededError as e:
                 last_err = e
