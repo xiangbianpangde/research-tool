@@ -172,14 +172,13 @@ def _find_repo_root(start: Path | None = None) -> Path | None:
     return None
 
 
-def _assert_safe_output_dir(output: Path | None, configured_dir: Path | None = None) -> None:
-    """Zero Workspace Mutation 硬防护（P1-E 闭环）：
-    禁止将输出目录指定为项目根目录、或仓库内任何源码/文档/测试目录。
+def _assert_safe_output_dir(target_dir: Path | None) -> None:
+    """Zero Workspace Mutation 硬防护（P1-E 终极闭环）：
+    禁止将任何实际落盘目录指定为项目根目录、或仓库内任何源码/文档/测试/配置目录。
     """
-    target = output or configured_dir
-    if target is None:
+    if target_dir is None:
         return
-    resolved_out = target.resolve()
+    resolved_out = target_dir.resolve()
     repo_root = _find_repo_root()
     if repo_root is not None:
         if resolved_out == repo_root:
@@ -187,8 +186,8 @@ def _assert_safe_output_dir(output: Path | None, configured_dir: Path | None = N
         if resolved_out.is_relative_to(repo_root):
             rel = resolved_out.relative_to(repo_root)
             top_part = rel.parts[0] if rel.parts else ""
-            allowed_prefixes = ("research-output", "work", "tmp", "temp", "dist", "build", "out")
-            if not any(top_part.startswith(prefix) for prefix in allowed_prefixes):
+            allowed_dirs = {"research-output", "work", "tmp", "temp", "dist", "build", "out", "output"}
+            if top_part not in allowed_dirs:
                 _fail(f"安全拦截（Zero Workspace Mutation）：禁止向仓库源码/资产/文档目录（{top_part}）输出调研产物！请指定 ./research-output")
     else:
         if (resolved_out / "research_tool").exists() or (resolved_out / ".git").exists():
@@ -411,6 +410,7 @@ def ingest_pdf(
     model: Optional[str] = typer.Option(None, "--model", help="翻译用 LLM 模型"),
 ) -> None:
     """用 MinerU 把本地 PDF 转为 raw/ Markdown（可选翻译），供后续阶段接力。"""
+    _assert_safe_output_dir(output)
     from ..infrastructure.ingest import PdfIngestor
 
     # 读 config.yaml 的 pdf_ingest 作默认，CLI 参数覆盖，确保 backend/cmd 生效。
@@ -474,7 +474,8 @@ def clean(
     min_length: int = typer.Option(200, "--min-length"),
 ) -> None:
     """阶段2：清洗去噪。"""
-    _assert_safe_output_dir(output)
+    effective_dest = output if output else (input_dir.parent / "clean")
+    _assert_safe_output_dir(effective_dest)
     cfg = CleanerConfig(
         strip_html=not no_strip_html,
         strip_nav=not no_strip_nav,
@@ -501,7 +502,8 @@ def extract(
     model: Optional[str] = typer.Option(None, "--model"),
 ) -> None:
     """阶段3：LLM 抽取实体/关系/三元组。"""
-    _assert_safe_output_dir(output)
+    effective_dest = output if output else (input_dir.parent / "extracted")
+    _assert_safe_output_dir(effective_dest)
     cfg = ExtractorConfig(
         tasks=tasks,
         entity_types=entity_types.split(",") if entity_types else None,
@@ -538,7 +540,8 @@ def organize(
     model: Optional[str] = typer.Option(None, "--model"),
 ) -> None:
     """阶段4：构建知识树。"""
-    _assert_safe_output_dir(output)
+    effective_dest = output if output else (extracted_dir.parent / "tree")
+    _assert_safe_output_dir(effective_dest)
     cfg = OrganizerConfig(max_nodes=max_nodes, min_nodes=min_nodes)
     work_dir = output.parent if output else None
     topic_hint = topic or input_topic_from_dir(extracted_dir)
@@ -564,7 +567,8 @@ def report(
     model: Optional[str] = typer.Option(None, "--model"),
 ) -> None:
     """阶段5：合成调研报告。"""
-    _assert_safe_output_dir(output)
+    effective_dest = output if output else (tree_dir.parent / "report.md")
+    _assert_safe_output_dir(effective_dest.parent if effective_dest.suffix else effective_dest)
     cfg = ReporterConfig(format=format, style=style)
     topic_hint = topic or input_topic_from_dir(tree_dir)
 
@@ -1010,7 +1014,7 @@ def run(
         return
 
     configured = load_config(_state["config_path"])
-    _assert_safe_output_dir(output, configured.work_dir)
+    _assert_safe_output_dir(output or configured.work_dir)
     effective_mode = mode or configured.mode
     if effective_mode not in {"brief", "full", "fast", "standard", "deep"}:
         _fail(

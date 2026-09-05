@@ -123,16 +123,9 @@ class ResearchPipeline:
 
     def _clean_input_fingerprint(self, topic_dir: Path) -> str:
         """生成 Clean 阶段完整输入+契约的 SHA-256 签名（P0-C 终极闭环）。
-        涵盖全部 cleaner 配置字段以及 raw/*.md 的真实文件内容字节哈希。
+        涵盖全部 cleaner 配置字段（model_dump 全量序列化）以及 raw/*.md 的真实文件内容字节哈希。
         """
-        cfg_data = {
-            "relevance_filter": bool(self.config.cleaner.relevance_filter),
-            "relevance_threshold": float(self.config.cleaner.relevance_threshold),
-            "dedup_similarity": float(self.config.cleaner.dedup_similarity),
-            "max_content_length": int(self.config.cleaner.max_content_length),
-            "strip_html": bool(self.config.cleaner.strip_html),
-            "strip_ads": bool(self.config.cleaner.strip_ads),
-        }
+        cfg_data = self.config.cleaner.model_dump(mode="json")
         raw_dir = topic_dir / "raw"
         raw_hashes: list[str] = []
         if raw_dir.exists():
@@ -142,7 +135,11 @@ class ResearchPipeline:
                     raw_hashes.append(f"{p.name}:{content_hash}")
                 except OSError:
                     pass
-        blob = json.dumps({"config": cfg_data, "raw_content": raw_hashes}, sort_keys=True)
+        blob = json.dumps({
+            "schema_version": 2,
+            "config": cfg_data,
+            "raw_content": raw_hashes,
+        }, sort_keys=True)
         return hashlib.sha256(blob.encode("utf-8")).hexdigest()
 
     def _stage_uses_llm(self, stage: str) -> bool:

@@ -283,6 +283,17 @@ def test_cli_output_path_protection(tmp_path: Path) -> None:
     assert res_tests.exit_code != 0
     assert "安全拦截" in res_tests.output
 
+    # Sol 第四轮反例：clean 不传 -o，但 input_dir 在 docs/raw，推导出的 docs/clean 必须被拦截
+    docs_raw = Path.cwd() / "docs" / "raw"
+    res_clean_none = CliRunner().invoke(app, ["clean", str(docs_raw)])
+    assert res_clean_none.exit_code != 0
+    assert "安全拦截" in res_clean_none.output
+
+    # Sol 第四轮反例：ingest-pdf 指向 docs/ 必须被拦截
+    res_ingest = CliRunner().invoke(app, ["ingest-pdf", "dummy.pdf", "-T", "demo", "-o", "./docs"])
+    assert res_ingest.exit_code != 0
+    assert "安全拦截" in res_ingest.output
+
 
 def test_clean_marker_bound_to_relevance_config_rejects_stale_marker(tmp_path: Path) -> None:
     """Sol 终审 P0-C 反例闭环：先在 relevance_filter=False 下跑出 marker，
@@ -343,6 +354,41 @@ def test_clean_marker_detects_raw_content_mutation_and_invalidates(tmp_path: Pat
 
     # 3. 校验：指纹识别到真实内容哈希变化，marker 必须判定失效
     assert pipe._stage_is_complete("clean", topic_dir, clean_dir, ["*.md"]) is False
+
+
+def test_clean_marker_covers_all_cleaner_config_fields(tmp_path: Path) -> None:
+    """Sol 第四轮 P0-C 反例闭环：strip_nav/find_content_start/min_content_length
+    变动时，必须使旧 marker 失效，绝不能漏掉 CleanerConfig 任何字段。"""
+    from research_tool.domain.models import CleanerConfig
+    topic_dir = tmp_path / "paper"
+    raw_dir = topic_dir / "raw"
+    clean_dir = topic_dir / "clean"
+    raw_dir.mkdir(parents=True)
+    clean_dir.mkdir(parents=True)
+    (raw_dir / "01.md").write_text("raw text", encoding="utf-8")
+    (clean_dir / "01.md").write_text("clean text", encoding="utf-8")
+
+    # 1. 初始配置 A
+    cfg_a = PipelineConfig(
+        topic="paper",
+        work_dir=tmp_path,
+        stages=["clean"],
+        cleaner=CleanerConfig(strip_nav=True, find_content_start=True, min_content_length=200),
+    )
+    pipe_a = ResearchPipeline(cfg_a)
+    pipe_a._mark_stage_complete(topic_dir, "clean")
+    assert pipe_a._stage_is_complete("clean", topic_dir, clean_dir, ["*.md"]) is True
+
+    # 2. 修改未显式挑选的字段：strip_nav 改为 False
+    cfg_b = PipelineConfig(
+        topic="paper",
+        work_dir=tmp_path,
+        stages=["clean"],
+        cleaner=CleanerConfig(strip_nav=False, find_content_start=True, min_content_length=200),
+    )
+    pipe_b = ResearchPipeline(cfg_b)
+    # 必须识别出配置指纹变动，marker 失效
+    assert pipe_b._stage_is_complete("clean", topic_dir, clean_dir, ["*.md"]) is False
 
 
 def test_agent_strict_blocks_stage_skipping_and_brief(tmp_path: Path, monkeypatch) -> None:
