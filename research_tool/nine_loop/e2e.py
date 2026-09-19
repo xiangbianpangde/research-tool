@@ -19,10 +19,9 @@ caller-provided work directory (task scratch in tests).
 from __future__ import annotations
 
 import argparse
-import hashlib
 import json
-import os
 import pathlib
+import sys
 
 from typing import Any, Callable
 
@@ -32,96 +31,21 @@ from . import inspect_min  # noqa: E402
 from . import knowledge_min  # noqa: E402
 from . import qgate_min  # noqa: E402
 from . import report_min  # noqa: E402
+from .chain_state import (  # noqa: E402
+    STATE_VERSION,
+    E_IDEMPOTENCY_CONFLICT,
+    E_STATE,
+    E_CAS_CONFLICT,
+    ChainStateFault,
+    E2EFault,
+    sha256_bytes,
+    sha256_file,
+    write_atomic,
+    ChainState,
+    canonical_stage_name,
+)
 
 STAGES = ("collect", "network", "inspect", "gate", "report")
-STATE_VERSION = 1
-
-E_IDEMPOTENCY_CONFLICT = "E_IDEMPOTENCY_CONFLICT"
-E_STATE = "E_STATE"
-
-
-class E2EFault(Exception):
-    """Typed fault carrying a contract-style safe message (no payloads)."""
-
-    def __init__(self, code: str, safe_message: str):
-        self.code = code
-        self.safe_message = safe_message
-        super().__init__(safe_message)
-
-
-def sha256_bytes(data: bytes) -> str:
-    return hashlib.sha256(data).hexdigest()
-
-
-def sha256_file(p) -> str:
-    return sha256_bytes(pathlib.Path(p).read_bytes())
-
-
-def write_atomic(target: pathlib.Path, data: bytes) -> None:
-    tmp = target.with_name(target.name + ".tmp-" + str(os.getpid()))
-    try:
-        with open(tmp, "wb") as fh:
-            fh.write(data)
-            fh.flush()
-            os.fsync(fh.fileno())
-        os.replace(tmp, target)
-    except BaseException:
-        try:
-            os.remove(tmp)
-        except OSError:
-            pass
-        raise
-
-
-# --------------------------------------------------------------------------- #
-# Chain state (durable, under work dir)
-# --------------------------------------------------------------------------- #
-class ChainState:
-    def __init__(self, work_dir: pathlib.Path):
-        self.work_dir = pathlib.Path(work_dir)
-        self.artifacts = self.work_dir / "artifacts"
-        self.state_path = self.work_dir / "state.json"
-
-    def load(self, input_key: str) -> dict[str, Any]:
-        if not self.state_path.exists():
-            return {"version": STATE_VERSION, "input_idempotency_key": input_key,
-                    "stages": {}, "done": []}
-        state = json.loads(self.state_path.read_text(encoding="utf-8"))
-        if state.get("input_idempotency_key") != input_key:
-            raise E2EFault(
-                E_IDEMPOTENCY_CONFLICT,
-                "work dir state belongs to a different input idempotency key")
-        return state
-
-    def commit_stage(self, state: dict[str, Any], stage: str,
-                     envelope: dict[str, Any]) -> dict[str, Any]:
-        data = json.dumps(envelope, sort_keys=True, ensure_ascii=False,
-                          separators=(",", ":")).encode("utf-8")
-        target = self.artifacts / f"{stage}.json"
-        self.artifacts.mkdir(parents=True, exist_ok=True)
-        write_atomic(target, data)
-        state["stages"][stage] = sha256_bytes(data)
-        if stage not in state["done"]:
-            state["done"].append(stage)
-        tmp = self.state_path.with_name(
-            self.state_path.name + ".tmp-" + str(os.getpid()))
-        write_atomic(self.state_path,
-                     json.dumps(state, sort_keys=True, ensure_ascii=False,
-                                separators=(",", ":")).encode("utf-8") + b"\n")
-        try:
-            os.remove(tmp)
-        except OSError:
-            pass
-        return state
-
-    def read_stage(self, state: dict[str, Any], stage: str) -> dict[str, Any]:
-        target = self.artifacts / f"{stage}.json"
-        if not target.exists():
-            raise E2EFault(E_STATE, f"missing artifact for stage {stage}")
-        data = target.read_bytes()
-        if sha256_bytes(data) != state["stages"].get(stage):
-            raise E2EFault(E_STATE, f"artifact digest mismatch for {stage}")
-        return json.loads(data.decode("utf-8"))
 
 
 # --------------------------------------------------------------------------- #
@@ -156,7 +80,6 @@ class E2EChain:
                     "work dir already contains a chain for this input; "
                     "use resume mode")
         done = set(state["done"])
-        current: dict[str, Any] | None = None
 
         # ① collect (needs the real pinned child via the adapter client)
         if "collect" in done:

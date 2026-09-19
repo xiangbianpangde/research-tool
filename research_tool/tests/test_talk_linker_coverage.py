@@ -216,3 +216,96 @@ async def test_enrich_ingest_success_partial_failure_and_exception(
     else:
         assert len(report.ingested_urls) == 1
         assert any("部分失败" in warning for warning in report.warnings)
+
+
+@pytest.mark.asyncio
+async def test_run_talk_enrichment_without_state_json_reconstructs_and_merges(tmp_path, monkeypatch):
+    """Bug A verification: datetime/timezone must be defined when reconstructing net_env."""
+    from unittest.mock import AsyncMock, patch
+    from research_tool.domain.config import PipelineConfig
+    from research_tool.domain.models import PipelineResult
+    from research_tool.application.pipeline import ResearchPipeline
+
+    topic_dir = tmp_path / "test_topic"
+    topic_dir.mkdir()
+    tree_dir = topic_dir / "tree"
+    tree_dir.mkdir()
+    (tree_dir / "00-主表.md").write_text("# Outline\n- [[N01|Node 1]]\n", encoding="utf-8")
+    (tree_dir / "N01.md").write_text("<!-- source: https://example.com -->\nContent", encoding="utf-8")
+    raw_dir = topic_dir / "raw"
+    raw_dir.mkdir()
+    (raw_dir / "sources.json").write_text(
+        json.dumps([{
+            "url": "https://openaccess.thecvf.com/paper.pdf",
+            "title": "NeRF in the Wild",
+            "source_engine": "cvpr",
+        }]),
+        encoding="utf-8",
+    )
+
+    pipeline = ResearchPipeline(PipelineConfig(talk=TalkConfig(enabled=True, ingest=False)))
+    result = PipelineResult(topic="NeRF in the Wild", topic_dir=topic_dir)
+    fake_match = TalkMatch(
+        paper_title="NeRF in the Wild",
+        video_url="https://youtube.com/watch?v=123",
+        confidence=0.9,
+        matched=True,
+        video_title="NeRF Talk",
+    )
+
+    with patch("research_tool.application.talk_linker.TalkLinker.find_talk", new=AsyncMock(return_value=fake_match)):
+        events = []
+        async for ev in pipeline._run_talk_enrichment("NeRF in the Wild", topic_dir, result):
+            events.append(ev)
+
+    assert len(events) >= 1
+    assert "merge" in result.stages_completed
+
+
+@pytest.mark.asyncio
+async def test_run_talk_enrichment_with_hash_state_json_handles_dict_and_done(tmp_path):
+    """Bug B and Bug C verification: net_env must be a dict (not hash string) and state must have stages/done."""
+    from unittest.mock import AsyncMock, patch
+    from research_tool.domain.config import PipelineConfig
+    from research_tool.domain.models import PipelineResult
+    from research_tool.application.pipeline import ResearchPipeline
+
+    topic_dir = tmp_path / "test_topic_hash"
+    topic_dir.mkdir()
+    (topic_dir / "state.json").write_text(
+        json.dumps({"stages": {"network": "a" * 64}}),
+        encoding="utf-8",
+    )
+    raw_dir = topic_dir / "raw"
+    raw_dir.mkdir()
+    (raw_dir / "sources.json").write_text(
+        json.dumps([{
+            "url": "https://openaccess.thecvf.com/paper.pdf",
+            "title": "NeRF in the Wild",
+            "source_engine": "cvpr",
+        }]),
+        encoding="utf-8",
+    )
+
+    pipeline = ResearchPipeline(PipelineConfig(talk=TalkConfig(enabled=True, ingest=False)))
+    result = PipelineResult(topic="NeRF in the Wild", topic_dir=topic_dir)
+    fake_match = TalkMatch(
+        paper_title="NeRF in the Wild",
+        video_url="https://youtube.com/watch?v=123",
+        confidence=0.9,
+        matched=True,
+        video_title="NeRF Talk",
+    )
+
+    with patch("research_tool.application.talk_linker.TalkLinker.find_talk", new=AsyncMock(return_value=fake_match)):
+        events = []
+        async for ev in pipeline._run_talk_enrichment("NeRF in the Wild", topic_dir, result):
+            events.append(ev)
+
+    assert "merge" in result.stages_completed
+    updated_state = json.loads((topic_dir / "state.json").read_text(encoding="utf-8"))
+    assert "network" in updated_state["stages"]
+    assert "merge" in updated_state["stages"]
+    assert "network" in updated_state["done"]
+    assert "merge" in updated_state["done"]
+

@@ -7,9 +7,9 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Literal
+from typing import Any, Literal
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 # --------------------------------------------------------------------------- #
 # 配置模型
@@ -36,8 +36,70 @@ SearchEngine = Literal[
     "twitter",
 ]
 ExtractTask = Literal["ner", "re", "triple"]
-StageName = Literal["collect", "deepen", "clean", "extract", "organize", "report"]
+StageName = Literal[
+    # Canonical 9 stages (Protocol v1)
+    "collect",
+    "clean",
+    "extract",
+    "knowledge",
+    "inspect",
+    "targeted",
+    "merge",
+    "qgate",
+    "report",
+    # Official contract aliases
+    "network",
+    "gate",
+    # Backward compatibility aliases
+    "organize",
+    "deepen",
+]
+
+CANONICAL_STAGES: tuple[StageName, ...] = (
+    "collect",
+    "clean",
+    "extract",
+    "knowledge",
+    "inspect",
+    "targeted",
+    "merge",
+    "qgate",
+    "report",
+)
+
+STAGE_ALIASES: dict[str, str] = {
+    "network": "knowledge",
+    "knowledge": "network",
+    "gate": "qgate",
+    "qgate": "gate",
+    "organize": "knowledge",
+    "deepen": "targeted",
+}
+
+STAGE_CANONICAL_DOMAIN: dict[str, str] = {
+    "network": "knowledge",
+    "gate": "qgate",
+    "organize": "knowledge",
+    "deepen": "targeted",
+}
+
+
+def normalize_stage_name(stage: str) -> str:
+    """将阶段名或别名规范化为领域模型标准阶段名。
+
+    支持首尾空白去除、大小写兼容，映射规则：
+      - 'network'  -> 'knowledge'
+      - 'gate'     -> 'qgate'
+      - 'organize' -> 'knowledge'
+      - 'deepen'   -> 'targeted'
+      - 其余名称保持原样（经 strip().lower() 处理）
+    """
+    cleaned = stage.strip().lower()
+    return STAGE_CANONICAL_DOMAIN.get(cleaned, cleaned)
+
+
 ResearchMode = Literal["brief", "full", "fast", "standard", "deep"]
+
 
 
 class LLMConfig(BaseModel):
@@ -50,8 +112,8 @@ class LLMConfig(BaseModel):
     temperature: float = Field(default=0.3, ge=0.0, le=2.0)
     max_tokens: int = Field(default=4096, gt=0)
     connect_timeout_sec: float = Field(default=10.0, gt=0)
-    read_timeout_sec: float = Field(default=120.0, gt=0)
-    request_timeout_sec: float = Field(default=180.0, gt=0)
+    read_timeout_sec: float = Field(default=300.0, gt=0)
+    request_timeout_sec: float = Field(default=300.0, gt=0)
     sdk_max_retries: int = Field(default=0, ge=0, le=5)
 
 
@@ -234,7 +296,8 @@ class CleanerConfig(BaseModel):
     relevance_filter: bool = False
     relevance_threshold: float = Field(default=0.4, ge=0.0, le=1.0)
     relevance_batch_size: int = Field(default=10, gt=0)
-    relevance_fail_open: bool = False  # 严禁 fail-open 默认 1.0 放行未打分脏数据；仅兼容历史单测模拟
+    # 严禁 fail-open 默认 1.0 放行未打分脏数据；仅兼容历史单测模拟
+    relevance_fail_open: bool = False
 
 
 class ExtractorConfig(BaseModel):
@@ -358,26 +421,98 @@ class NineLoopConfig(BaseModel):
         return self
 
 
+class BudgetLeaseConfig(BaseModel):
+    """⑧ QGate 预算租约限制。"""
+
+    lease_id: str | None = None
+    tokens_max: int = Field(default=1_000_000, gt=0)
+    cost_max: float = Field(default=10.0, gt=0.0)
+    wall_s_max: float = Field(default=600.0, gt=0.0)
+    search_calls_max: int = Field(default=50, gt=0)
+
+
+class QGateConfig(BaseModel):
+    """⑧ QGate 质量门控判定阈值。"""
+
+    max_high_findings: int = Field(default=0, ge=0)
+    max_total_findings: int = Field(default=10, ge=0)
+    strict_pass: bool = False
+    budget_lease: BudgetLeaseConfig = Field(default_factory=BudgetLeaseConfig)
+
+
+class InspectConfig(BaseModel):
+    """⑤ Inspect 阶段检视规则配置。"""
+
+    enabled: bool = True
+    rules: list[str] = Field(
+        default_factory=lambda: ["contradiction", "orphan_node", "span_incomplete"]
+    )
+    priority_filter: list[Literal["high", "medium", "low"]] = Field(
+        default_factory=lambda: ["high", "medium", "low"]
+    )
+    min_gap_severity: Literal["high", "medium", "low"] = "medium"
+
+
+class TargetedConfig(BaseModel):
+    """⑥ Targeted 阶段靶向补搜预算与调度配置。"""
+
+    max_rounds: int = Field(default=3, ge=1, le=5)
+    max_queries: int = Field(default=10, ge=1, le=30)
+    max_queries_per_round: int | None = Field(default=None, ge=1, le=30)
+    max_results_per_query: int = Field(default=5, ge=1, le=15)
+    search_depth: int = Field(default=2, ge=1)
+    time_cutoff_utc: str | None = None
+
+    @model_validator(mode="after")
+    def _sync_max_queries(self) -> "TargetedConfig":
+        if self.max_queries_per_round is not None:
+            self.max_queries = self.max_queries_per_round
+        else:
+            self.max_queries_per_round = self.max_queries
+        return self
+
+
 class PipelineConfig(BaseModel):
-    """管道总配置。依据 01 §7.3 + 03 §2。"""
+    """管道总配置。依据 01 §7.3 + 03 §2。原生九段闭环架构。"""
 
     topic: str = ""
     mode: ResearchMode = "full"
     work_dir: Path = Path("./research-output")
     stages: list[StageName] = Field(
-        default_factory=lambda: ["collect", "deepen", "clean", "extract", "organize", "report"]
+        default_factory=lambda: list(CANONICAL_STAGES)
     )
+
+    @field_validator("stages", mode="before")
+    @classmethod
+    def _normalize_stages(cls, v: Any) -> Any:
+        if isinstance(v, (list, tuple, set)):
+            cleaned_stages = [s.strip().lower() if isinstance(s, str) else s for s in v]
+            has_closed_loop = any(
+                s in cleaned_stages
+                for s in ("inspect", "targeted", "merge", "qgate", "gate")
+            )
+            normalized = []
+            for s in cleaned_stages:
+                if not isinstance(s, str):
+                    normalized.append(s)
+                    continue
+                if not has_closed_loop and s in ("deepen", "organize"):
+                    normalized.append(s)
+                else:
+                    normalized.append(normalize_stage_name(s))
+            return normalized
+        return v
     collector: CollectorConfig = Field(default_factory=CollectorConfig)
-    deepen: DeepenConfig = Field(default_factory=DeepenConfig)
     pdf_ingest: PdfIngestConfig = Field(default_factory=PdfIngestConfig)
     pdf_dir: str | None = None  # 设置后 collect 阶段改为摄取该目录下的 PDF
     cleaner: CleanerConfig = Field(default_factory=CleanerConfig)
     extractor: ExtractorConfig = Field(default_factory=ExtractorConfig)
-    organizer: OrganizerConfig = Field(default_factory=OrganizerConfig)
+    inspect: InspectConfig = Field(default_factory=InspectConfig)
+    targeted: TargetedConfig = Field(default_factory=TargetedConfig)
+    qgate: QGateConfig = Field(default_factory=QGateConfig)
     reporter: ReporterConfig = Field(default_factory=ReporterConfig)
     talk: TalkConfig = Field(default_factory=TalkConfig)
     llm: LLMConfig = Field(default_factory=LLMConfig)
-    nine_loop: NineLoopConfig = Field(default_factory=NineLoopConfig)
     resume: bool = True  # 幂等跳过已完成 Stage（05 §5）
     # LLM 阶段级恢复：SDK 层默认不重试，统一由 pipeline 做有界重试，避免 SDK
     # 默认 600s 超时叠加隐式重试。鉴权错误永不重试。
@@ -386,9 +521,15 @@ class PipelineConfig(BaseModel):
     # LLM 健康检查探针超时（秒）。慢端点（如 Paratera/代理链路）可调大，
     # 避免“健康检查超时”误杀阶段（默认 10s 偏紧）。
     llm_healthcheck_timeout_sec: float = Field(default=10.0, ge=1, le=300)
-    # 反向传播（P2-6）：完成一次正向后，让 organizer 评估知识树质量，把稀疏节点/
-    # 知识断层/矛盾产出修正查询回到 collect 重跑。0=不启用（向后兼容）。
-    max_backward_rounds: int = Field(default=0, ge=0, le=3)
+
+    # ----------------------------------------------------------------------- #
+    # 兼容过渡字段：保留属性访问与传参兼容性，但在序列化（model_dump）中物理排除
+    # ----------------------------------------------------------------------- #
+    deepen: DeepenConfig = Field(default_factory=DeepenConfig, exclude=True)
+    nine_loop: NineLoopConfig = Field(default_factory=NineLoopConfig, exclude=True)
+    organizer: OrganizerConfig = Field(default_factory=OrganizerConfig, exclude=True)
+    max_backward_rounds: int = Field(default=0, ge=0, le=3, exclude=True)
+
 
 
 # --------------------------------------------------------------------------- #

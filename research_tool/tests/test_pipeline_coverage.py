@@ -238,6 +238,9 @@ async def test_talk_enrichment_warning_without_files_stops_before_rerun(tmp_path
 
 @pytest.mark.asyncio
 async def test_talk_enrichment_cleans_outputs_and_skips_disabled_extract(tmp_path, monkeypatch):
+    (tmp_path / "raw").mkdir(parents=True, exist_ok=True)
+    talk_file = tmp_path / "raw" / "talk.md"
+    talk_file.write_text("<!-- source: https://youtube.com/watch?v=123 -->\n<!-- from_paper: paper -->\ncontent", encoding="utf-8")
     for sub in ("clean", "extracted", "tree"):
         directory = tmp_path / sub
         directory.mkdir()
@@ -255,7 +258,11 @@ async def test_talk_enrichment_cleans_outputs_and_skips_disabled_extract(tmp_pat
     executed: list[str] = []
 
     async def fake_enrich(self, topic_dir, topic=""):
-        return TalkEnrichReport(files_written=[topic_dir / "raw" / "talk.md"])
+        from research_tool.application.talk_linker import TalkMatch
+        return TalkEnrichReport(
+            matched=[TalkMatch(paper_title="paper", video_url="https://youtube.com/watch?v=123", confidence=0.9, matched=True)],
+            files_written=[talk_file],
+        )
 
     async def fake_exec(stage, topic, topic_dir, result):
         executed.append(stage)
@@ -267,18 +274,20 @@ async def test_talk_enrichment_cleans_outputs_and_skips_disabled_extract(tmp_pat
     monkeypatch.setattr(pipe, "_exec", fake_exec)
     monkeypatch.setattr(pipe, "_get_llm", lambda: MockLLMClient())
 
+    result_obj = PipelineResult(topic_dir=tmp_path)
     events = [
         event
         async for event in pipe._run_talk_enrichment(
-            "paper", tmp_path, PipelineResult(topic_dir=tmp_path)
+            "paper", tmp_path, result_obj
         )
     ]
 
     assert events[-1].status == "completed"
-    assert executed == ["clean", "organize"]
-    assert not any((tmp_path / sub).exists() for sub in ("clean", "extracted", "tree"))
-    assert not (tmp_path / "report.md").exists()
-    assert not (tmp_path / "report.html").exists()
+    assert executed == []
+    assert all((tmp_path / sub / "stale.txt").exists() for sub in ("clean", "extracted", "tree"))
+    assert (tmp_path / "report.md").exists()
+    assert any(ev.stage == "merge" and ev.status == "completed" for ev in events)
+    assert "merge" in result_obj.stages_completed
 
 
 @pytest.mark.asyncio

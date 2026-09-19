@@ -80,14 +80,16 @@ class TavilyBackend(SearchBackend):
                     available = [k for k in self._keys if k not in self._exhausted_keys]
                     if not available:
                         raise SearchError(
-                            f"Tavily 搜索失败: 所有 {len(self._keys)} 个 key 配额均已耗尽 ({last_err})"
+                            f"Tavily 搜索失败: 所有 {len(self._keys)} 个 key 配额均已耗尽 "
+                            f"({last_err})"
                         )
                     unreserved = [k for k in available if k not in self._reserved_keys]
                     if unreserved:
                         key = unreserved[0]
                         self._reserved_keys.add(key)
                         break
-                    # 所有可用 key 均处于排他 in-flight 预占中，等待在途请求释放（P1-D 真正排他闭环）
+                    # 所有可用 key 均处于排他 in-flight 预占中，
+                    # 等待在途请求释放（P1-D 真正排他闭环）
                     self._cond.wait(timeout=10.0)
 
             try:

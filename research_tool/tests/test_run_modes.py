@@ -3,6 +3,34 @@ from typer.testing import CliRunner
 from research_tool.presentation.cli import app
 
 
+def test_default_dry_run_executes_native_nine_stages():
+    """Default CLI execution without flags runs full 9-stage pipeline."""
+    result = CliRunner().invoke(app, ["run", "topic", "--dry-run"])
+
+    assert result.exit_code == 0
+    assert "mode=full" in result.output
+    assert "collect → clean → extract → knowledge → inspect → targeted → merge → qgate → report" in result.output
+
+
+def test_full_mode_dry_run_executes_native_nine_stages():
+    """Explicit --mode full runs full 9-stage pipeline."""
+    result = CliRunner().invoke(app, ["run", "topic", "--mode", "full", "--dry-run"])
+
+    assert result.exit_code == 0
+    assert "mode=full" in result.output
+    assert "collect → clean → extract → knowledge → inspect → targeted → merge → qgate → report" in result.output
+
+
+def test_brief_mode_dry_run_executes_three_stages_with_warning():
+    """--mode brief runs collect -> clean -> report and emits a warning."""
+    result = CliRunner().invoke(app, ["run", "topic", "--mode", "brief", "--dry-run"])
+
+    assert result.exit_code == 0
+    assert "mode=brief" in result.output
+    assert "collect → clean → report" in result.output
+    assert "警告" in result.output or "WARNING" in result.output
+
+
 def test_fast_mode_dry_run_skips_deepen_without_network():
     result = CliRunner().invoke(app, ["run", "topic", "--mode", "fast", "--dry-run"])
 

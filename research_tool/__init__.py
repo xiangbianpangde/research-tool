@@ -38,6 +38,7 @@ except Exception:  # noqa: S110  # .env autoload — best-effort, must not block
     pass
 
 from pathlib import Path
+from typing import Any
 
 from .domain.config import load_config
 from .domain.errors import (
@@ -116,15 +117,26 @@ async def research(
     llm_provider: str = "deepseek",
     llm_model: str | None = None,
     config_path: str | Path | None = None,
+    **kwargs: Any,
 ) -> PipelineResult:
-    """一键调研便捷函数（03 §5）。"""
+    """一键调研便捷函数（03 §5）。原生驱动九段闭环管线。"""
     overrides: dict = {
         "topic": topic,
         "work_dir": str(work_dir),
         "llm": {"provider": llm_provider},
     }
+    if "stages" not in kwargs:
+        overrides["stages"] = [
+            "collect",
+            "clean",
+            "extract",
+            "organize",
+            "report",
+        ]
     if llm_model:
         overrides["llm"]["model"] = llm_model
+    if kwargs:
+        overrides.update(kwargs)
     config = load_config(config_path, overrides=overrides)
     return await ResearchPipeline(config).run(topic)
 

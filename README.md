@@ -7,8 +7,8 @@
 
 <p align="center">
   <img src="https://img.shields.io/badge/Python-3.11+-3776AB?logo=python&logoColor=white" alt="Python 3.11+">
-  <img src="https://img.shields.io/badge/Pipeline-v1.0.0%20Decoupled%205--Stage-blueviolet" alt="Pipeline">
-  <img src="https://img.shields.io/badge/Tests-850+%20Passed-brightgreen" alt="Tests">
+  <img src="https://img.shields.io/badge/Pipeline-v2.0%20Native%209--Stage%20Closed--Loop-blueviolet" alt="Pipeline">
+  <img src="https://img.shields.io/badge/Tests-1760+%20Passed-brightgreen" alt="Tests">
   <img src="https://img.shields.io/badge/Rust%20Core-rt--identity-DEA584?logo=rust&logoColor=white" alt="Rust Core">
   <img src="https://img.shields.io/badge/License-MIT-green" alt="License">
 </p>
@@ -19,8 +19,9 @@
 
 - [🌟 核心亮点](#-核心亮点)
 - [🏗️ 架构与管线流程](#️-架构与管线流程)
-  - [v1.0.0 文件系统解耦五阶段生产管线与九段闭环 Staging 架构](#v100-文件系统解耦五阶段生产管线cli-主管线与九段闭环-staging-架构)
-  - [确定性 Rust 身份核心与模型降级链](#确定性-rust-身份核心与模型降级链)
+  - [v2.0 原生九段闭环生产管线架构](#v20-原生九段闭环生产管线架构)
+  - [管线执行模式：为什么会有 3 阶段与 9 阶段的区别？](#管线执行模式为什么会有-3-阶段与-9-阶段的区别)
+  - [确定性身份核心与模型降级链](#确定性身份核心与模型降级链)
   - [Legacy 六阶段管线（Kill-Switch 回退）](#legacy-六阶段管线kill-switch-回退)
 - [🚀 快速开始与部署](#-快速开始与部署)
   - [交互式部署向导（推荐）](#交互式部署向导推荐)
@@ -49,8 +50,8 @@
 
 ## 🌟 核心亮点
 
-- 🔄 **文件系统解耦五阶段生产管线 + 九段闭环 Staging**：核心生产管线涵盖收集、MinHash清洗、事实抽取、知识拓扑组织与核验报告合成；扩展九段闭环模块处于 shadow 双跑评估。
-- 🦀 **确定性 Rust 身份核心（`rt-identity`）**：URL 规范化、稳定 Hash 与内容去重下沉至 Rust 子进程，性能提升 **10.8×**，内存消耗降低 **8.3×**。
+- 🔄 **原生九段闭环生产管线（Native 9-Stage Closed-Loop）**：CLI 与 SDK 全面升级至原生九段闭环架构（`① 收集 → ② 清洗 → ③ 事实抽取 → ④ 知识网络 → ⑤ 缺口反思 → ⑥ 靶向补搜 → ⑦ 增量合并 → ⑧ 质量门控 → ⑨ 核验报告`），内置自愈补搜循环与 100% 引用覆盖（Citation Coverage 1.0）核验报告合成。
+- 🦀 **确定性身份核心（`rt-identity` + Python 零编译回退）**：URL 规范化、稳定 Hash 与内容去重下沉至 Rust 子进程，性能提升 **10.8×**，内存消耗降低 **8.3×**；同时具备纯 Python（`PythonIdentityEngine`）零依赖透明兜底，任何平台免编译即开即用。
 - 🌐 **15+ 多源学术与全网搜索**：原生集成 OpenAlex（2.5亿+学术文献）、Crossref、arXiv（HTML5 全文 + PDF 回退）、Semantic Scholar、PubMed、DuckDuckGo、Tavily、Google News、GitHub、Wikipedia、X/Twitter、Bilibili、YouTube 及 OpenCLI 浏览器兜底。
 - 🧠 **反偏差深挖（Deepen）与反向自愈**：通过实体拆分、画像注入（英文名去锚）、时间线回溯、同名消歧突破单一锚点偏差；支持按知识树稀疏度自动触发反向补充检索。
 - 📄 **多模态文献综述（PDF Ingest）**：集成 MinerU 与可插拔 OCR 引擎（PaddleOCR-VL / Unlimited-OCR / Vision-LLM），公式/图表/引用完整保留并支持全篇中文翻译。
@@ -62,42 +63,61 @@
 
 ## 🏗️ 架构与管线流程
 
-### v1.0.0 文件系统解耦五阶段生产管线（CLI 主管线）与九段闭环 Staging 架构
+### v2.0 原生九段闭环生产管线架构
 
-当前 **CLI 主调度引擎（`ResearchPipeline`）执行的是严格遵循因果依赖的文件系统解耦 5 阶段生产管线**（`① 收集 → ② 清洗 → ③ 抽取事实 → ④ 组织知识 → ⑨ 合成报告`），其中 Deepen 已全面降级为 Collect 内部的可选反偏差画像策略（`deepen_as_strategy: true`），彻底杜绝在 Clean 清洗前盲目并发抓取脏数据的缺陷。
+当前 **CLI 主调度引擎与 Python SDK（`ResearchPipeline`）执行的是严格遵循因果依赖的原生九段闭环生产管线**（`① 收集 → ② 清洗 → ③ 事实抽取 → ④ 知识网络 → ⑤ 缺口检视 → ⑥ 针对补搜 → ⑦ 增量合并 → ⑧ 质量与预算门 → ⑨ 核验报告`）。各阶段通过文件系统不可变资产传递，实现全链路断点可恢复与严格因果隔离。
 
-> ℹ️ **九段闭环演进状态说明（Staging / Shadow Sidecar）**：  
-> 完整的九段闭环高级组件（`research_tool/nine_loop/` 中的 Network、Inspect、Targeted、Merge、Gate 模块）已完成算法与契约实现，当前作为 **Staging / Shadow Sidecar 双跑评估**分支（产物落于 `shadow/<run_id>/` 独立目录），待全链路验证稳定后正式接驳主管线调度。
+```
+                    ┌────────────────────────────────────────────────────────┐
+                    │                   自愈补搜反馈闭环 (Self-Healing Loop) │
+                    ▼                                                        │
+Topic ─→ [① Collect] ─→ [② Clean] ─→ [③ Extract] ─→ [④ Knowledge] ─→ [⑤ Inspect] ─→ [⑥ Targeted]
+           raw/          clean/        extracted/      knowledge/       inspect/        targeted/
+                                                                                            │
+                                                                                            ▼
+                                     report.md ◀─── [⑨ Report] ◀─── [⑧ QGate] ◀─── [⑦ Merge]
+                                                   (Citation 1.0)   (Quality/Budget)   (CAS Tree)
+```
 
-![research-tool 九段闭环](collect/architecture/system/nine-stage-loop.png)
-
-九段闭环执行流如下：
-1. **① 收集 (Collect)**：多源学术与全网检索、arXiv HTML5 全文解析、PDF/视频摄取与原始资产（`raw/_originals/`）归档。
-2. **② 清洗 (Clean)**：`raw/` 保持只读；去除 HTML/广告噪声并定位正文；MinHash（char-5gram Jaccard 0.85）近似去重；按文件记录清洗指标（`clean/quality.json`）；支持增量 delta 清洗。
-3. **③ 事实抽取 (Extract)**：确定性规则与 LLM 并发抽取实体、关系与三元组，Evidence Span 边界强锚定。
-4. **④ 知识网络 (Knowledge)**：实体/关系拓扑构建、Same-Bytes 等价边计算与 Family 节点聚合。
-5. **⑤ 缺口/矛盾 (Inspect)**：深度反思检视，规则引擎扫描证据空白、时间线断层与事实冲突。
-6. **⑥ 针对性补搜 (Targeted)**：针对检视发现的缺口与矛盾生成精准补搜请求（零外网安全断言，仅处理新增定向资料）。
-7. **⑦ 增量合并 (Merge)**：CAS (Write-if-match) 幂等合并、带出处新事实融合与同名消歧。
-8. **⑧ 质量与预算门 (QGate)**：确定性决策树仲裁（质量达标或预算耗尽：否 → 回 ⑤ 循环补搜，是 → 进入 ⑨）。
-9. **⑨ 核验式报告 (Report)**：严格引用断言（Citation Coverage 1.0），未引用事实自动丢弃，多风格专业组装。
+#### 九段闭环执行流与职责划分
 
 | 阶段 | 核心职责 | 产出物 |
 |---|---|---|
-| **① Collect** | 15+ 搜索源聚合、arXiv HTML5 全文解析、PDF/视频多模态摄取、原始资产归档 | `raw/*.md` + `raw/_originals/` + `sources.json` |
-| **② Clean** | 去除 HTML 结构噪声与广告，MinHash 相似度去重（Jaccard），LLM 语义相关性评分过滤 | `clean/*.md` + `quality.json` |
-| **③ Extract** | 并发提取实体（NER）、关系与三元组（Triples），动态 Schema 归纳 | `extracted/*.json` |
-| **④ Knowledge** | 聚合多源证据，构建多层级网络与知识骨架 | `knowledge/*.json` |
-| **⑤ Inspect** | 深度反思：检视证据空白点、时间线断层与事实冲突 | `inspect/gap_analysis.json` |
-| **⑥ Targeted** | 针对 Inspect 发现的缺口与矛盾，生成高精度靶向查询并补采 | `targeted/*.md` |
-| **⑦ Merge** | 实体对齐、同名消歧与增量知识图谱融合 | `tree/00-主表.md` + `tree/N*.md` |
-| **⑧ Gate** | 节点置信度裁决，核查最小证据支撑数（`min_evidence_per_node`） | `gate/verification.json` |
-| **⑨ Report** | 多风格专业报告合成（综述报告 / 可行性分析 / 述评 / 长文） | `report.md` + `run-summary.json` |
+| **① Collect** | 15+ 搜索源聚合、arXiv HTML5 全文解析、PDF/视频多模态摄取、原始资产（`raw/_originals/`）只读归档 | `raw/*.md` + `raw/_originals/` + `sources.json` |
+| **② Clean** | `raw/` 保持只读存证；去除 HTML 噪声/广告，MinHash（char-5gram Jaccard 0.85）近似去重；支持增量 delta 清洗 | `clean/*.md` + `quality.json` |
+| **③ Extract** | 并发提取实体（NER）、关系与三元组（Triples），Evidence Span 边界强锚定 | `extracted/*.json` |
+| **④ Knowledge** | 实体/关系拓扑构建、Same-Bytes 等价边计算与 Family 节点聚合 | `knowledge/*.json` |
+| **⑤ Inspect** | 深度反思检视：规则引擎自动扫描证据空白、时间线断层与事实观点冲突 | `inspect/gap_analysis.json` |
+| **⑥ Targeted** | 针对检视发现的缺口与矛盾，生成高精度靶向查询并补采定向资料 | `targeted/*.md` |
+| **⑦ Merge** | CAS (Write-if-match) 幂等合并、带出处新事实融合与同名消歧 | `tree/00-主表.md` + `tree/N*.md` |
+| **⑧ QGate** | 确定性决策树仲裁（质量达标或预算耗尽：未达标回 ⑤ 循环补搜，达标进入 ⑨） | `gate/verification.json` |
+| **⑨ Report** | 严格引用断言（Citation Coverage 1.0），未引用事实自动丢弃，多风格专业报告合成 | `report.md` + `run-summary.json` |
 
-### 确定性 Rust 身份核心与模型降级链
+---
 
-- **Rust 身份核心（`rt-identity`）**：负责 Canonical URL 解析、Stable ID 生成与 Content Hash 校验，以子进程形式提供高并发确定性支撑。
-- **弹性模型链**：默认支持 Primary → Fallback 故障转移降级链（如 `DeepSeek-V4-Flash` → `MiniMax-M3`），保障长时间运行任务的高韧性。
+### 管线执行模式：为什么会有 3 阶段与 9 阶段的区别？
+
+系统提供分工明确的执行模式，以在**调研深度**与**计算/时间开销**之间取得最优平衡：
+
+1. **`--mode full`（默认 / 生产模式）：完整九段闭环（~20–25 分钟）**
+   - **执行流程**：`collect → clean → extract → knowledge → inspect → targeted → merge → qgate → report`。
+   - **自愈机制**：在 `inspect` 检视到证据断层或矛盾时，自动由 `targeted` 触发补搜，并在 `merge` 增量图谱合并后由 `qgate` 门控仲裁是否收敛。
+   - **适用场景**：正式科研综述、技术路线对比、可行性调研、商业尽职调查等对事实准确度和引用严谨性有强要求的场景。
+
+2. **`--mode brief`（简报模式）：快速三阶段（`collect → clean → report`，~3.7 分钟）**
+   - **执行流程**：仅执行 **① 收集 (Collect) → ② 清洗 (Clean) → ⑨ 报告 (Report)** 3 个核心环节。
+   - **设计初衷**：专为快速巡检与低成本初筛设计。直接跳过深度事实抽取（`extract`）、知识拓扑构建（`knowledge`）、反思检视（`inspect`）、定向补搜（`targeted`）、CAS 树合并（`merge`）与门禁裁决（`qgate`）。
+   - **产物链路**：`report` 阶段直接以 `clean/` 目录中的清洗正文作为输入上下文（`report_input = topic_dir / "clean"`），以极低 Token 快速产出核心结论速览。
+   - **安全约束**：当系统设置环境变量 `RESEARCH_AGENT_STRICT=1` 时，会严格禁止非法的 `--mode brief` 降级，强行保证关键任务的闭环质检完整性。
+
+3. **兼容过渡模式**：保留 `--mode fast` 与 `--mode standard` 供单项阶段演进测试。
+
+---
+
+### 确定性身份核心与模型降级链
+
+- **双模身份核心（Rust `rt-identity` + Python 零编译回退）**：负责 Canonical URL 解析、Stable ID 生成与 Content Hash 校验。检测到已编译二进制时优先采用 Rust 子进程（10.8× 吞吐提升），未编译或纯 Python 生产环境自动无缝回退至内置的 `PythonIdentityEngine`，保证跨平台即开即用零编译负担。
+- **弹性模型链**：原生兼容标准 OpenAI 协议（支持 DeepSeek-V4-Flash、Ark 端点、MiniMax、Claude 等），支持配置 Primary → Fallback 故障转移降级链，保障长时间批处理任务的高韧性。
 
 ### Legacy 六阶段管线（Kill-Switch 回退）
 
@@ -525,11 +545,11 @@ research_tool/
 # 激活开发环境
 source .venv/bin/activate
 
-# 运行完整测试套件（850+ 测试用例）
+# 运行完整测试套件（1,760+ 测试用例，覆盖单元测试、契约断言、对抗鲁棒性与九段闭环端到端）
 pytest
 
 # 执行代码风格与规范检查（Ruff）
-ruff check research_tool/
+ruff check research_tool/ tests/
 ```
 
 ---

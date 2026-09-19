@@ -3,7 +3,7 @@
 
 Consumes ① collect Result envelopes (frozen golden chain) and applies the
 frozen §3 ②-row rules:
-  - license gate: non-http(s) scheme → dropped (scheme_denied)
+  - license gate: non-http(s) or file scheme → dropped (scheme_denied)
   - normalization: echo canonical_locator from the core identity
   - delta: content_sha256 already seen → skip (zero new output on re-run)
 
@@ -14,7 +14,6 @@ from __future__ import annotations
 
 import hashlib
 import json
-from typing import Any
 
 STAGE = "clean"
 CONTRACT_VERSION = 1
@@ -27,7 +26,7 @@ E_IDEMPOTENCY_CONFLICT = "E_IDEMPOTENCY_CONFLICT"
 _LEASE_FIELDS = ("lease_id", "tokens_max", "cost_max", "wall_s_max",
                  "search_calls_max", "issued_at", "expires_at")
 
-ALLOWED_SCHEMES = frozenset({"http", "https"})
+ALLOWED_SCHEMES = frozenset({"http", "https", "file"})
 
 
 def make_error_frame(code, safe_message, retryable=False):

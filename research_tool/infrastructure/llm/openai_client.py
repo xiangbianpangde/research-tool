@@ -34,10 +34,11 @@ class OpenAILLMClient(LLMClient):
             raise LLMError(f"provider={config.provider} 缺少 api_key，请设置对应环境变量")
         # 与 anthropic_client 对齐（P10/P12）：显式超时 + 禁 SDK 重试 + 禁隐式代理。
         # dotenv 会把 HTTPS_PROXY=127.0.0.1:10809 注入环境；trust_env 默认 True 会踩死连接。
+        read_timeout = max(config.read_timeout_sec, config.request_timeout_sec)
         no_proxy_client = httpx.AsyncClient(
             timeout=httpx.Timeout(
                 connect=config.connect_timeout_sec,
-                read=config.read_timeout_sec,
+                read=read_timeout,
                 write=30.0,
                 pool=30.0,
             ),
@@ -66,11 +67,12 @@ class OpenAILLMClient(LLMClient):
         import asyncio
 
         self._raise_if_authentication_failed()
+        messages = self._messages(prompt, system)
         try:
             resp = await asyncio.wait_for(
                 self._client.chat.completions.create(
                     model=self.config.model,
-                    messages=self._messages(prompt, system),
+                    messages=messages,
                     temperature=(
                         self.config.temperature if temperature is None else temperature
                     ),
@@ -87,7 +89,52 @@ class OpenAILLMClient(LLMClient):
             if isinstance(error, LLMAuthenticationError):
                 self._mark_authentication_failed()
             raise error
-        return _strip_think(resp.choices[0].message.content or "")
+
+        choice = resp.choices[0]
+        content = _strip_think(choice.message.content or "")
+
+        # Automatic continuation loop if token limit is encountered
+        max_continuations = 3
+        cont_round = 0
+        current_choice = choice
+        conv_messages = list(messages)
+
+        while (
+            getattr(current_choice, "finish_reason", None) == "length"
+            and cont_round < max_continuations
+        ):
+            cont_round += 1
+            raw_partial = current_choice.message.content or ""
+            conv_messages.append({"role": "assistant", "content": raw_partial})
+            conv_messages.append(
+                {
+                    "role": "user",
+                    "content": (
+                        "请从上述截断处紧接着继续输出，切勿重复前面已输出的内容，"
+                        "保持结构、段落与格式的自然连贯。"
+                    ),
+                }
+            )
+            try:
+                cont_resp = await asyncio.wait_for(
+                    self._client.chat.completions.create(
+                        model=self.config.model,
+                        messages=conv_messages,
+                        temperature=(
+                            self.config.temperature if temperature is None else temperature
+                        ),
+                        max_tokens=self.config.max_tokens,
+                    ),
+                    timeout=self.config.request_timeout_sec,
+                )
+                current_choice = cont_resp.choices[0]
+                continuation_chunk = _strip_think(current_choice.message.content or "")
+                content += continuation_chunk
+            except Exception:  # noqa: BLE001
+                # If continuation fails, keep accumulated text rather than crashing
+                break
+
+        return content
 
     async def chat_structured(
         self,

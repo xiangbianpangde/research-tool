@@ -19,7 +19,6 @@ from __future__ import annotations
 
 import hashlib
 import json
-from typing import Any
 
 STAGE = "extract"
 CONTRACT_VERSION = 1

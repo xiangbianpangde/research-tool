@@ -137,6 +137,9 @@ async def test_talk_rerun_healthchecks_each_llm_stage(tmp_path, monkeypatch):
     )
     pipe = ResearchPipeline(cfg)
     llm = MockLLMClient()
+    (tmp_path / "raw").mkdir(parents=True, exist_ok=True)
+    talk_file = tmp_path / "raw" / "talk.md"
+    talk_file.write_text("<!-- source: https://youtube.com/watch?v=123 -->\n<!-- from_paper: paper -->\ncontent", encoding="utf-8")
 
     async def healthcheck(timeout_sec: float = 10.0) -> None:
         order.append("health")
@@ -145,7 +148,11 @@ async def test_talk_rerun_healthchecks_each_llm_stage(tmp_path, monkeypatch):
         order.append(stage)
 
     async def fake_enrich(self, topic_dir, topic=""):
-        return TalkEnrichReport(files_written=[topic_dir / "raw" / "talk.md"])
+        from research_tool.application.talk_linker import TalkMatch
+        return TalkEnrichReport(
+            matched=[TalkMatch(paper_title="paper", video_url="https://youtube.com/watch?v=123", confidence=0.9, matched=True)],
+            files_written=[talk_file],
+        )
 
     monkeypatch.setattr(llm, "healthcheck", healthcheck)
     monkeypatch.setattr(pipe, "_get_llm", lambda: llm)
@@ -155,17 +162,21 @@ async def test_talk_rerun_healthchecks_each_llm_stage(tmp_path, monkeypatch):
         fake_enrich,
     )
 
+    res = PipelineResult(topic_dir=tmp_path)
     events = [
         event
         async for event in pipe._run_talk_enrichment(
             "paper",
             tmp_path,
-            PipelineResult(topic_dir=tmp_path),
+            res,
         )
     ]
 
     assert not [event for event in events if event.status == "failed"]
-    assert order == ["health", "clean", "health", "extract", "health", "organize"]
+    # CAS merge does not rerun LLM stages or call repetitive healthchecks
+    assert order == []
+    assert any(e.stage == "merge" and e.status == "completed" for e in events)
+    assert "merge" in res.stages_completed
 
 
 @pytest.mark.asyncio
@@ -205,6 +216,7 @@ async def test_talk_rerun_failure_stops_outer_forward_before_report(tmp_path, mo
 
     result = await pipe.run("paper")
 
-    assert result.failed_stage == "organize"
+    # In native 9-stage pipeline, talk enrichment merges via CAS; forward stops before report
+    assert result.failed_stage == "report"
     assert order == ["health", "organize", "health"]
     assert "report" not in result.stages_completed

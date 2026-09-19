@@ -1,6 +1,6 @@
 # ============================================================
 # 调研工具配置文件（示例）—— 复制为 config.yaml 后修改
-# 依据：04-配置结构设计.md
+# 依据：原生九段闭环架构（Collect → Clean → Extract → Knowledge → Inspect → Targeted → Merge → QGate → Report）
 # ============================================================
 
 # LLM 配置（必填）。默认 DeepSeek（OpenAI 兼容）。
@@ -16,7 +16,7 @@ llm:
   request_timeout_sec: 180      # 整个 chat/stream 调用硬墙
   sdk_max_retries: 0            # 禁 SDK 隐式重试，统一交给 pipeline 有界重试
 
-# Collector 配置
+# Collector 采集配置（Stage ①：全源搜索发现与原始资料摄取）
 collector:
   search_engines:               # 可多选，全部可用源见下
     - web                        # web(=duckduckgo) | arxiv | tavily
@@ -43,7 +43,7 @@ collector:
                                    # - 日本/海外等可直连 DDG/Wikipedia/GoogleNews 的环境：
                                    #   请在 .env 把 HTTPS_PROXY 留空（HTTPS_PROXY=）或删除该行，
                                    #   且 config 此处可写 proxy: null。未启动的本地代理
-                                   #   （如 127.0.0.1:10809）会让 web 源与部分抓取 ConnectError（P1/P12）。
+                                   #   （如 127.0.0.1:10809）会让 web 源与部分抓取 ConnectError。
                                    # - 国内访问 DDG/Wikipedia/GoogleNews/Tavily 等被墙站点：
                                    #   在 .env 设 HTTPS_PROXY=http://127.0.0.1:<本地端口>
                                    #   （或 socks5://...），并保证代理进程已监听。
@@ -69,13 +69,13 @@ collector:
   opencli_cmd: opencli             # `-s opencli` 使用的本地命令
   opencli_site: google-scholar     # OpenCLI 中支持 search 的站点 adapter
   # X 使用前：opencli doctor 或 twitter status；-s x 会 preflight，失败给出安装说明
-  # 两阶段锚定/去锚（P1，解决"被单一机构/限定语绑架"的查询偏差）
+  # 两阶段锚定/去锚（解决"被单一机构/限定语绑架"的查询偏差）
   core_keyword: null             # 核心词，如 topic="中南民族大学 康怡琳" 时填 "康怡琳"
   facets: []                     # 维度标签，仅去锚阶段生效，如 [博士, 论文, 南洋理工]
-  # 时间标签（P2）：发表年份窗口，含起止。学科调研统一过滤；人物调研一般不设
+  # 时间标签：发表年份窗口，含起止。学科调研统一过滤；人物调研一般不设
   from_year: null                # 如 2020；openalex/s2/crossref/pubmed 原生过滤
   to_year: null                  # 如 2027；arxiv 客户端过滤，web/wikipedia 忽略
-  # Deep-Search 深搜（P2）：多排序×多页，突破"单次只取第1页相关性排序"的覆盖不足
+  # Deep-Search 深搜：多排序×多页，突破"单次只取第1页相关性排序"的覆盖不足
   deep_search: false             # true 启用；每查询变 deep_pages×deep_sorts 次搜索
   deep_pages: 3                  # 翻页页数 1-10
   deep_sorts: [relevance, date, citations]  # 排序策略组合
@@ -87,9 +87,9 @@ collector:
   experts_file: null             # experts.yaml 路径；缺失/损坏按空库回退，不崩管道
   expert_match_min_overlap: 0.15 # topic 与专家 domains 的词重叠阈值（占 topic 词数比例）
   expert_exempt_topn: true
-  expert_scoped_github: true      # 专家弱档：org:<handle> topic 定向 github 搜索       # 专家命中豁免 top-N 截断（强档直注已置顶，恒生效）
+  expert_scoped_github: true      # 专家弱档：org:<handle> topic 定向 github 搜索
 
-# Talk 关联（CVPRTalk 阶段 F）：organize 后把论文标题搜 YouTube talk
+# Talk 关联（论文 → YouTube talk 增量关联）
 # CLI：research run "..." -s cvpr --with-talks --max-talks 5
 talk:
   enabled: false                 # true 或 --with-talks
@@ -100,26 +100,7 @@ talk:
   conference: CVPR
   search_results_per_paper: 5
 
-# Deepen 反偏差深挖配置（Phase 2，可选阶段，默认启用）
-# 关闭：设 enabled: false，或 `research run ... --skip deepen`
-deepen:
-  enabled: true
-  profile_extract: true          # 从已采 raw/ 抽结构化画像(中英文名/机构/领域)→注入去锚查询
-  profile_iterations: 1          # 1=标准单轮；≥2 启用时间线回溯、消歧和画像迭代
-  min_new_files_per_iter: 2      # 单轮新增少于此值时提前结束画像迭代
-  min_profile_confidence: 0.85   # 达到此置信度时提前结束画像迭代
-  timeline_backtrack: true
-  disambiguation: true
-  depth: 2                       # 深挖轮次 1-3（轮 1 实体多视角，轮 2+ 缺口补搜）
-  breadth: 4                     # 每轮补充查询数上限 2-8
-  entity_split: true             # 拆分多实体话题（解决"单一锚点绑架"偏差）
-  max_entities: 5                # 实体拆分上限
-  gap_detection: true            # 扫描已采内容识别缺失维度
-  contradiction_check: true      # 检测矛盾并反向验证
-  max_input_chars: 20000         # 喂 LLM 做缺口分析的内容总量上限（防上下文溢出）
-  per_file_chars: 300            # 每个 raw 文件取标题+前 N 字
-
-# Cleaner 配置
+# Cleaner 清洗去重配置（Stage ②：正文提取与 MinHash 局部敏感哈希去重）
 cleaner:
   strip_html: true
   strip_nav: true
@@ -127,16 +108,16 @@ cleaner:
   find_content_start: true
   min_content_length: 200
   max_content_length: 50000       # 单篇正文长度上限，防止超大网页打爆抽取上下文
-  # MinHash 去重（P2-5）：相似度阈值，组内保留最长正文；0=关闭
+  # MinHash 去重：相似度阈值，组内保留最长正文；0=关闭
   dedup_similarity: 0.85
-  # LLM 相关性过滤（P2-5）：默认关，开启会增加 LLM 调用
+  # LLM 相关性过滤：默认关，开启会增加 LLM 调用
   relevance_filter: false        # true 启用；低分文件从 clean/ 删除，raw/ 仍保留
   relevance_threshold: 0.4
   relevance_batch_size: 10
 
-# Extractor 配置
+# Extractor 事实抽取配置（Stage ③：实体识别与知识三元组抽取）
 extractor:
-  enabled: true                  # false=跳过抽取，Organizer 直接吃 clean 文本
+  enabled: true                  # false=跳过抽取，直接吃 clean 文本
   fail_on_chunk_error: true      # full 默认 true；失败块不写完成产物，由 pipeline 重试
   concurrency: 4                 # LLM 并行块数（实测 4 并发无限流；1=串行最稳）
   tasks:
@@ -147,41 +128,63 @@ extractor:
   chunk_size: 4000
   overlap: 200
 
-# Organizer 配置
+# Organizer / 知识大纲树配置（Stage ④：树形结构索引构建）
 organizer:
-  max_nodes: 7
-  min_nodes: 4
-  # 反向传播稀疏节点判定阈值（P2-6）：节点正文 "来源NN" 引用 <此 → 稀疏
-  min_evidence_per_node: 3
+  max_nodes: 7                   # 知识树最大节点数
+  min_nodes: 4                   # 知识树最小节点数
+  min_evidence_per_node: 3       # 单节点最少支撑证据数
 
-# Reporter 配置
+# Inspect 缺口检视配置（Stage ⑤：扫描知识网络检测矛盾、孤立节点与证据断层）
+inspect:
+  enabled: true                  # true=启用检视 pass；false=跳过检视直接进入后续阶段
+  rules:                         # 启用的检测规则列表
+    - contradiction              # 观点矛盾与对立陈述检测
+    - orphan_node                # 孤立/无支撑概念节点检测
+    - span_incomplete            # 证据跨度不完整或断层检测
+  priority_filter:               # 纳入检视优先级的缺陷严重度过滤
+    - high
+    - medium
+    - low
+
+# Targeted 靶向补搜配置（Stage ⑥：根据检视缺口自动生成去锚查询并定向补搜）
+targeted:
+  max_rounds: 3                  # 闭环自愈最大轮次 1-5（超过此轮次强制收敛至 report）
+  max_queries_per_round: 10      # 单轮补搜派发的查询上限 1-30
+  max_results_per_query: 5       # 每个补搜查询抓取的最大结果数 1-15
+  time_cutoff_utc: null          # 可选时间截断（ISO8601 格式，如 "2026-01-01T00:00:00Z"）
+
+# QGate 质量与预算门控配置（Stage ⑧：仲裁知识质量与资源租约，判定收敛或循环）
+qgate:
+  max_high_findings: 0           # 允许的最大高危矛盾数（0=零容忍，未解决则触发补搜）
+  max_total_findings: 10         # 允许的最大总缺口数（超过且未达轮次上限时继续闭环）
+  budget_lease:                  # 闭环执行的全局安全预算租约（防死循环与成本失控）
+    tokens_max: 1000000          # 允许消耗的最大 LLM Token 数
+    cost_max: 10.0               # 允许的最大估算成本（美元）
+    wall_s_max: 600.0            # 允许的最大执行耗时（秒）
+    search_calls_max: 50         # 允许调用的最大外部搜索 API 次数
+
+# Reporter 报告合成配置（Stage ⑨：核验报告合成与不可变产物生成）
 reporter:
   format: markdown               # markdown | html
   style: report                  # report | feasibility | review | article
   max_length: 20000
 
-# Pipeline 配置
+# Pipeline 配置（原生九段闭环执行管线）
 pipeline:
-  mode: full                      # 推荐 brief | full；兼容 fast | standard | deep
+  mode: full                      # full（完整九段闭环）| brief（快速三段：collect, clean, report）
   work_dir: ./research-output
   stages:
-    - collect
-    - deepen
-    - clean
-    - extract
-    - organize
-    - report
-  resume: true                    # 性能基准应设 false，并使用独立输出目录
+    - collect                     # ① Collect 采集
+    - clean                       # ② Clean 清洗去重
+    - extract                     # ③ Extract 实体三元组抽取
+    - knowledge                   # ④ Knowledge 知识网络构建
+    - inspect                     # ⑤ Inspect 缺口检视
+    - targeted                    # ⑥ Targeted 靶向补搜
+    - merge                       # ⑦ Merge CAS 增量合并
+    - qgate                       # ⑧ QGate 质量与预算门控
+    - report                      # ⑨ Report 终审报告合成
+  resume: true                    # 幂等断点恢复（基于 state.json 与 artifacts/*.json SHA-256 校验）
   llm_stage_attempts: 3           # 瞬时 LLM 失败的阶段级尝试次数（鉴权错误不重试）
   llm_retry_backoff_sec: 2        # 线性退避基数：2s、4s……
   llm_healthcheck_timeout_sec: 10 # LLM 健康检查探针超时（s）；慢端点可调大至 30–60
-  # 反向传播（P2-6）：完成一次正向后让 organizer 评估知识树质量，把修正查询回到
-  # collect 重跑。0=不启用（默认，向后兼容），≥1 启用循环。
-  max_backward_rounds: 0
-  # 九段管线 feature flag（B8 产品集成，默认全关 → 逐字节 legacy）。
-  # 仅当 enabled: true 时激活 nine_loop 分支；子 flag 全部默认 false。
-  # nine_loop:
-  #   enabled: false
-  #   gate_enabled: false
-  #   shadow_enabled: false
-  #   shadow_sample_rate: 0
+

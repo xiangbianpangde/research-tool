@@ -17,7 +17,6 @@ stdlib-only; tests use mock transport (no real model calls).
 from __future__ import annotations
 
 import json
-import pathlib
 import re
 
 from typing import Any

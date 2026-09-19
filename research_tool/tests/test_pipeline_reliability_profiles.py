@@ -16,7 +16,20 @@ from research_tool.infrastructure.stages.extractor import Extractor
     ("mode", "stages"),
     [
         ("brief", ["collect", "clean", "report"]),
-        ("full", ["collect", "deepen", "clean", "extract", "organize", "report"]),
+        (
+            "full",
+            [
+                "collect",
+                "clean",
+                "extract",
+                "knowledge",
+                "inspect",
+                "targeted",
+                "merge",
+                "qgate",
+                "report",
+            ],
+        ),
     ],
 )
 def test_brief_and_full_modes_have_explicit_output_contracts(tmp_path, monkeypatch, mode, stages):

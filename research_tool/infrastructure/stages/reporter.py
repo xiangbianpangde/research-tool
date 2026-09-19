@@ -93,14 +93,24 @@ class Reporter:
         return "\n\n---\n\n".join(documents)
 
     def _load_sources(self, tree_dir: Path) -> list[dict]:
-        """读 raw/sources.json，返回 [{sid, title, url}]，sid 与采集文件序号一致。"""
-        sources = tree_dir.parent / "raw" / "sources.json"
+        """读 raw/sources.json 或 sources.json，返回 [{sid, title, url}]。
+
+        sid 与采集文件序号一致。
+        """
+        raw_sources = tree_dir.parent / "raw" / "sources.json"
+        sources = raw_sources
+        if not sources.exists() or sources.stat().st_size <= 2:
+            root_sources = tree_dir.parent / "sources.json"
+            if root_sources.exists() and root_sources.stat().st_size > 2:
+                sources = root_sources
         if not sources.exists():
             return []
         try:
             data = read_json(sources)
         except Exception as exc:  # noqa: BLE001
             logger.debug("读取 sources.json 失败: %s", exc)
+            return []
+        if not isinstance(data, list):
             return []
         out = []
         for i, s in enumerate(data, 1):
@@ -177,9 +187,11 @@ class Reporter:
             f"1. 含摘要；{detail_requirement}\n"
             "2. 涉及具体论文/资料时，**说明该来源讲了什么**（研究问题、方法/模型名、"
             "关键发现与数据），并在句末用 (来源NN) 标注，让读者知道结论出自哪篇；\n"
-            "3. 正文用 (来源NN) 标注每条结论出处；**不要自己编写参考资料列表**"
-            "（系统会自动附上完整的来源清单）；\n"
-            f"4. 总长度尽量充分，但不超过约 {self.config.max_length} 字符；输出 Markdown。\n\n"
+            "3. 正文用 (来源NN) 标注每条结论出处；**严禁在文末自行编写「参考资料」"
+            "或「参考文献」章节**（系统会自动附上权威参考资料清单）；\n"
+            "4. 全面覆盖所有知识节点，各章节必须论述完整、首尾呼应；"
+            "所有句子必须完整结束，禁止中途突兀截断；\n"
+            f"5. 总长度充分展开，但不超过约 {self.config.max_length} 字符；输出 Markdown。\n\n"
             f"=== 来源清单（编号→标题→链接）===\n{ref_block}\n\n"
             f"=== 主表 ===\n{main}\n\n=== {material_name} ===\n{nodes_text}"
         )
@@ -195,7 +207,23 @@ class Reporter:
             header += f"> 知识节点: {node_count} 个\n"
         header += "\n"
         # 去掉模型可能自行写的(常不全的)参考资料，统一用程序生成的权威完整列表
-        body = re.split(r"\n#{1,6}\s*参考资料", body)[0].rstrip()
+        # 1. 广谱剥离模型自行生成的参考资料章节（支持参考资料/参考文献/References等多种变体）
+        ref_split_regex = re.compile(
+            r"\n#{1,6}\s*(?:参考资料|参考文献|参考来源|引用来源|References)\b.*$",
+            re.MULTILINE | re.DOTALL | re.IGNORECASE,
+        )
+        body = ref_split_regex.split(body)[0].rstrip()
+
+        # 2. 句尾防御：检查是否停留在未写完的断句（例如由于冒号或无标点悬挂）
+        # 若尾部以冒号结尾或非终止标点结尾，清理悬挂碎片，确保进入参考资料前正文语义闭合
+        if body:
+            terminal_puncts = ("。", "！", "？", "!", "?", "”", "’", "）", ")", "```", "\n")
+            if not body.endswith(terminal_puncts):
+                p_idx = max(body.rfind("。"), body.rfind("！"), body.rfind("？"))
+                if p_idx != -1 and len(body) - p_idx < 500:
+                    body = body[: p_idx + 1].rstrip()
+                else:
+                    body = body + "。"
         audit_block = self._audit_markdown(audits)
         # 审计块放在模型正文之前，确保长报告截断时仍可见。
         markdown = header

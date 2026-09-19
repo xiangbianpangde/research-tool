@@ -2,15 +2,16 @@
 
 设计依据：
 - [DD-001:M-008/M-012/M-001] 集成入口层
-- [PRD-V1.1:FR-006] 下游 5 阶段管道零改动（仅触发 clean→extract→organize→report）
-- [PRD-V1.1:F-006] 落 raw/<topic>/video_<id>.md 后 5 阶段自动跑完
+- [PRD-V1.1:FR-006] 下游闭环管线适配
+  （触发 clean→extract→knowledge→inspect→targeted→merge→qgate→report）
+- [PRD-V1.1:F-006] 落 raw/<topic>/video_<id>.md 后下游阶段自动跑完
 
 职责：
 - URL → VideoURL 校验（仅 bilibili + youtube 一期 P0；其他拒绝）
 - 并发调度多 URL（M-012 Semaphore(3)）
 - 单 URL 全链路：download（yt-dlp）→ transcribe（whisper/groq）→ LLM summary → assemble markdown
 - 落盘到 raw/<topic>/video_<id>.md（M-008 MarkdownWriter）
-- 触发 5 阶段管道（M-008 PipelineTrigger）—— 可选
+- 触发九段闭环下游管道（M-008 PipelineTrigger）—— 可选
 - 错误隔离 + 3 段式错误码登记（M-010 复用）
 
 设计模式：协调器 + 适配器（M-008）+ 资源池（M-012）；不修改任何底层模块
@@ -585,15 +586,18 @@ class VideoPipeline:
         # 3) 按输入顺序汇总
         ordered_results = [results_by_url[u] for u in urls if u in results_by_url]
 
-        # 4) 可选：触发 5 阶段管道（clean/extract/organize/report）
+        # 4) 可选：触发下游闭环管线（8 阶段）
         stages_result = None
         if self.run_pipeline and any(r.status == "success" for r in ordered_results):
-            from ..infrastructure.ingest.pipeline_adapter import trigger_pipeline
+            from ..infrastructure.ingest.pipeline_adapter import (
+                DEFAULT_DOWNSTREAM_STAGES,
+                trigger_pipeline,
+            )
 
             stages_result = await trigger_pipeline(
                 self.topic,
                 work_dir=self.work_dir,
-                stages=["clean", "extract", "organize", "report"],
+                stages=DEFAULT_DOWNSTREAM_STAGES,
             )
 
         elapsed = int((time.monotonic() - start) * 1000)

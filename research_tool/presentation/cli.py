@@ -15,6 +15,7 @@ from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 import typer
 from rich.console import Console
+from rich.markup import escape
 from rich.table import Table
 
 from .. import __version__
@@ -160,6 +161,15 @@ def _fail(msg: str) -> typer.Exit:
     """输出错误信息到 stderr 并退出。"""
     logger.error("错误 %s", msg)
     raise typer.Exit(code=1)
+
+
+def _is_strict_agent() -> bool:
+    """检测是否开启了 RESEARCH_AGENT_STRICT 严格安全审查模式。"""
+    val = os.environ.get("RESEARCH_AGENT_STRICT")
+    if val is None:
+        return False
+    return val.strip().lower() in ("1", "true", "yes")
+
 
 
 def _find_repo_root(start: Path | None = None) -> Path | None:
@@ -701,15 +711,19 @@ def _build_run_overrides(  # noqa: PLR0915
     x_backend: str | None,
     x_cmd: str | None,
     relevance_filter: bool,
-    profile_iterations: int | None,
-    max_backward_rounds: int | None,
-    pdf_dir: Path | None,
-    mineru_cmd: str | None,
-    ocr_engine: str | None,
-    ocr_cmd: str | None,
-    ocr_model_path: str | None,
-    translate: bool,
-    model: str | None,
+    qgate_max_high: int | None = None,
+    qgate_max_total: int | None = None,
+    max_targeted_rounds: int | None = None,
+    max_targeted_queries: int | None = None,
+    inspect_rules: str | None = None,
+    pdf_dir: Path | None = None,
+    mineru_cmd: str | None = None,
+    ocr_engine: str | None = None,
+    ocr_cmd: str | None = None,
+    ocr_model_path: str | None = None,
+    translate: bool = False,
+    model: str | None = None,
+    max_tokens: int | None = None,
     with_talks: bool = False,
     max_talks: int | None = None,
     min_talk_similarity: float | None = None,
@@ -737,7 +751,6 @@ def _build_run_overrides(  # noqa: PLR0915
     if source:
         overrides["collector"]["search_engines"] = source
     if mode == "full":
-        overrides["deepen"] = {"enabled": True}
         overrides["extractor"] = {"enabled": True, "fail_on_chunk_error": True}
     if rounds is not None:
         overrides["collector"]["search_rounds"] = rounds
@@ -757,10 +770,16 @@ def _build_run_overrides(  # noqa: PLR0915
         overrides["collector"]["x_cmd"] = x_cmd
     if relevance_filter:
         overrides["cleaner"] = {"relevance_filter": True}
-    if profile_iterations is not None:
-        overrides.setdefault("deepen", {})["profile_iterations"] = profile_iterations
-    if max_backward_rounds is not None:
-        overrides["max_backward_rounds"] = max_backward_rounds
+    if qgate_max_high is not None:
+        overrides.setdefault("qgate", {})["max_high_findings"] = qgate_max_high
+    if qgate_max_total is not None:
+        overrides.setdefault("qgate", {})["max_total_findings"] = qgate_max_total
+    if max_targeted_rounds is not None:
+        overrides.setdefault("targeted", {})["max_rounds"] = max_targeted_rounds
+    if max_targeted_queries is not None:
+        overrides.setdefault("targeted", {})["max_queries_per_round"] = max_targeted_queries
+    if inspect_rules:
+        overrides.setdefault("inspect", {})["rules"] = _split_csv(inspect_rules)
     if mineru_cmd:
         overrides["collector"]["mineru_cmd"] = mineru_cmd
     if experts_file:
@@ -781,7 +800,9 @@ def _build_run_overrides(  # noqa: PLR0915
         if mineru_cmd:
             overrides["pdf_ingest"]["mineru_cmd"] = mineru_cmd
     if model:
-        overrides["llm"] = {"model": model}
+        overrides.setdefault("llm", {})["model"] = model
+    if max_tokens is not None:
+        overrides.setdefault("llm", {})["max_tokens"] = max_tokens
     if with_talks or max_talks is not None or min_talk_similarity is not None or ingest_talks:
         talk: dict = {}
         if with_talks:
@@ -901,14 +922,44 @@ def run(
     profile_iterations: Optional[int] = typer.Option(
         None,
         "--profile-iterations",
-        rich_help_panel=_ADVANCED,
-        help="画像迭代轮数 1-5，≥2 启用时间线回溯+同名消歧（=deepen.profile_iterations）",
+        hidden=True,
+        help="[已废弃] 旧版 deepen 画像迭代轮数（九段闭环由靶向补搜闭环取代）",
     ),
     max_backward_rounds: Optional[int] = typer.Option(
         None,
         "--max-backward-rounds",
+        hidden=True,
+        help="[已废弃] 旧版反向传播轮数（九段闭环由 QGate 质量门控闭环取代）",
+    ),
+    qgate_max_high: Optional[int] = typer.Option(
+        None,
+        "--qgate-max-high",
         rich_help_panel=_ADVANCED,
-        help="反向传播轮数 0-3，>0 启用知识树质量评估循环（=pipeline.max_backward_rounds）",
+        help="QGate 阶段允许的严重矛盾/缺口上限（=qgate.max_high_findings，默认 0 零容忍）",
+    ),
+    qgate_max_total: Optional[int] = typer.Option(
+        None,
+        "--qgate-max-total",
+        rich_help_panel=_ADVANCED,
+        help="QGate 阶段允许的总缺口上限（=qgate.max_total_findings，默认 10）",
+    ),
+    max_targeted_rounds: Optional[int] = typer.Option(
+        None,
+        "--max-targeted-rounds",
+        rich_help_panel=_ADVANCED,
+        help="Targeted 靶向补搜最大自愈轮次（=targeted.max_rounds，默认 3）",
+    ),
+    max_targeted_queries: Optional[int] = typer.Option(
+        None,
+        "--max-targeted-queries",
+        rich_help_panel=_ADVANCED,
+        help="Targeted 靶向补搜每轮最大派发查询数（=targeted.max_queries_per_round，默认 10）",
+    ),
+    inspect_rules: Optional[str] = typer.Option(
+        None,
+        "--inspect-rules",
+        rich_help_panel=_ADVANCED,
+        help="Inspect 阶段启用的检视规则逗号分隔（=inspect.rules，如 contradiction,orphan_node,span_incomplete）",
     ),
     pdf_dir: Optional[Path] = typer.Option(
         None, "--pdf-dir", rich_help_panel=_ADVANCED, help="改用本地 PDF 文件夹作为数据源"
@@ -940,6 +991,12 @@ def run(
     model: Optional[str] = typer.Option(
         None, "--model", rich_help_panel=_ADVANCED, help="覆盖 LLM 模型（=llm.model）"
     ),
+    max_tokens: Optional[int] = typer.Option(
+        None,
+        "--max-tokens",
+        rich_help_panel=_ADVANCED,
+        help="覆盖 LLM 单次最大生成 Token 数（=llm.max_tokens，全量建议 8192 或 16384）",
+    ),
     video_url: list[str] = typer.Option(
         [],
         "--video-url",
@@ -959,7 +1016,7 @@ def run(
         False,
         "--with-talks",
         rich_help_panel=_ADVANCED,
-        help="阶段 F：organize 后把论文标题关联 YouTube talk（=talk.enabled）",
+        help="阶段 F：knowledge 后把论文标题关联 YouTube talk（=talk.enabled）",
     ),
     max_talks: Optional[int] = typer.Option(
         None,
@@ -997,7 +1054,7 @@ def run(
         help="新论文官方来源；先强制抓取，再自动扩展 OpenAlex/Crossref/arXiv",
     ),
 ) -> None:
-    """一键全流程：collect/PDF摄取 → clean → extract → organize → report。
+    """一键全流程：collect/PDF摄取 → clean → extract → knowledge → inspect → targeted → merge → qgate → report。
 
     V1.1 扩展：传 --video-url 时进入 VideoIngest 流程（下载→转写→总结→raw/）。
     """
@@ -1013,6 +1070,15 @@ def run(
         )
         return
 
+    if profile_iterations is not None:
+        logger.warning(
+            "⚠️ 警告：--profile-iterations 已废弃并失效，九段闭环管线已原生支持自愈补搜。"
+        )
+    if max_backward_rounds is not None:
+        logger.warning(
+            "⚠️ 警告：--max-backward-rounds 已废弃并失效，九段闭环管线已由 QGate 闭环自愈取代。"
+        )
+
     configured = load_config(_state["config_path"])
     effective_work_dir = (output or configured.work_dir)
     _assert_safe_output_dir(effective_work_dir / slugify(topic))
@@ -1021,43 +1087,63 @@ def run(
         _fail(
             f"未知调研模式: {effective_mode}（推荐 brief/full；兼容 fast/standard/deep）"
         )
-    is_deepen_strategy = bool(
-        configured.nine_loop.enabled and configured.nine_loop.deepen_as_strategy
-    )
-    all_stages = ["collect", "deepen", "clean", "extract", "organize", "report"]
+    is_deepen_strategy = False
+    if hasattr(configured, "nine_loop") and getattr(configured.nine_loop, "enabled", False) and getattr(configured.nine_loop, "deepen_as_strategy", False):
+        is_deepen_strategy = True
+    all_nine_stages = [
+        "collect",
+        "clean",
+        "extract",
+        "knowledge",
+        "inspect",
+        "targeted",
+        "merge",
+        "qgate",
+        "report",
+    ]
     if mode is None:
         mode_stages = list(configured.stages)
     elif effective_mode == "brief":
-        if os.environ.get("RESEARCH_AGENT_STRICT", "0") == "1":
-            _fail("安全拦截：当前环境开启了 RESEARCH_AGENT_STRICT，严禁使用 --mode brief 偷懒缩水，必须执行完整管线！")
+        if _is_strict_agent():
+            _fail("安全拦截（RESEARCH_AGENT_STRICT）：当前环境开启了严格安全模式，严禁使用 --mode brief 偷懒缩水，必须执行完整九段闭环管线！")
         logger.warning(
-            "⚠️ 警告：当前以 --mode brief 运行，仅执行 collect → clean → report（跳过抽取与知识树构建）。"
+            "⚠️ 警告：当前以 --mode brief 运行，仅执行 collect → clean → report（跳过抽取、知识网络与闭环自愈）。"
             "正式深度调研请使用默认九段管线或 --mode full。"
         )
         mode_stages = ["collect", "clean", "report"]
     elif effective_mode == "full" and is_deepen_strategy:
         mode_stages = ["collect", "clean", "extract", "organize", "report"]
+    elif effective_mode == "full":
+        mode_stages = list(all_nine_stages)
+    elif effective_mode == "fast":
+        mode_stages = [s for s in configured.stages if s != "deepen"]
+    elif effective_mode == "deep":
+        mode_stages = list(configured.stages)
+        if "deepen" not in mode_stages:
+            mode_stages = ["collect", "deepen", "clean", "extract", "organize", "report"]
     else:
-        mode_stages = [
-            stage
-            for stage in all_stages
-            if not (effective_mode == "fast" and stage == "deepen")
-        ]
+        mode_stages = list(configured.stages)
     if effective_mode == "full" and skip:
         _fail(
-            f"--mode full 强制执行{'五' if is_deepen_strategy else '六'}阶段，不能同时使用 --skip"
+            "--mode full 强制执行完整九段闭环管线，不能同时使用 --skip"
         )
     stages = [s for s in mode_stages if s not in skip]
 
     # P0-B 闭环：统一在最终 stages 集合上执行 Agent Strict 审查，杜绝任何形式的绕过
-    is_strict_agent = os.environ.get("RESEARCH_AGENT_STRICT", "0") == "1"
-    if is_strict_agent:
-        required_stages = {"collect", "clean", "extract", "organize", "report"}
-        missing = required_stages - set(stages)
+    if _is_strict_agent():
+        stage_aliases = {
+            "network": "knowledge",
+            "organize": "knowledge",
+            "gate": "qgate",
+        }
+        normalized_stages = {stage_aliases.get(s, s) for s in stages}
+        required_stages = set(all_nine_stages)
+        missing = required_stages - normalized_stages
         if missing:
             _fail(
                 f"安全拦截（RESEARCH_AGENT_STRICT）：严禁缩水或跳过核心阶段！"
-                f"缺失核心阶段：{sorted(missing)}。Agent 调研必须执行完整管线（collect → clean → extract → organize → report）。"
+                f"缺失核心阶段：{sorted(missing)}。Agent 调研必须执行完整九段闭环管线（"
+                f"{' → '.join(all_nine_stages)}）。"
             )
 
     if dry_run:
@@ -1086,8 +1172,11 @@ def run(
         x_backend=x_backend,
         x_cmd=x_cmd,
         relevance_filter=relevance_filter,
-        profile_iterations=profile_iterations,
-        max_backward_rounds=max_backward_rounds,
+        qgate_max_high=qgate_max_high,
+        qgate_max_total=qgate_max_total,
+        max_targeted_rounds=max_targeted_rounds,
+        max_targeted_queries=max_targeted_queries,
+        inspect_rules=inspect_rules,
         pdf_dir=pdf_dir,
         mineru_cmd=mineru_cmd,
         ocr_engine=ocr_engine,
@@ -1095,6 +1184,7 @@ def run(
         ocr_model_path=ocr_model_path,
         translate=translate,
         model=model,
+        max_tokens=max_tokens,
         with_talks=with_talks,
         max_talks=max_talks,
         min_talk_similarity=min_talk_similarity,
@@ -1113,7 +1203,7 @@ def run(
         if res and res.collect_result:
             _print_source_audits(res.collect_result.source_audits)
             _print_warnings(res.collect_result.warnings)
-        if res and res.deepen_result:
+        if res and getattr(res, "deepen_result", None):
             _print_warnings(res.deepen_result.warnings)
         if res and res.failed_stage:
             _fail(f"在 {res.failed_stage} 阶段失败")
@@ -1194,30 +1284,147 @@ def publish_wiki(
 
 @app.command()
 def status(path: Path = typer.Argument(..., help="主题目录")) -> None:
-    """查看调研进度。"""
-    stages = [
-        ("collect", path / "raw", "*.md"),
-        ("clean", path / "clean", "*.md"),
-        ("extract", path / "extracted", "*.json"),
-        ("organize", path / "tree", "*.md"),
-        ("report", path, "report.*"),
+    """查看九段闭环调研进度与产物指标。"""
+    if not path.exists():
+        _fail(f"指定的主题目录不存在: {path}")
+    if not path.is_dir():
+        _fail(f"指定的路径不是有效目录: {path}")
+
+    state_path = path / "state.json"
+    state_data: dict = {}
+    if state_path.is_file():
+        try:
+            state_data = json.loads(state_path.read_text(encoding="utf-8"))
+        except Exception:
+            state_data = {}
+
+    done_stages = set(state_data.get("done") or [])
+    artifacts_dir = path / "artifacts"
+
+    # 阶段定义：(canonical_name, 中文标签, 产物候选文件, 降级目录, 降级匹配正则)
+    stage_definitions = [
+        ("collect", "采集", [artifacts_dir / "collect.json"], path / "raw", "*.md"),
+        ("clean", "清洗", [artifacts_dir / "clean.json"], path / "clean", "*.md"),
+        ("extract", "抽取", [artifacts_dir / "extract.json"], path / "extracted", "*.json"),
+        (
+            "knowledge",
+            "知识网络",
+            [artifacts_dir / "knowledge.json", artifacts_dir / "network.json"],
+            path / "tree",
+            "*.md",
+        ),
+        ("inspect", "缺口检视", [artifacts_dir / "inspect.json"], None, None),
+        ("targeted", "靶向补搜", [artifacts_dir / "targeted.json"], None, None),
+        ("merge", "CAS合并", [artifacts_dir / "merge.json"], None, None),
+        (
+            "qgate",
+            "质量门控",
+            [artifacts_dir / "qgate.json", artifacts_dir / "gate.json"],
+            None,
+            None,
+        ),
+        ("report", "核验报告", [artifacts_dir / "report.json"], path, "report.*"),
     ]
+
     table = Table(title=f"主题: {path.name}")
     table.add_column("阶段")
     table.add_column("状态")
-    table.add_column("文件数")
-    for i, (name, d, pat) in enumerate(stages, 1):
-        files = list(d.glob(pat)) if d.exists() else []
-        # report.* 不含子目录里的 md
-        if name == "report":
-            files = [f for f in files if f.name.startswith("report.")]
-        done = len(files) > 0
-        table.add_row(
-            f"阶段{i} [{name}]",
-            "[green]✓ 完成[/green]" if done else "[dim]✗ 未执行[/dim]",
-            str(len(files)) if done else "-",
-        )
+    table.add_column("产物 / 详情")
+
+    for i, (name, label, artifact_candidates, fallback_dir, fallback_pattern) in enumerate(
+        stage_definitions, 1
+    ):
+        artifact_file = next((p for p in artifact_candidates if p.is_file()), None)
+        is_done = False
+        detail = "-"
+
+        # 优先读取 artifact envelope 提取关键指标
+        if artifact_file:
+            is_done = True
+            try:
+                env = json.loads(artifact_file.read_text(encoding="utf-8"))
+                res = env.get("result") or {}
+                if name == "collect":
+                    sources = res.get("sources", [])
+                    detail = f"{len(sources)} 篇来源" if sources else artifact_file.name
+                elif name == "clean":
+                    docs = res.get("cleaned_documents", [])
+                    detail = f"{len(docs)} 篇清洗文档" if docs else artifact_file.name
+                elif name == "extract":
+                    facts = res.get("facts", [])
+                    entities = res.get("entities", [])
+                    detail = f"{len(facts)} 事实 / {len(entities)} 实体" if (facts or entities) else artifact_file.name
+                elif name == "knowledge":
+                    nodes = res.get("nodes", [])
+                    detail = f"{len(nodes)} 知识节点" if nodes else artifact_file.name
+                elif name == "inspect":
+                    gaps = res.get("gap_count", len(res.get("findings", [])))
+                    contras = res.get("contradiction_count", 0)
+                    detail = f"缺口: {gaps}, 矛盾: {contras}"
+                elif name == "targeted":
+                    queries = res.get("queries", [])
+                    detail = f"{len(queries)} 条自愈查询" if queries else artifact_file.name
+                elif name == "merge":
+                    counts = res.get("counts") or {}
+                    added = counts.get("added", counts.get("claims_added", 0))
+                    detail = f"增量合并 +{added}" if added else artifact_file.name
+                elif name == "qgate":
+                    decision = res.get("decision", "PASS")
+                    detail = f"判定: {decision}"
+                elif name == "report":
+                    cov = res.get("citation_coverage")
+                    claims = res.get("verified_claims_count")
+                    if cov is not None:
+                        detail = f"引用覆盖率 {cov*100:.0f}%, 核验假说 {claims or 0}"
+                    else:
+                        detail = "report.md"
+            except Exception:
+                detail = artifact_file.name
+        elif (
+            name in done_stages
+            or (name == "knowledge" and "network" in done_stages)
+            or (name == "qgate" and "gate" in done_stages)
+        ):
+            is_done = True
+            detail = "已提交状态机"
+        elif fallback_dir and fallback_dir.exists() and fallback_pattern:
+            files = list(fallback_dir.glob(fallback_pattern))
+            if name == "report":
+                files = [f for f in files if f.name.startswith("report.")]
+            if files:
+                is_done = True
+                detail = f"{len(files)} 个文件"
+
+        status_str = "[green]✓ 完成[/green]" if is_done else "[dim]✗ 未执行[/dim]"
+        table.add_row(f"阶段{i} {escape(label)} ({escape(name)})", status_str, detail)
+
     _out.print(table)
+
+    # 展示闭环自愈轮次与产物摘要
+    loop_info = state_data.get("loop") or {}
+    current_round = loop_info.get("current_round", 0)
+    history = loop_info.get("history", [])
+    if current_round > 0 or history:
+        _out.print(
+            f"[bold cyan]闭环自愈指标:[/bold cyan] 迭代轮次: {current_round} | 历史合并轮次: {len(history)}"
+        )
+
+    summary_path = path / "run-summary.json"
+    if summary_path.is_file():
+        try:
+            summary = json.loads(summary_path.read_text(encoding="utf-8"))
+            elapsed = summary.get("elapsed_sec")
+            cov = summary.get("citation_coverage")
+            status_text = "完成" if summary.get("pipeline_complete") else "进行中"
+            summary_str = f"状态: {status_text}"
+            if elapsed is not None:
+                summary_str += f" | 总耗时: {elapsed:.1f}s"
+            if cov is not None:
+                summary_str += f" | 引用覆盖率: {cov*100:.0f}%"
+            _out.print(f"[dim]运行摘要: {summary_str}[/dim]")
+        except Exception:
+            pass
+
 
 
 # --------------------------------------------------------------------------- #

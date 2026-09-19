@@ -128,8 +128,14 @@ class Organizer:
         nodes = plan.nodes[: self.config.max_nodes]
         node_titles = [n.title for n in nodes]
 
+        sem = asyncio.Semaphore(2)
+
+        async def _limited_node(idx: int, node: _Node) -> str:
+            async with sem:
+                return await self._node_body(idx, node, node_titles, evidence, llm)
+
         node_bodies = await gather_fail_fast(
-            self._node_body(i + 1, n, node_titles, evidence, llm)
+            _limited_node(i + 1, n)
             for i, n in enumerate(nodes)
         )
 

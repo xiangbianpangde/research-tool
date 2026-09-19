@@ -22,43 +22,53 @@ from pydantic import ValidationError
 from .errors import ConfigValidationError
 from .models import PipelineConfig
 
-_STANDARD_STAGES = ["collect", "deepen", "clean", "extract", "organize", "report"]
+_STANDARD_STAGES = [
+    "collect",
+    "clean",
+    "extract",
+    "knowledge",
+    "inspect",
+    "targeted",
+    "merge",
+    "qgate",
+    "report",
+]
 _MODE_DEFAULTS: dict[str, dict[str, Any]] = {
     "brief": {
         "mode": "brief",
         "stages": ["collect", "clean", "report"],
         "collector": {"search_rounds": 1, "deep_search": False},
-        "deepen": {"profile_iterations": 1},
-        "max_backward_rounds": 0,
         "llm_stage_attempts": 2,
     },
     "full": {
         "mode": "full",
         "stages": list(_STANDARD_STAGES),
+        "llm": {"max_tokens": 16384},
         "collector": {"search_rounds": 1, "deep_search": False},
-        "deepen": {"profile_iterations": 1},
         "cleaner": {"relevance_filter": True},
         "extractor": {"enabled": True, "fail_on_chunk_error": True},
-        "max_backward_rounds": 0,
+        "inspect": {"enabled": True},
+        "targeted": {"max_rounds": 3, "max_queries": 10},
+        "qgate": {"max_high_findings": 0, "max_total_findings": 10},
         "llm_stage_attempts": 3,
     },
     "fast": {
         "mode": "fast",
-        "stages": [stage for stage in _STANDARD_STAGES if stage != "deepen"],
+        "stages": ["collect", "clean", "extract", "organize", "report"],
         "collector": {"search_rounds": 1, "deep_search": False},
         "deepen": {"profile_iterations": 1},
         "max_backward_rounds": 0,
     },
     "standard": {
         "mode": "standard",
-        "stages": list(_STANDARD_STAGES),
+        "stages": ["collect", "deepen", "clean", "extract", "organize", "report"],
         "collector": {"search_rounds": 1, "deep_search": False},
         "deepen": {"profile_iterations": 1},
         "max_backward_rounds": 0,
     },
     "deep": {
         "mode": "deep",
-        "stages": list(_STANDARD_STAGES),
+        "stages": ["collect", "deepen", "clean", "extract", "organize", "report"],
         "collector": {
             "search_rounds": 2,
             "deep_search": True,
@@ -84,6 +94,9 @@ _ENV_OVERRIDES = {
     "LLM_PROVIDER": ("llm", "provider"),
     "LLM_MODEL": ("llm", "model"),
     "LLM_BASE_URL": ("llm", "base_url"),
+    "LLM_MAX_TOKENS": ("llm", "max_tokens"),
+    "LLM_REQUEST_TIMEOUT_SEC": ("llm", "request_timeout_sec"),
+    "LLM_READ_TIMEOUT_SEC": ("llm", "read_timeout_sec"),
 }
 
 
@@ -157,6 +170,9 @@ def _flatten_to_pipeline(raw: dict) -> dict:
         ("cleaner", "cleaner"),
         ("extractor", "extractor"),
         ("organizer", "organizer"),
+        ("inspect", "inspect"),
+        ("targeted", "targeted"),
+        ("qgate", "qgate"),
         ("reporter", "reporter"),
         # 阶段 F：论文 ↔ YouTube talk；遗漏会导致 config.yaml talk: 段静默丢弃
         ("talk", "talk"),
@@ -181,6 +197,9 @@ def _flatten_to_pipeline(raw: dict) -> dict:
         "llm_healthcheck_timeout_sec",
         # B8：九段管线 flag 键（默认全关）
         "nine_loop",
+        "inspect",
+        "targeted",
+        "qgate",
     ):
         if key in pipeline:
             data[key] = pipeline[key]
@@ -195,7 +214,20 @@ def _apply_env_overrides(data: dict) -> dict:
             if section == "pipeline":
                 data[key] = val
             else:
-                data.setdefault(section, {})[key] = None if key == "base_url" and not val else val
+                target_val: Any = val
+                if key == "base_url" and not val:
+                    target_val = None
+                elif key == "max_tokens":
+                    try:
+                        target_val = int(val)
+                    except ValueError:
+                        target_val = val
+                elif key in {"request_timeout_sec", "read_timeout_sec"}:
+                    try:
+                        target_val = float(val)
+                    except ValueError:
+                        target_val = val
+                data.setdefault(section, {})[key] = target_val
     return data
 
 
@@ -216,6 +248,9 @@ _MAPPING_SECTIONS = (
     "cleaner",
     "extractor",
     "organizer",
+    "inspect",
+    "targeted",
+    "qgate",
     "reporter",
     "talk",
     "pipeline",
@@ -365,20 +400,24 @@ def load_config(
 
     if data.get("mode") == "full":
         # full 是产物契约，不允许 config.yaml 或 CLI 静默裁掉中间阶段。
-        # 当 nine_loop.deepen_as_strategy 生效时，deepen 已降级为策略而非独立顶层阶段，
-        # stages 拓扑严格遵循 ① 收集 → ② 清洗 → ③ 抽取事实，不注入独立 deepen 阶段。
+        # stages 拓扑严格遵循九段闭环管线。
+        # 显式传入的 overrides["stages"]（如 SDK research() 或 CLI --stages）
+        # 具有最高优先级，不得被覆盖。
+        has_override_stages = isinstance(overrides, dict) and "stages" in overrides
         full_stages = (
-            [s for s in _STANDARD_STAGES if s != "deepen"]
+            ["collect", "clean", "extract", "organize", "report"]
             if is_deepen_strategy
             else list(_STANDARD_STAGES)
         )
         full_patch: dict[str, Any] = {
-            "stages": full_stages,
             "extractor": {"enabled": True, "fail_on_chunk_error": True},
+            "inspect": {"enabled": True},
         }
-        if not is_deepen_strategy:
-            full_patch["deepen"] = {"enabled": True}
+        if not has_override_stages:
+            full_patch["stages"] = full_stages
         data = _deep_merge(data, full_patch)
+        if overrides:
+            data = _deep_merge(data, overrides)
     _validate_mapping_sections(data)
     # 密钥必须根据最终 provider/base_url 选择；CLI overrides 可能刚切换
     # provider，若提前注入会把旧 provider 的 key 带到新端点并触发 401。

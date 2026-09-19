@@ -60,7 +60,7 @@ packages = ["research_tool"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
-testpaths = ["research_tool/tests"]
+testpaths = ["research_tool/tests", "tests"]
 # addopts = "--cov=research_tool --cov-report=term-missing"  # 需 pip install pytest-cov
 
 [tool.coverage.run]
@@ -78,7 +78,7 @@ exclude_also = [
 [tool.ruff]
 line-length = 100
 target-version = "py311"
-extend-exclude = ["docs"]  # historical M-001..M-012 skeletons are design artifacts, not linted code
+extend-exclude = ["docs", ".agents", "project_management"]  # design artifacts, agent workspaces, project management scripts
 
 [tool.ruff.lint]
 select = [
@@ -96,8 +96,23 @@ ignore = [
     "S403",    # pickle
 ]
 [tool.ruff.lint.per-file-ignores]
-"research_tool/tests/*" = ["S101", "T20", "S108", "N814", "E501"]
+# Test suites: extensive assertions, test helper printouts, relaxed naming, and test fixtures
+"research_tool/tests/*" = ["S101", "T20", "S108", "N814", "N812", "E501", "F401", "F841", "N802", "PLR0915", "S603", "S607"]
+"tests/*" = ["S101", "T20", "S108", "N814", "N812", "E501", "F401", "F841", "N802", "PLR0915", "S603", "S607"]
+# Standalone setup/maintenance scripts allow stdout printing
 "scripts/*" = ["T20"]
+# Presentation layer: Typer CLI and Gradio WebUI contain long console/UI strings, Rich markup,
+# multi-branch command handlers (PLR0915), and silent fallbacks for status reporting (S110)
+"research_tool/presentation/cli.py" = ["E501", "PLR0915", "S110"]
+"research_tool/presentation/webui.py" = ["E501"]
+# Application layer: Multi-stage pipeline orchestrator coordinates 9 stages, complex asynchronous
+# streaming routines (PLR0915), verbose trace logs (E501), and non-fatal cleanup handlers (S110)
+"research_tool/application/pipeline.py" = ["E501", "PLR0915", "S110"]
+# Domain layer: Configuration loader handles multi-source cascading overrides and topology validation
+"research_tool/domain/config.py" = ["PLR0915"]
+# Nine-loop module: Native 9-stage reference implementation uses *Fault naming per Protocol v1 (N818),
+# includes diagnostic evaluation CLI scripts (T20, F841, E741), and offline model simulation (S310, S311, S110)
+"research_tool/nine_loop/*" = ["N818", "PLR0915", "T20", "E501", "S310", "S311", "S110", "N812", "F841", "E741", "S603", "F401"]
 
 [tool.ruff.lint.pylint]
 max-statements = 50

@@ -34,7 +34,8 @@ _DATA_URI = re.compile(r"data:image/[^;]+;base64,[A-Za-z0-9+/=]+", re.IGNORECASE
 # Cookie/GDPR 声明与提示噪音
 _COOKIE_BANNER = re.compile(
     r"\b(cookie policy|privacy policy|accept (all )?cookies|we use cookies|manage cookies|"
-    r"cookie preferences|consent preferences|本网站使用cookies|隐私政策|同意所有cookies|关闭提示)\b",
+    r"cookie preferences|consent preferences|本网站使用cookies|"
+    r"隐私政策|同意所有cookies|关闭提示)\b",
     re.IGNORECASE,
 )
 # 尾部截断标题（01 §3.4 规则6）
@@ -315,7 +316,10 @@ class Cleaner:
                 issues=issues,
             )
             # 只把"非过短"且开启去重的纳入去重：0=关闭去重，避免全量文档合并
-            if 0.0 < self.config.dedup_similarity < 1.0 and body_len >= self.config.min_content_length:
+            if (
+                0.0 < self.config.dedup_similarity < 1.0
+                and body_len >= self.config.min_content_length
+            ):
                 dedup_items.append((src.stem, _shingles(cleaned_body), body_len))
 
         # MinHash 去重：相似组保留最长，其余从 clean/ 删除并标 dedup_of:<胜者>
@@ -379,7 +383,10 @@ class Cleaner:
                 if self.config.relevance_fail_open:
                     scores = [1.0] * len(batch)
                 else:
-                    raise StageError("clean", f"LLM 相关性过滤失败（避免 fail-open 放行未打分脏数据）: {last_err}")
+                    raise StageError(
+                        "clean",
+                        f"LLM 相关性过滤失败（避免 fail-open 放行未打分脏数据）: {last_err}",
+                    )
 
             if len(scores) != len(batch):
                 if self.config.relevance_fail_open:
@@ -387,7 +394,8 @@ class Cleaner:
                 else:
                     raise StageError(
                         "clean",
-                        f"LLM 相关性过滤返回数量不匹配（期望 {len(batch)}，实际 {len(scores)}），拒绝放行未评分文档",
+                        f"LLM 相关性过滤返回数量不匹配"
+                        f"（期望 {len(batch)}，实际 {len(scores)}），拒绝放行未评分文档",
                     )
 
             if any(not (0.0 <= float(s) <= 1.0) for s in scores):

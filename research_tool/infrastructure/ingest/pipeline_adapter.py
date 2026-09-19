@@ -53,6 +53,18 @@ E_PIPE_CONFIG_MISMATCH: Final[str] = "E_PIPE_CONFIG_MISMATCH"  # Collect 配置 
 # Collect 配置 schema 版本（CE-009 引用）
 COLLECT_CONFIG_VERSION: Final[str] = "1.0.0"
 
+# 默认下游阶段列表（九段闭环管线）
+DEFAULT_DOWNSTREAM_STAGES: Final[list[str]] = [
+    "clean",
+    "extract",
+    "knowledge",
+    "inspect",
+    "targeted",
+    "merge",
+    "qgate",
+    "report",
+]
+
 
 # --------------------------------------------------------------------------- #
 # 数据类
@@ -61,7 +73,7 @@ COLLECT_CONFIG_VERSION: Final[str] = "1.0.0"
 
 @dataclass(frozen=True)
 class StagesResult:
-    """5 阶段管道触发结果（IC-023）。"""
+    """九段闭环下游管道触发结果（IC-023）。"""
 
     stages_run: list[str] = field(default_factory=list)
     success: bool = False
@@ -185,17 +197,17 @@ class MarkdownWriter:
 
 
 # --------------------------------------------------------------------------- #
-# PipelineTrigger（5 阶段管道触发 IC-023）
+# PipelineTrigger（九段闭环下游管道触发 IC-023）
 # --------------------------------------------------------------------------- #
 
 
 class PipelineTrigger:
-    """5 阶段管道触发器（IC-023）。
+    """九段闭环下游管道触发器（IC-023）。
 
     复用 application/pipeline.py:ResearchPipeline；不修改任何 Stage 实现。
     设计要点：
-    - 默认跳过 deepen（视频源已有 raw/ 内容，deepen 反而会搜索更多无关注入）
-    - resume=True 必传：让 collect 阶段检测到 raw/ 已有 video_*.md → 跳过
+    - 默认执行下游 8 阶段（视频/PDF 源已有 raw/ 内容）
+    - resume=True 必传：让 collect 阶段检测到 raw/ 已有内容 → 跳过
     - 失败重试 1 次（FDR-M008-003）
     """
 
@@ -204,9 +216,9 @@ class PipelineTrigger:
         stages: list[str] | None = None,
         max_retry: int = PIPELINE_MAX_RETRY,
     ) -> None:
-        # 默认阶段列表：跳过 collect（已由 video markdown 提供）和 deepen（视频源不再二次深挖）
-        # 保留 clean → extract → organize → report
-        self._stages = stages or ["clean", "extract", "organize", "report"]
+        # 默认阶段列表：跳过 collect（已由 video markdown / pdf 提供）
+        # 执行下游 8 阶段：clean → extract → knowledge → inspect → targeted → merge → qgate → report
+        self._stages = list(stages) if stages is not None else list(DEFAULT_DOWNSTREAM_STAGES)
         self._max_retry = max_retry
 
     async def trigger(
@@ -214,7 +226,7 @@ class PipelineTrigger:
         topic: str,
         work_dir: str | Path,
     ) -> StagesResult:
-        """触发 5 阶段管道（IC-023）。
+        """触发下游闭环管道（IC-023）。
 
         Args:
             topic: 主题
@@ -477,6 +489,7 @@ __all__ = [
     "RAW_DIR_NAME",
     "VIDEO_FILENAME_PREFIX",
     "COLLECT_CONFIG_VERSION",
+    "DEFAULT_DOWNSTREAM_STAGES",
     # 错误码
     "E_PIPE_001",
     "E_PIPE_DISK_FULL",

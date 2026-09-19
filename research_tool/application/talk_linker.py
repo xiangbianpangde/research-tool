@@ -11,11 +11,13 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Any
 from ..common.logging_config import get_logger
 from ..domain.models import TalkConfig
 from ..infrastructure.search.base import SearchHit
@@ -428,3 +430,82 @@ class TalkLinker:
         }
         done.write_text(json.dumps(summary, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
         return report
+
+    def to_merge_responses(
+        self, matches: list[TalkMatch] | TalkEnrichReport
+    ) -> list[dict[str, Any]]:
+        """Convert talk matches into Stage 7 Merge response envelopes."""
+        if isinstance(matches, TalkEnrichReport):
+            match_list = [m for m in matches.matched if m.matched and m.video_url]
+        elif isinstance(matches, list):
+            match_list = [m for m in matches if m.matched and m.video_url]
+        else:
+            match_list = []
+
+        if not match_list:
+            return []
+        responses = []
+        for m in match_list:
+            vid = m.video_url or ""
+            blob = f"{m.paper_title}:{m.video_title}:{vid}".encode("utf-8")
+            ch = hashlib.sha256(blob).hexdigest()
+            src_id = (
+                f"src:talk:{hashlib.sha256(vid.encode('utf-8')).hexdigest()[:16]}"
+                if vid
+                else f"src:talk:{ch[:16]}"
+            )
+            responses.append(
+                {
+                    "request_id": f"talk:{ch[:12]}",
+                    "facts": [
+                        {
+                            "source_id": src_id,
+                            "locator": vid or f"https://youtube.com/watch?v={ch[:11]}",
+                            "content_sha256": ch,
+                            "extractor_version": "talk_linker.v1",
+                            "round_id": "talk_enrichment",
+                            "talk_confidence": float(m.confidence),
+                            "via": "talk_linker",
+                            "source": vid,
+                            "paper_title": m.paper_title,
+                            "video_title": m.video_title,
+                        }
+                    ],
+                }
+            )
+        return responses
+
+    def merge_into_network(
+        self,
+        net_env: dict[str, Any],
+        matches_or_report: list[TalkMatch] | TalkEnrichReport,
+        *,
+        prev_digest: str | None = None,
+    ) -> tuple[dict[str, Any], dict[str, Any]]:
+        """Non-destructively CAS merge talk evidence into the knowledge graph envelope."""
+        from ..nine_loop import merge_min
+
+        responses = self.to_merge_responses(matches_or_report)
+        if not responses:
+            return net_env, {}
+
+        if prev_digest is None:
+            prev_digest = merge_min.graph_digest(net_env.get("result", {}))
+
+        merge_req = merge_min.request_from_chain(net_env, responses, prev_digest=prev_digest)
+        merge_env = merge_min.run_merge(merge_req)
+        if merge_env.get("error"):
+            logger.warning("TalkLinker CAS merge fault: %s", merge_env["error"])
+            return net_env, merge_env
+
+        merged_net_env = {
+            "v": 1,
+            "run_id": net_env.get("run_id"),
+            "stage": "network",
+            "request_id": "network:talk_merged",
+            "idempotency_key": merge_env["result"]["latest_digest"],
+            "budget_lease": net_env.get("budget_lease"),
+            "result": merge_env["result"]["graph"],
+            "error": None,
+        }
+        return merged_net_env, merge_env

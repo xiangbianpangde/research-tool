@@ -171,7 +171,13 @@ _STOPWORDS = {
 
 
 def _tokens(text: str) -> set[str]:
-    return {t.lower() for t in _TOKEN_RE.findall(text or "") if t.lower() not in _STOPWORDS}
+    tokens = {t.lower() for t in _TOKEN_RE.findall(text or "") if t.lower() not in _STOPWORDS}
+    cjk = [c for c in (text or "") if "\u4e00" <= c <= "\u9fff"]
+    for c in cjk:
+        tokens.add(c)
+    for i in range(len(cjk) - 1):
+        tokens.add(cjk[i] + cjk[i + 1])
+    return tokens
 
 
 def _hit_relevance(topic: str, hit: SearchHit) -> float:
