@@ -74,6 +74,8 @@ _xtasks/
 .pi-subagents/
 .agents/
 
-# pi agent runtime artifacts
-collect/runtime/
-!collect/architecture/
+# worklogs (local records only, do not upload to GitHub)
+worklogs/
+**/worklog/
+**/worklogs/
+

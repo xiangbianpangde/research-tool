@@ -6,51 +6,48 @@
 
 ## 项目概述
 
-Python 核心引擎 + 多接口层的调研工具：给定主题 → 自动产出知识树 / 调研报告。
-六阶段管道（Collect → Deepen → Clean → Extract → Organize → Report），
-Stage 之间仅通过文件系统通信，可中断、可恢复、可独立调试。
+Python 核心引擎 + 多接口层的智能深度调研工具：给定主题 → 自动产出知识树 / 调研报告。
+原生九段闭环管线（Collect → Clean → Extract → Knowledge → Inspect → Targeted → Merge → QGate → Report），
+Stage 之间严格通过文件系统不可变数据通信，断点幂等可恢复、可自愈补搜、可独立调试。
 
 ---
 
 ## 目录索引
 
 ```
-.                                ← 项目根（即工作区根）
-├── research_tool/               # Python 包（按 01-架构 五层组织）
-│   ├── __init__.py              #   公开 API 入口
-│   ├── presentation/            #   表现层
-│   │   ├── cli.py               #     Typer CLI（11 命令）
-│   │   └── webui.py             #     Gradio Web 界面
-│   ├── application/             #   应用层
-│   │   ├── pipeline.py          #     ResearchPipeline 编排
-│   │   ├── video_pipeline.py    #     V1.1 VideoIngest 编排
-│   │   └── video_concurrent_orchestrator.py  # 视频并发调度
-│   ├── domain/                  #   领域层
-│   │   ├── models.py            #     30+ Pydantic 模型
-│   │   ├── config.py            #     YAML 配置加载
-│   │   └── errors.py            #     7 异常类 + V1.1 错误码体系
-│   ├── infrastructure/          #   基础设施层
-│   │   ├── stages/              #     6 个 Stage 实现
-│   │   ├── llm/                 #     LLM 客户端抽象（5 provider）
-│   │   ├── search/              #     12 个搜索后端
-│   │   └── ingest/              #     PDF/视频摄取（9 模块）
-│   └── common/                  #   公共工具
-│       ├── logging_config.py    #     统一日志
-│       ├── slug.py              #     中文→文件名
-│       ├── translate.py         #     Markdown 翻译
-│       └── url_guard.py         #     SSRF 防护
-├── research_tool/tests/         # pytest（417 passed / 5 skipped）
-├── docs/                        # 文档资产
-│   ├── reports/                 #   收束报告 + 交接展示
-│   ├── plan/                    #   项目计划
-│   └── templates/               #   模板
-├── meta/                        # 元信息（CODE_MAP）
-├── worklogs/                    # 工作日志 + decisions/
-│   └── decisions/               #   ADR（收束节点产出）
-├── pyproject.toml               # 项目元数据 + ruff
-├── .pre-commit-config.yaml
-├── README.md / CLAUDE.md / STATUS.md
-└── CLAUDE.md                 # 本文件（给 AI 读）
+.                                ← 项目根（极简规范根目录）
+├── .env.example                 # 环境变量配置模板
+├── .gitignore                   # Git 忽略规则（严格屏蔽 .env、.agents/、worklogs/）
+├── .pre-commit-config.yaml      # Pre-commit 代码规范与防凭证泄漏检查
+├── CLAUDE.md                    # 本文件（AI 项目上下文）
+├── pyproject.toml               # 项目元数据、依赖构建与 Ruff/Pytest 规则
+├── README.md                    # 官方完整架构与使用指南
+├── uv.lock                      # 依赖版本锁定
+├── research_tool/               # Python 核心包（5 层整洁架构 + 原生 9 段闭环引擎）
+│   ├── presentation/            #   表现层 (cli.py / webui.py / setup_deployment.py)
+│   ├── application/             #   应用层 (pipeline.py / video_pipeline.py / talk_linker.py)
+│   ├── domain/                  #   领域层 (models.py / config.py / errors.py)
+│   ├── nine_loop/               #   原生 9 阶段闭环核心调度引擎
+│   ├── infrastructure/          #   基础设施层 (stages/ / search/ / llm/ / ingest/ / export/)
+│   └── common/                  #   公共横切工具 (logging / url_guard / slug)
+├── tests/                       # 全局 E2E 分层测试 (Tier 1-4) 与对抗测试 (adversarial/)
+│   ├── e2e/                     #   分级端到端测试体系
+│   └── adversarial/             #   真实 API 熔断、网络瞬断与对抗压力挑战
+├── scripts/                     # 运维与辅助脚本 (setup / smoke / proxy)
+└── docs/                        # 统一文档中心
+    ├── PROJECT.md               #   项目演进规范与契约白皮书
+    ├── TEST_INFRA.md            #   测试基础设施规格
+    ├── TEST_READY.md            #   测试验收与交付判定报告
+    ├── STATUS.md                #   开发状态与进度看板
+    ├── CHANGELOG.md             #   版本变更历史
+    ├── AGENTS.md                #   多 Agent 协作规则与上下文
+    ├── architecture/            #   架构设计蓝图与九段闭环流程图
+    ├── conventions/             #   开发、代码、测试、Git 规范全集
+    ├── meta/                    #   代码图谱与重构笔记
+    ├── project_management/      #   项目管理审计报告与演进追踪
+    ├── plan/                    #   各阶段开发实施计划
+    ├── reports/                 #   收束报告与交付物
+    └── templates/               #   各类规范文档模板
 ```
 
 ---
