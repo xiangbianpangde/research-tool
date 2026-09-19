@@ -95,7 +95,7 @@
 人已确认触发收束节点。覆盖功能点 #{N-2}、#{N-1}、#{N}。
 
 按四阶段执行（详见 `06-第三步_收束节点.md`）：
-1. 整理：清理代码/文件，更新 CLAUDE.md 和 FILE_GRAPH.md，回顾 worklog 提升关键决策为 ADR
+1. 整理：清理代码/文件，更新 AGENTS.md 和 FILE_GRAPH.md，回顾 worklog 提升关键决策为 ADR
 2. 测试：运行全量测试 + 手工探索
 3. 审计：AI 审计（模板见 `docs/templates/AI审计报告模板.md`）+ 通知人审计（模板见 `docs/templates/人审计签核模板.md`）
 4. 验证：BDD 回演 + 用户故事回溯

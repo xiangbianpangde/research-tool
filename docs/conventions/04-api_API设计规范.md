@@ -124,7 +124,7 @@ v2 "顺手"把 `name` 改成 `fullName` → 未迁移的 v1 调用方生产事�
 | 方向 | 链接 |
 |------|------|
 | 细化自 | [ai-workflow 第二步 §2.1 实现](ai-workflow_AI协作开发流程/04-第二步_迭代开发.md) |
-| 验收标准 | [docs/specs/04-api.md](../docs/specs/04-api.md) |
+| 验收标准 | `docs/specs/04-api.md` |
 | 错误处理 / 异常类型 | [02-代码编写规范 §四](02-coding_代码编写规范.md) |
 | API 路由全景图 | [08-代码理解与图谱规范](08-code-understanding_代码理解与图谱规范.md) |
 

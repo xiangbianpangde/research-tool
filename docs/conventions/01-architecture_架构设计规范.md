@@ -130,7 +130,7 @@ def create_user(request):
 | 方向 | 链接 |
 |------|------|
 | 细化自 | [ai-workflow 第一步·编写计划](ai-workflow_AI协作开发流程/03-第一步_编写计划.md) |
-| 验收标准 | [docs/specs/01-architecture.md](../docs/specs/01-architecture.md) |
+| 验收标准 | `docs/specs/01-architecture.md` |
 | 密钥 / 代码级安全 | [02-代码编写规范](02-coding_代码编写规范.md) |
 | 调用图 / 依赖黑洞 / 代码地图 | [08-代码理解与图谱规范](08-code-understanding_代码理解与图谱规范.md) |
 | ADR 产出时机 | [ai-workflow 第三步·收束节点](ai-workflow_AI协作开发流程/06-第三步_收束节点.md) |

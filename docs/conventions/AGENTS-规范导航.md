@@ -56,6 +56,6 @@
 1. 改 `conventions/NN-*.md` → 同步 `docs/specs/NN-*.md` BDD。
 2. 动到 §二落地配置 → 同步 `src/<维度>/` 可运行示例。
 3. 红线增删 → 同步本文件 §2 + `README-规范导航.md` 红线速查。
-4. 汇报：更新 `worklogs/` + `STATUS.md`（见 [CLAUDE.md](../CLAUDE.md) 工作流程）。
+4. 汇报：更新 `worklogs/` + `STATUS.md`（见 [AGENTS.md](../../AGENTS.md) 工作流程）。
 
 > 各篇正文结构统一：§一红线（配检测）→ §二落地配置 → §三决策表 → 反模式 → 检查清单 → 关联。

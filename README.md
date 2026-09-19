@@ -556,4 +556,4 @@ ruff check research_tool/ tests/
 
 ## 📄 开源许可证
 
-本项目基于 [MIT License](LICENSE) 开源。
+本项目基于 [MIT License](https://opensource.org/licenses/MIT) 开源。

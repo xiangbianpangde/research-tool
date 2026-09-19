@@ -1,10 +1,10 @@
 # 文档规范
 
 > **本规范是 ai-workflow 中文档产出环节的细化**：
-> - 细化 [第二步 §2.5 更新记录](ai-workflow_AI协作开发流程/04-第二步_迭代开发.md)（worklog / STATUS / CLAUDE）与 [§2.8 + 07-汇报](ai-workflow_AI协作开发流程/07-汇报.md)。
+> - 细化 [第二步 §2.5 更新记录](ai-workflow_AI协作开发流程/04-第二步_迭代开发.md)（worklog / STATUS / AGENTS）与 [§2.8 + 07-汇报](ai-workflow_AI协作开发流程/07-汇报.md)。
 > - 细化交付物文档（README / CHANGELOG / 设计文档）；并支撑[第三步·收束节点](ai-workflow_AI协作开发流程/06-第三步_收束节点.md)的「文档一致性检查」。
 >
-> **模板权威在 [docs/templates/](../docs/templates/README-模板索引.md)**——本规范只定标准与红线，模板正文不在此重抄。
+> **模板权威在 [docs/templates/](../templates/README-模板索引.md)**——本规范只定标准与红线，模板正文不在此重抄。
 > **档位裁剪**：轻量（README + worklog）/ 标准（+ CHANGELOG + 设计文档）/ 团队（+ CONTRIBUTING + 代码地图）。
 
 ---
@@ -23,12 +23,12 @@
 
 ## 二、落地：模板复用 + 文档随码同步
 
-所有文档从 [docs/templates/](../docs/templates/README-模板索引.md) 复制起步，不手搓：
+所有文档从 [docs/templates/](../templates/README-模板索引.md) 复制起步，不手搓：
 
 | 要写的文档 | 用哪个模板 |
 |-----------|-----------|
-| 工作日志 | [worklog模板](../docs/templates/worklog模板.md) |
-| 功能点 / 收束汇报 | [汇报模板](../docs/templates/汇报模板.md) |
+| 工作日志 | [worklog模板](../templates/worklog模板.md) |
+| 功能点 / 收束汇报 | [汇报模板](../templates/汇报模板.md) |
 | README / CHANGELOG / 设计文档 | 见模板索引 |
 
 **docstring 范例（公共 API 必须）：**
@@ -119,8 +119,8 @@ def create_order(user_id: str, product_id: str, quantity: int) -> Order:
 | 方向 | 链接 |
 |------|------|
 | 细化自 | [§2.5 更新记录](ai-workflow_AI协作开发流程/04-第二步_迭代开发.md) · [07-汇报](ai-workflow_AI协作开发流程/07-汇报.md) |
-| 模板权威 | [docs/templates/](../docs/templates/README-模板索引.md) |
-| 验收标准 | [docs/specs/06-documentation.md](../docs/specs/06-documentation.md) |
+| 模板权威 | [docs/templates/](../templates/README-模板索引.md) |
+| 验收标准 | `docs/specs/06-documentation.md` |
 | 代码地图 CODE_MAP / 知识图谱 | [08-代码理解与图谱规范](08-code-understanding_代码理解与图谱规范.md) |
 | 文档一致性检查时机 | [第三步·收束节点](ai-workflow_AI协作开发流程/06-第三步_收束节点.md) |
 

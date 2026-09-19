@@ -27,7 +27,7 @@ project/
 ├── plan/            # 计划
 ├── src/             # 源代码
 ├── STATUS.md        # 项目状态
-├── CLAUDE.md        # AI 上下文
+├── AGENTS.md        # AI 上下文
 └── README.md        # 本文件
 ```
 

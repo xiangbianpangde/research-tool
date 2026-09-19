@@ -34,9 +34,32 @@ ARK_BASE_URL = os.environ.get(
 ARK_MODEL = os.environ.get("LLM_MODEL", "deepseek-v4-flash")
 ARK_API_KEY = os.environ.get("OPENAI_API_KEY") or os.environ.get("VOLC_API_KEY") or os.environ.get("ARK_API_KEY") or ""
 
+
+def _is_ark_live_available() -> bool:
+    if not ARK_API_KEY or ARK_API_KEY == "ark-placeholder-adversarial-key":
+        return False
+    try:
+        import httpx
+
+        url = f"{ARK_BASE_URL.rstrip('/')}/chat/completions"
+        resp = httpx.post(
+            url,
+            json={
+                "model": ARK_MODEL,
+                "messages": [{"role": "user", "content": "ping"}],
+                "max_tokens": 1,
+            },
+            headers={"Authorization": f"Bearer {ARK_API_KEY}"},
+            timeout=3.0,
+        )
+        return resp.status_code == 200
+    except Exception:
+        return False
+
+
 pytestmark = pytest.mark.skipif(
-    not ARK_API_KEY,
-    reason="Live Ark integration tests require OPENAI_API_KEY or VOLC_API_KEY environment variable",
+    not _is_ark_live_available(),
+    reason="Live Ark integration tests require functional API key with active subscription",
 )
 
 

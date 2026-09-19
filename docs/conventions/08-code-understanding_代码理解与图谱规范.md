@@ -194,7 +194,7 @@ git lfs track ".understand-anything/*.json"
 
 队友 clone 后直接 `/understand-dashboard`，不需要重新跑分析。
 
-> **⚠️ 迁移生成产物时，真正的源头是生成它的脚本**：移动/重命名入库的生成物（如 `CODE_MAP.md`、图谱 HTML）后，若只 `git mv` 而不改生成器，**下次一跑生成器就把文件写回老位置，迁移等于白做**。迁移清单：① 生成器的写出路径 ② 生成器的 docstring/日志 ③ 所有引用（CLAUDE.md / README / dashboard 等）④ `.gitignore` 注释 ⑤ `meta/FILE_GRAPH.md`。**迁移后跑一次生成器验证落点正确。**
+> **⚠️ 迁移生成产物时，真正的源头是生成它的脚本**：移动/重命名入库的生成物（如 `CODE_MAP.md`、图谱 HTML）后，若只 `git mv` 而不改生成器，**下次一跑生成器就把文件写回老位置，迁移等于白做**。迁移清单：① 生成器的写出路径 ② 生成器的 docstring/日志 ③ 所有引用（AGENTS.md / README / dashboard 等）④ `.gitignore` 注释 ⑤ `meta/FILE_GRAPH.md`。**迁移后跑一次生成器验证落点正确。**
 
 ### 2.5 为什么是交互式 Dashboard，不是 Mermaid 手写图
 

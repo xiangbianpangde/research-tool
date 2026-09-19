@@ -169,7 +169,7 @@ def fetch_user(user_id):
 - [ ] 命名见名知意，风格与项目一致（无 `data`/`temp`/`process`）
 - [ ] 函数单一职责，超阈值处已拆分或注释例外
 - [ ] 无越界变更（只改本功能点该改的）
-- [ ] 未与已有模块重复造轮子（对照 `CLAUDE.md` 代码库图谱）
+- [ ] 未与已有模块重复造轮子（对照 `AGENTS.md` 代码库图谱）
 
 ---
 
@@ -178,7 +178,7 @@ def fetch_user(user_id):
 | 方向 | 链接 |
 |------|------|
 | 细化自 | [ai-workflow 第二步 §2.1 实现 / §2.3 审查](ai-workflow_AI协作开发流程/04-第二步_迭代开发.md) |
-| 验收标准 | [docs/specs/02-coding.md](../docs/specs/02-coding.md) |
+| 验收标准 | `docs/specs/02-coding.md` |
 | 分层 / 跨层 / 循环依赖 | [01-架构设计规范](01-architecture_架构设计规范.md) |
 | 错误响应格式 | [04-API 设计规范](04-api_API设计规范.md) |
 | 中大型项目的调用图 / 可理解性 | [08-代码理解与图谱规范](08-code-understanding_代码理解与图谱规范.md) |

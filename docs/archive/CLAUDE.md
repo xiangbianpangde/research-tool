@@ -1,3 +1,16 @@
+# [ARCHIVED] research-tool — 历史 AI 项目上下文 (CLAUDE.md)
+
+> ⚠️ **已废弃并归档 (DEPRECATED & ARCHIVED)**
+> 
+> - **归档日期**：2026-09-19
+> - **迁移说明**：本项目已全面升级 AI Agent 协议体系。根据架构治理决策（Requirement R1），AI Agent 权威项目上下文与治理规范已统一提升并迁移至项目根目录的 **[`AGENTS.md`](../../AGENTS.md)**。
+> - **重定向指引**：所有 AI 协作工具（Claude、Cursor、Codex、Gemini、Antigravity 等）及自动化脚本请立即转向阅读根目录 **`AGENTS.md`**。
+> - **存档状态**：本文件作为历史治理快照永久归档于 `docs/archive/CLAUDE.md`，不再随代码演进而更新。
+
+---
+
+*(以下为归档的历史原文内容)*
+
 # research-tool — AI 项目上下文
 
 > **⚠️ 仅供 AI Agent 读取**，新会话自动加载。人类请读 `README.md`。

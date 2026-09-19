@@ -45,6 +45,28 @@ ARK_API_KEY = (
 )
 
 
+def _is_ark_live_available() -> bool:
+    if not ARK_API_KEY or ARK_API_KEY == "ark-placeholder-adversarial-key":
+        return False
+    try:
+        import httpx
+
+        url = f"{ARK_BASE_URL.rstrip('/')}/chat/completions"
+        resp = httpx.post(
+            url,
+            json={
+                "model": ARK_MODEL,
+                "messages": [{"role": "user", "content": "ping"}],
+                "max_tokens": 1,
+            },
+            headers={"Authorization": f"Bearer {ARK_API_KEY}"},
+            timeout=3.0,
+        )
+        return resp.status_code == 200
+    except Exception:
+        return False
+
+
 class SampleStructuredModel(BaseModel):
     topic: str = Field(description="The topic name")
     score: int = Field(description="A score between 1 and 10")
@@ -398,6 +420,10 @@ class TestReasoningTokenIsolation(unittest.TestCase):
         self.assertEqual("".join(output), "Prefix: ")
 
 
+@unittest.skipIf(
+    not _is_ark_live_available(),
+    "Live Ark reasoning isolation tests require functional API key with active subscription",
+)
 class TestLiveArkReasoningIsolation(unittest.IsolatedAsyncioTestCase):
     """Verifies reasoning token isolation directly against live Volcengine Ark deepseek-v4-flash."""
 

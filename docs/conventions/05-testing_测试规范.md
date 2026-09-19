@@ -120,7 +120,7 @@ addopts = "--cov=myapp --cov-fail-under=80 --cov-branch"
 | 方向 | 链接 |
 |------|------|
 | 细化自 | [ai-workflow §2.1 TDD / §2.2 可观测验证](ai-workflow_AI协作开发流程/04-第二步_迭代开发.md) |
-| 验收标准 | [docs/specs/05-testing.md](../docs/specs/05-testing.md) |
+| 验收标准 | `docs/specs/05-testing.md` |
 | 影响分析 / 调用图驱动增量测试 | [08-代码理解与图谱规范](08-code-understanding_代码理解与图谱规范.md) |
 
 ---
