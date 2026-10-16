@@ -142,7 +142,9 @@ class ResearchPipeline:
         for attempt in range(1, attempts + 1):
             try:
                 if uses_llm:
-                    await self._get_llm().healthcheck()
+                    await self._get_llm().healthcheck(
+                        timeout_sec=self.config.llm_healthcheck_timeout_sec
+                    )
                 await self._exec(stage, topic, topic_dir, result)
                 return
             except LLMAuthenticationError:
@@ -200,7 +202,9 @@ class ResearchPipeline:
                 message=f"第 {round_n + 1} 轮反向：评估知识树质量",
             )
             try:
-                await self._get_llm().healthcheck()
+                await self._get_llm().healthcheck(
+                    timeout_sec=self.config.llm_healthcheck_timeout_sec
+                )
                 fb = await Organizer(self.config.organizer).assess_and_feedback(
                     result.organize_result,
                     self._get_llm(),

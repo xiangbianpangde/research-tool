@@ -177,6 +177,7 @@ def _flatten_to_pipeline(raw: dict) -> dict:
         "max_backward_rounds",
         "llm_stage_attempts",
         "llm_retry_backoff_sec",
+        "llm_healthcheck_timeout_sec",
         # B8：九段管线 flag 键（默认全关）
         "nine_loop",
     ):
