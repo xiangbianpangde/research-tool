@@ -1,5 +1,17 @@
 # research-tool 开发状态
 
+## 当前恢复分支（2026-10-16）
+
+当前开发分支为 codex/nine-stage-only，固定历史基线提交 4ab1412；工作区 /Users/xbpd/.codex/worktrees/nine-stage-only/research-tool。后续以此分支开发，九段唯一主链通过验收后再提升为主分支。原 master 和原目录的未提交改动保留。
+
+已完成：恢复源码核对、四文件历史补丁提交、三份 CPA/gpt-6-luna 只读审计、126 项相关基线测试。九段主链尚未接通，未删除旧代码，未做真实联网/模型/DRB 验证；全包 Ruff 仍有 46 项原有告警。
+
+审计证据、裁剪边界、验收要求和唯一下一步见 [九段唯一主链裁剪计划](docs/plan/NINE-STAGE-ONLY-TRIM-PLAN.md)。下一步先按该文档的行为验收接通正文证据链和单一九段调度，随后裁掉被替代的旧路径。
+
+## 以下为恢复时保留的历史状态
+
+以下完成标记和测试数属于旧版本记录，不代表当前九段主链已通过验收。
+
 | 功能点 | 状态 | 备注 |
 |--------|------|------|
 | FP01: 六阶段管道 | ✅ | Collect→Deepen→Clean→Extract→Organize→Report；`brief/full` 产物契约 + stage completion marker + LLM 阶段有界重试 |

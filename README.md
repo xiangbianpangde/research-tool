@@ -1,5 +1,7 @@
 # research-tool
 
+> 当前为 codex/nine-stage-only 历史恢复开发分支。恢复基线和裁剪审计已完成，九段唯一主链尚未实现或验收。请先查看 [当前状态](STATUS.md) 与 [裁剪计划](docs/plan/NINE-STAGE-ONLY-TRIM-PLAN.md)；下文保留的“默认九段”等历史描述不作为当前运行证明。
+
 <p align="center">
   <strong>智能深度调研工具与知识引擎</strong><br>
   给定任意主题、论文、本地文档或视频 → 自动执行多源检索、反偏差深挖、结构化提炼与闭环质检 → 产出高可信知识树与专业调研报告。

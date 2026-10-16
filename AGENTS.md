@@ -1,5 +1,11 @@
 # research-tool — AI 项目上下文
 
+## 当前分支入口（2026-10-16）
+
+当前开发在 codex/nine-stage-only 独立工作区进行。先读 [STATUS.md](STATUS.md) 和其中指向的 [九段唯一主链裁剪计划](docs/plan/NINE-STAGE-ONLY-TRIM-PLAN.md)，核验当前 HEAD 后继续；该计划记录已恢复基线、审计证据、未验证内容和唯一下一步。下方架构及测试数字是恢复版的历史说明，不是新九段验收结论。
+
+用户要求后续以本分支开发，验收完成后作为主分支；当前不要把旧 master 的后续代码合回，也不要修改原工作区的未提交内容。子 Agent 必须显式使用 CPA/gpt-6-luna，不能使用其他模型。
+
 > **⚠️ 仅供 AI Agent 读取**，新会话自动加载。人类请读 `README.md`。
 
 ---

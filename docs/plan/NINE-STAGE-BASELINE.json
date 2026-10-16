@@ -1,0 +1,89 @@
+{
+  "kind": "immutable_recovered_baseline_evidence",
+  "base_commit": "94a5c09f325ee037a1871abf46ace043fe728d55",
+  "recovered_commit": "4ab1412a40b0c15824a23a63175538ffc267b4dc",
+  "branch": "codex/nine-stage-only",
+  "reconstruction_status": "RECONSTRUCTED_FROM_GIT_AND_RECORDED_MUTATIONS_NOT_A_FROZEN_RUN_SNAPSHOT",
+  "source_file_count": 407,
+  "tree_sha256_method": "sha256 of sorted lines: sha256 + two spaces + relative_path + LF",
+  "tree_sha256": "d0c9de87ab3b1879a863adb6df65a645efe4eb5b604e628e9530ba35676d3505",
+  "runtime_patch_sha256": "7e4225ebae2cd42c4a864131c0b2f6a6f941dd1178628d9754339630219010cf",
+  "changed_files": {
+    "research_tool/application/pipeline.py": "8557e572300ea930f997764a0fd8217307bac81aadd8acc4331b81e534b6ca52",
+    "research_tool/domain/config.py": "4a8b529578166163874cfdadbc3dd8da3d952e6031f14e274c8004d928d35265",
+    "research_tool/domain/models.py": "785ef83984b3cd2d049f22c365726635f32a25558866e0a32c74148230ee760a",
+    "research_tool/infrastructure/search/tavily.py": "c491eba7abaf9b803d2c4357bd4b64dcd45cd7d7ce4fecbaee5590f01e3241a7"
+  },
+  "provenance_events": [
+    {
+      "line": 182,
+      "timestamp": "2026-08-30T07:35:27.953Z",
+      "path": "research_tool/infrastructure/search/tavily.py",
+      "operation": "write"
+    },
+    {
+      "line": 184,
+      "timestamp": "2026-08-30T07:35:39.889Z",
+      "path": "research_tool/infrastructure/search/tavily.py",
+      "operation": "edit"
+    },
+    {
+      "line": 280,
+      "timestamp": "2026-08-30T09:07:54.103Z",
+      "path": "research_tool/domain/models.py",
+      "operation": "edit"
+    },
+    {
+      "line": 280,
+      "timestamp": "2026-08-30T09:07:54.103Z",
+      "path": "research_tool/application/pipeline.py",
+      "operation": "edit"
+    },
+    {
+      "line": 280,
+      "timestamp": "2026-08-30T09:07:54.103Z",
+      "path": "research_tool/application/pipeline.py",
+      "operation": "edit"
+    },
+    {
+      "line": 661,
+      "timestamp": "2026-09-01T10:05:19.693Z",
+      "path": "research_tool/domain/config.py",
+      "operation": "edit"
+    }
+  ],
+  "original_evidence": [
+    {
+      "path": "/Users/xbpd/Projects/research-tool-old/work/drb-bench/scored/research-tool-summary.json",
+      "sha256": "ab925dec23d201581e9c94e501b4706102c258f0b9864ce56e99e48ac20f6f6b"
+    },
+    {
+      "path": "/Users/xbpd/Projects/research-tool-old/work/drb-bench/scored/research-tool.jsonl",
+      "sha256": "c543d8cb622d3f519da84b4c61259473f73d205c9bb5f1f1658df3cd64d9308f"
+    }
+  ],
+  "validation": {
+    "source_manifest_matches": 407,
+    "pytest": {
+      "tests": "126",
+      "failures": "0",
+      "errors": "0",
+      "skipped": "0"
+    },
+    "junit_path": "/private/tmp/research-tool-nine-stage-baseline-4ab1412.xml",
+    "ruff": {
+      "issues": 46,
+      "files": 19,
+      "report": "/private/tmp/research-tool-nine-stage-baseline-4ab1412-ruff.json"
+    },
+    "nine_stage_e2e": "NOT_RUN_NOT_IMPLEMENTED",
+    "live_search_llm_drb": "NOT_RUN"
+  },
+  "limitations": [
+    "No per-task source digest or commit recorded at execution time.",
+    "Replay covers explicit write/edit source mutations in the benchmark session; unrecorded or concurrent changes cannot be excluded.",
+    "domain/config.py healthcheck flattening was changed on 2026-09-01 during the batch.",
+    "No benchmark regeneration or live API calls performed.",
+    "Nine-stage modules exist in this tree; complete nine-stage execution for this score is not established."
+  ]
+}
