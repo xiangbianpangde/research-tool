@@ -1,6 +1,6 @@
 # research-tool
 
-给定主题，通过多源检索、正文清洗、事实抽取、证据检视与补搜，生成可追溯的报告和知识树。正式入口统一使用 `ResearchPipeline` 九阶段管线。
+面向 AI Agent 的 macOS 命令行调研工具：给定主题，通过多源检索、正文清洗、事实抽取、证据检视与补搜，生成可追溯的报告和知识树。CLI 与 Python SDK 共用 `ResearchPipeline` 九阶段管线。
 
 历史恢复基线为 `4ab1412`，开发来自 `codex/nine-stage-only`。当前验证与分支见 [STATUS.md](STATUS.md)；来源与裁剪边界见 [九段裁剪记录](docs/plan/NINE-STAGE-ONLY-TRIM-PLAN.md)。历史 52.77 分尚未在本实现上复现。
 
@@ -28,7 +28,20 @@
 
 ## 安装与配置
 
-Python >= 3.11。安装核心：`pip install -e ".[llm,search]"`；WebUI 增加 ui extra；PDF/视频等使用 all extra 及相应本地工具。`research setup` 提供 minimal/recommended/full 档位，`research setup --check-only` 检查环境。
+本版本面向 **macOS**，需要 Python 3.11 或更新版本，运行状态使用 macOS/POSIX 的 fcntl 文件锁。
+
+安装核心：`pip install -e ".[llm,search]"`；PDF/视频等使用对应 optional extra 和本地工具。`research setup` 提供 minimal/recommended/full 档位，`research setup --check-only` 检查环境。
+
+在 macOS 终端中进入本项目目录后，建立隔离环境并启动：
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+python -m pip install -e ".[llm,search]"
+research run "你的研究主题" --dry-run
+```
+
+需要配置密钥和可选工具时，在同一环境运行 `bash scripts/setup.sh`。PDF 路径使用 `/Users/<用户名>/Documents/papers` 或具体的 .pdf 文件；MinerU 命令路径如 `.venv/bin/mineru`。
 
 CLI overrides > 环境变量 > YAML > 默认值。完整模板见 [docs/config.example.yaml](docs/config.example.yaml)。密钥放本地 .env 或环境变量，不提交 Git；`research config` 显示脱敏配置。
 
@@ -36,7 +49,7 @@ CLI overrides > 环境变量 > YAML > 默认值。完整模板见 [docs/config.e
 
 full、standard、deep 执行同一九段链，collector.depth 必须至少为 2；搜索摘要和未转写的视频发现记录不能作为正文证据。brief/fast、--skip、阶段重排、关闭 extract、旧 deepen/max_backward_rounds 和 legacy/shadow 开关报错。画像策略使用 `collector.strategies`；补搜上限与时限使用 `nine_loop.max_rounds`、`nine_loop.wall_s_max`。
 
-## CLI 与 WebUI
+## CLI
 
 ```bash
 research run "固态电池商业化现状" -s tavily --mode full --output ./research-output
@@ -49,7 +62,6 @@ research run "Transformer 原理" --video-url "https://www.bilibili.com/video/BV
 research run "电池循环寿命" --dry-run
 research status ./research-output/topic-slug
 research wiki-stage ./research-output/topic-slug --build --package-output ./wiki-packages
-research ui --port 7861
 ```
 
 搜索保留 DuckDuckGo、Tavily、OpenAlex、Crossref、arXiv、Semantic Scholar、PubMed、Wikipedia、GitHub、Google News、CVPR/DBLP、Bilibili、YouTube、X 和 OpenCLI。`--official-url` 指定先抓取的官方来源，成功后扩展学术检索；其余配置见 `research run --help`。
@@ -58,7 +70,9 @@ talk 关联在 Collect 内部执行；发现笔记只供定位，不进入事实
 
 独立 collect/clean/extract/organize/report 命令和 quick_collect 已移除。ingest-pdf 与 ocr-engines 是输入准备工具，正式报告使用 run。wiki-stage 只打包当前成功 final；旧 publish-wiki 不支持九段结果。
 
-WebUI 固定九阶段，成功后展示当前报告和知识树下载，失败清空上次成果。视频笔记面板选择“同时生成完整九段调研报告”后使用同一主链。
+AI Agent 应使用 `research run`、`research status` 和 `research wiki-stage`；WebUI 与 `research ui` 命令已移除。视频/PDF 摄入继续由 CLI 驱动。
+
+调用方应同时检查进程退出码和主题目录中的 `run-summary.json`：只有 `verdict=STOP_SUCCESS` 且 `pipeline_complete=true` 才能采用 `output_dir` 指向的报告。其余 verdict 表示本次任务未完成，不应采用历史报告。`research config` 返回脱敏 JSON，`run-summary.json` 提供运行身份、阶段记录和 final 文件哈希，适合 AI 读取和核验。
 
 ## SDK 与开发
 
@@ -84,6 +98,6 @@ ruff check --no-cache research_tool/ pyproject.toml
 python -B scripts/smoke_e2e.py --output /tmp/research-nine-smoke
 ```
 
-冒烟仅模拟搜索、抓取和模型外部 I/O，实际执行生产管线，含一轮补搜和无模型调用的恢复。它不验证联网表现、报告质量或历史分数。完整回归与真实界面证据见 STATUS。
+冒烟仅模拟搜索、抓取和模型外部 I/O，实际执行生产管线，含一轮补搜和无模型调用的恢复。它不验证联网表现、报告质量或历史分数。完整回归与 CLI 验证证据见 STATUS。
 
 使用 [MIT License](LICENSE)。

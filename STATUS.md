@@ -1,5 +1,21 @@
 # research-tool 当前状态
 
+## 当前交付：macOS CLI/SDK，供 AI Agent 使用
+
+工作区 /Users/xbpd/.codex/worktrees/nine-stage-only/research-tool，分支 fix/runtime-input-reliability，PR #1（草稿）。按用户最新要求删除 WebUI 源码、research ui 命令、Gradio extra、部署档位和预检中的 UI 能力，以及旧 Windows 启动脚本。CLI/SDK 共用完整九段引擎，PDF、视频及浏览器搜索仍是输入/采集适配。
+
+依赖锁文件从165项缩减为150项，移除Gradio相关15项，其他包版本没有变化。安装和打包不再包含WebUI。运行锁使用macOS/POSIX fcntl；原先新增的Windows锁模拟测试与实现已撤回。
+
+macOS 27.0 / arm64 / Python 3.11.15 实跑：971 passed / 3 skipped，报告/private/tmp/research-cli-only-all.xml。Ruff、git diff --check和bash -n scripts/setup.sh通过。九段补搜/合并/重检/恢复冒烟证据在/private/tmp/research-cli-only-smoke/smoke-receipt.json。
+
+CLI实际执行run、status、resume、鉴权失败和wiki-stage，日志与可复现外部I/O fixture在/private/tmp/research-cli-only-acceptance/。resume没有再次调用模型；失败不发布成功报告。wheel在/private/tmp/research-cli-only-wheel/，包内没有webui.py、Gradio依赖或ui extra，保留setup与MacOS分类。以上测试没有执行真实联网调研或复现历史52.77分。
+
+干净环境/private/tmp/research-cli-only-env从wheel独立安装，未安装Gradio。使用python -I排除源码路径后，help/run/resume/status/wiki-stage成功退出0，鉴权失败退出1，已删除的ui命令退出2，pip check退出0。验收回执为/private/tmp/research-cli-only-acceptance/packaged-receipt.json。生产改动的Pi /review结果为approve/0 findings，报告/private/tmp/research-cli-only-review.md。
+
+三个skip分别为两项Windows-only cookie测试和需要单独构建wheel的内容检查，wheel已在独立打包验证中核对。当前共享Python环境额外安装的arxiv与lxml仍存在此前披露的版本冲突；本轮不修改共享环境。
+
+下列章节保留前几轮工作历史，不代表当前产品仍有界面，也不替代本节CLI-only验收。
+
 更新：2026-10-17。历史基线为 4ab1412，审计提交为 60881ca，九段实现提交为 47f5888。已从 codex/nine-stage-only 建立 main、推送并设为 GitHub 默认分支。本轮优化工作区 /Users/xbpd/.codex/worktrees/nine-stage-only/research-tool 位于 fix/runtime-input-reliability，基于 main / 488ccea；原目录仍在 master / ab2b0d6，29 tracked 与 10 untracked 文件哈希保持相同。
 
 ## 已实现
@@ -8,9 +24,11 @@ ResearchPipeline 是唯一正式九段调度：collect、clean、extract、knowl
 
 Deepen 有价值的实体拆分、画像、时间线、消歧和查询扩展迁入 collect 内部 ResearchStrategies。PDF/视频保留为输入适配。来源正文哈希、精确跨度、增量合并、运行锁、原子状态和 CAS 已接入。
 
-最终产物位于主题下 runs/<run_id>/final/。CLI 成功出口、status、WebUI 和 wiki-stage 统一校验当前 run_id、runtime 阶段、文件集合和 SHA-256。旧根目录报告/知识树保持原样。
+最终产物位于主题下 runs/<run_id>/final/。CLI 成功出口、status 和 wiki-stage 统一校验当前 run_id、runtime 阶段、文件集合和 SHA-256。旧根目录报告/知识树保持原样。
 
-## 验证与证据
+## 九段主线提升时的历史验收（47f5888）
+
+以下表格记录主线提升时的历史结果；其中的界面验证不表示当前产品仍有 WebUI。当前 CLI-only 验收见文首。
 
 | 检查 | 结果 | 证据 |
 |---|---|---|
@@ -45,9 +63,9 @@ Pi /review 对入口进行了审查：CLI 成功出口缺少再次校验的告�
 Git 推送钩子在正确的 research-tool Python 3.11 环境下另行重跑，结果为 957 passed / 3 skipped。首次误用系统 Python 3.12 因缺依赖失败；没有绕过提交或推送钩子。
 
 
-## 运行边界与输入优化（2026-10-17）
+## macOS 收敛时的历史记录（2026-10-17）
 
-当前优化分支 fix/runtime-input-reliability，基于488ccea。九段正式主链保持不变。本轮修复：
+当前优化分支 fix/runtime-input-reliability，基于488ccea。用户要求面向 macOS 使用；已移除上一版新增的 Windows/msvcrt 锁分支与对应模拟测试，使用 macOS/POSIX fcntl。九段正式主链以及输入、并发、预算、talk、视频接力修复保留。本轮修复：
 
 | 问题 | 改进 |
 |---|---|
@@ -57,11 +75,11 @@ Git 推送钩子在正确的 research-tool Python 3.11 环境下另行重跑，�
 | 重试等待和健康检查可超预算 | 同一剩余墙钟预算覆盖健康检查、执行与退避 |
 | talk参数被静默忽略 | 接入collect；discovery明确分类，转写正文回收至本轮raw |
 | 视频适配器load_config关键字错误 | 真实配置加载回归，修正path参数；异步重试用asyncio.sleep |
-| Windows缺少fcntl导致导入失败 | 标准库msvcrt锁分支，状态相对路径统一POSIX分隔符 |
+| macOS运行与路径 | 使用fcntl真实进程锁；CLI使用macOS路径；安装文档与包元数据声明macOS |
 | HTML输出、双输入被静默忽略 | 正式主链明确拒绝html格式及同时设置input_dir/pdf_dir |
 
-完整回归968 passed / 3 skipped，报告/private/tmp/research-opt-all.xml；Ruff与差异检查通过。离线九段冒烟/private/tmp/research-opt-smoke/smoke-receipt.json通过，包含补搜与零模型恢复调用。锁文件uv lock --check --offline通过。wheel构建和临时隔离安装后import/CLI dry-run通过。
+macOS 27.0 / arm64 / Python 3.11.15 实跑：967 passed / 3 skipped，报告/private/tmp/research-macos-all.xml；移除的是仅验证Windows模拟分支的1项测试，其余回归保留。Ruff、git diff --check、bash -n scripts/setup.sh通过。离线九段冒烟/private/tmp/research-macos-smoke/smoke-receipt.json通过，包含补搜与零模型恢复调用。uv lock --check --offline通过。macOS版本wheel在/private/tmp/research-macos-wheel/。
 
 真实浏览器执行单PDF文件输入，报告下载HTTP200，SHA-256为09ae31e2bd336f473e0e15a841e5a1fb52e986b38ccc30c0fea4d46922bd8783，与运行摘要一致。复现脚本及证据在/private/tmp/research-opt-ui/server.py、success.snapshot.txt、success.download.txt；只模拟OCR/模型外部边界，管线和浏览器交互真实执行。Pi /review对五个生产文件给出approve/0 findings，原报告/private/tmp/research-opt-review.md。
 
-限制：Windows锁分支只做本机模拟及POSIX真实竞争，未在Windows真机运行。当前共享Python环境pip check仍发现额外安装的arxiv4.0.0要求lxml>=6.1,<7，但当前lxml5.4.0；该arxiv包不是本项目arXiv后端依赖，uv.lock已锁定lxml6.1.1。没有擅自改共享环境，联网检索与研究质量/DRB仍未验证。原工作区39个既有文件哈希和HEAD复核未变。
+平台范围：当前以macOS为验收目标，不再维护Windows锁适配或声称支持Windows；已验证本机真实跨进程排斥、CAS竞争、异常释放。项目原有的两项Windows-only cookie测试在macOS跳过，历史测试记录仅说明当时结果。当前共享Python环境pip check仍发现额外安装的arxiv4.0.0要求lxml>=6.1,<7，但当前lxml5.4.0；该arxiv包不是本项目arXiv后端依赖，uv.lock已锁定lxml6.1.1。没有擅自改共享环境，联网检索与研究质量/DRB仍未验证。原工作区39个既有文件哈希和HEAD复核未变。

@@ -4,7 +4,9 @@
 
 ## 开发约定
 
-- 基线 `4ab1412`；九段实现 `47f5888` 已从 codex/nine-stage-only 提升到 main，并设为 GitHub 默认分支。后续在 /Users/xbpd/.codex/worktrees/nine-stage-only/research-tool 的 main 开发，当前状态见 STATUS。
+- 本版本面向 macOS，Python >= 3.11；运行状态锁使用标准库 fcntl，维护 macOS 的安装、路径和实际运行验证。
+- 产品主要供 AI Agent 调用，正式接口为 CLI 和 Python SDK。WebUI、research ui 命令及 Gradio 依赖已移除；不要重新引入交互式前端。
+- 基线 `4ab1412`；九段实现 `47f5888` 已提升到 main。当前开发使用 /Users/xbpd/.codex/worktrees/nine-stage-only/research-tool，先读 STATUS 核对实际分支与 PR 状态。
 - 原目录 /Users/xbpd/Projects/research-tool 的旧分支及未提交工作必须保留；不得 reset、clean、stash、覆盖或将其后续实现整体合回。
 - 用户取消了子 Agent 指定模型限制。默认单 Agent，独立任务才委派，明确所有权并复核。
 - 本次代码迁移可编辑必要源码；执行正式调研时不得为运行方便改源码/生产配置，用 CLI、临时配置与环境变量。
@@ -20,7 +22,7 @@ ResearchPipeline.run/stream 固定 collect、clean、extract、knowledge、inspe
 - application/pipeline.py：唯一编排、恢复、预算和摘要。
 - nine_loop/evidence.py、runtime_state.py：正文/span/hash、运行锁、原子状态及 CAS。
 - nine_loop/knowledge_min.py、merge_min.py、research.py：图谱、增量合并、检视/门控/报告。
-- presentation/cli.py、webui.py：CLI/Gradio；infrastructure/export/wiki_stage.py：当前成果校验与不可变包。
+- presentation/cli.py：CLI 入口；infrastructure/export/wiki_stage.py：当前成果校验与不可变包。
 - infrastructure/stages/：真实采集/抓取/清洗/抽取/内部策略；domain/models.py、config.py：配置校验。路径均相对 research_tool/。
 
 本主链使用现有 URL guard 与 Python 正文哈希；零调用旧 Rust 适配器已删除，不能宣称仍执行或逐比特等价。
@@ -29,12 +31,12 @@ ResearchPipeline.run/stream 固定 collect、clean、extract、knowledge、inspe
 
 产物隔离到指定 output：主题下有 artifacts/<run_id>/、runs/<run_id>/initial/、targeted-N/、final/。final 含报告、sources、知识树和图 JSON。run-summary.json 指向当前运行及完整 final 哈希。不得移动或覆盖根目录历史 report.md/tree/。
 
-状态/WebUI/Wiki 必须验证 run_id、runtime 阶段、final 文件集合及哈希。引用覆盖 1.0 是原文跨度及模型支持检查的结构指标，不代表语义真值或 52.77 分复现。
+CLI/status/Wiki 必须验证 run_id、runtime 阶段、final 文件集合及哈希。引用覆盖 1.0 是原文跨度及模型支持检查的结构指标，不代表语义真值或 52.77 分复现。
 
 ## 验证
 
 环境 /opt/anaconda3/envs/research-tool/bin/python。运行受影响测试、全量 `python -B -m pytest -q -p no:cacheprovider research_tool/tests`、`ruff check --no-cache research_tool/ pyproject.toml`、`git diff --check`，以及隔离目录 scripts/smoke_e2e.py。
 
-保留有效的搜索/模型/摄入/安全测试，不能恢复旧分派或删除失败场景变绿。UI 通过真实浏览器验证，不新增 UI 单元测试；区分实现、自动测试、外部 fixture、本地交互、联网质量与用户验收。
+保留有效的搜索/模型/摄入/安全测试，不能恢复旧分派或删除失败场景变绿。以 CLI/SDK 的实际调用验证输入、退出码、恢复和文件产物；区分实现、自动测试、外部 fixture、本地执行、联网质量与用户验收。
 
 当前进度与交接维护 STATUS 入口；详细证据放现有 plan/reports 边界。历史基线清单不可改；未经用户要求不写长期记忆或个人全局规则。

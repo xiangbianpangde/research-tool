@@ -1,37 +1,18 @@
-"""Durable, CAS-protected state for the nine-stage runtime loop."""
+"""Durable, CAS-protected state using macOS/POSIX file locks."""
 
 from __future__ import annotations
 
+import fcntl
 import hashlib
 import json
 import os
 import re
 import uuid
-import time
-from errno import EACCES, EAGAIN, EDEADLK
+from errno import EACCES, EAGAIN
 from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
-
-try:
-    import fcntl
-except ImportError:
-    fcntl = None
-    import msvcrt
-
-
-def _windows_lock(handle, *, nonblocking: bool) -> None:
-    while True:
-        handle.seek(0)
-        try:
-            msvcrt.locking(handle.fileno(), msvcrt.LK_NBLCK, 1)
-            return
-        except OSError as exc:
-            busy = exc.errno in {EACCES, EAGAIN, EDEADLK}
-            if not busy or nonblocking:
-                raise
-            time.sleep(0.01)
 
 
 class RuntimeStateError(RuntimeError):
@@ -146,24 +127,17 @@ class RuntimeState:
             raise RuntimeStateError(f"cannot open runtime lock: {filename}") from exc
         # Keep the lock file: unlinking it could give waiting writers a stale inode.
         with handle:
+            operation = fcntl.LOCK_EX | (fcntl.LOCK_NB if nonblocking else 0)
             try:
-                if fcntl is None:
-                    _windows_lock(handle, nonblocking=nonblocking)
-                else:
-                    operation = fcntl.LOCK_EX | (fcntl.LOCK_NB if nonblocking else 0)
-                    fcntl.flock(handle.fileno(), operation)
+                fcntl.flock(handle.fileno(), operation)
             except BlockingIOError as exc:
                 raise RuntimeStateError("run lock is already held") from exc
             except OSError as exc:
                 if nonblocking and exc.errno in {EACCES, EAGAIN}:
                     raise RuntimeStateError("run lock is already held") from exc
                 raise RuntimeStateError(f"cannot acquire runtime lock: {filename}") from exc
-            try:
-                yield
-            finally:
-                if fcntl is None:
-                    handle.seek(0)
-                    msvcrt.locking(handle.fileno(), msvcrt.LK_UNLCK, 1)
+            # Closing the descriptor on any exit releases the flock.
+            yield
 
     @staticmethod
     def _validate_fingerprint(input_fingerprint: str) -> None:

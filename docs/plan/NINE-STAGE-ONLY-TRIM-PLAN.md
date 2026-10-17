@@ -1,5 +1,7 @@
 # 九段唯一主链裁剪计划
 
+当前范围修正：用户要求 macOS CLI/SDK、主要供 AI 调用；WebUI、research ui 和 Gradio 依赖已删除。下文关于界面迁移或浏览器验收的叙述属于先前实施记录，当前验收以 STATUS.md 的 CLI 证据为准。
+
 状态（2026-10-17）：唯一九段、证据引用、补搜闭环和版本化成果消费已实现。全量957项通过，Ruff与CLI/浏览器验收通过；独立审查问题已修复，实现提交47f5888已推送到main并设为GitHub默认分支。最终状态与证据以 STATUS.md 为入口。
 
 基线：分支 codex/nine-stage-only，提交 4ab1412a40b0c15824a23a63175538ffc267b4dc。该提交从 94a5c09f 恢复 52.77 跑批基底，并重放了历史会话中记录的四个源码补丁。主工作区 /Users/xbpd/Projects/research-tool 保持未修改。

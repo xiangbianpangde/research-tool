@@ -30,9 +30,18 @@ def test_full_profile_accounts_for_every_supported_capability():
     full = PROFILES["full"]
 
     assert full.capabilities == FULL_CAPABILITIES
-    assert set(full.extras) == {"llm", "search", "ui", "video", "pdf", "crawl"}
+    assert set(full.extras) == {"llm", "search", "video", "pdf", "crawl"}
     assert {"ffmpeg", "deno", "opencli"} <= set(full.required_commands)
     assert FULL_CAPABILITIES <= CAPABILITY_FIXES.keys()
+
+
+@pytest.mark.parametrize("profile", ["minimal", "recommended", "full"])
+def test_deployment_profiles_only_install_cli_capabilities(profile, tmp_path):
+    plan = build_deployment_plan(profile, python="python", project_root=tmp_path)
+    assert "ui" not in plan.profile.capabilities
+    assert "ui" not in plan.profile.extras
+    assert "gradio" not in " ".join(plan.steps[0].command)
+    assert "ui" not in CAPABILITY_FIXES
 
 
 @pytest.mark.parametrize(
@@ -92,6 +101,11 @@ def test_wheel_contains_packaged_setup_module():
     with zipfile.ZipFile(wheels[-1]) as archive:
         assert "research_tool/presentation/setup_deployment.py" in archive.namelist()
         assert "research_tool/presentation/setup_interactive.py" in archive.namelist()
+        assert "research_tool/presentation/webui.py" not in archive.namelist()
+        metadata_path = next(name for name in archive.namelist() if name.endswith("/METADATA"))
+        metadata = archive.read(metadata_path).decode()
+        assert "gradio" not in metadata.lower()
+        assert "Provides-Extra: ui" not in metadata
 
 
 def test_interactive_provider_choice_writes_identity_not_cross_vendor_key(monkeypatch):
