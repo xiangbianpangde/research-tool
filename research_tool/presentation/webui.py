@@ -4,7 +4,7 @@ V1.1 启用 Tab 化布局：
 - Tab 1「调研」：主题 / 报告任务流（原 V1.0 通用调研 UI）
 - Tab 2「视频笔记」：仿 bilinote 视频笔记工具，URL → 实时进度 → Markdown 笔记
 
-启动：`research ui` 或 `python -m research_tool.webui`，浏览器开 127.0.0.1:7861。
+启动：`research ui` 或 `python -m research_tool.presentation.webui`，浏览器开 127.0.0.1:7861。
 """
 
 from __future__ import annotations
@@ -19,8 +19,17 @@ from ..domain.config import load_config
 from ..common.logging_config import get_logger
 from ..application.pipeline import ResearchPipeline
 from ..common.slug import slugify
+from ..infrastructure.export.wiki_stage import (
+    PackageStageError,
+    resolve_current_output,
+    validate_current_run,
+)
 
 logger = get_logger(__name__)
+_NINE_STAGES = (
+    "collect", "clean", "extract", "knowledge", "inspect",
+    "targeted", "merge", "qgate", "report",
+)
 
 # 与 start.bat 一致：从 .env 载入密钥（脚本目录 / 上级 / 用户目录）
 _ENV_KEYS = {
@@ -71,7 +80,7 @@ def _run_threaded_video_notes(
     also_make_report: bool,
     q: "queue.Queue",
 ) -> None:
-    """视频笔记后端：调 VideoPipeline → 落盘 → 可选 4 阶段调研管道。"""
+    """视频笔记后端：视频转写是摄入；报告由固定九段主链生成。"""
 
     async def go():
         from ..application.video_pipeline import VideoPipeline
@@ -106,26 +115,32 @@ def _run_threaded_video_notes(
             q.put(("log", "⚠ 没有生成视频笔记文件"))
         note_md = "\n\n---\n\n".join(p.read_text(encoding="utf-8") for p in notes) if notes else ""
 
-        # 可选：跑 4 阶段调研管道
+        # 可选：视频笔记落盘后从 raw/ 进入唯一九段主链
         files: list[str] = [str(p) for p in notes]
+        report_pipeline_complete = False
         if also_make_report and notes:
-            q.put(("log", "▶ 启动 4 阶段调研管道..."))
+            q.put(("log", "▶ 启动完整九段调研管道..."))
             try:
                 stages = await trigger_pipeline(
                     topic,
                     work_dir=work_dir,
-                    stages=["clean", "extract", "organize", "report"],
                 )
                 run_list = ", ".join(stages.stages_run) or "（无）"
-                q.put(("log", f"✓ 调研管道：{run_list}（{stages.duration_ms / 1000:.1f}s）"))
+                q.put(("log", f"调研管道：{run_list}（{stages.duration_ms / 1000:.1f}s）"))
+                report_pipeline_complete = stages.success
+                if not stages.success:
+                    q.put(("log", f"⚠ 九段调研未完成：{stages.error or '运行失败'}"))
             except Exception as e:  # noqa: BLE001
                 q.put(("log", f"⚠ 调研管道失败：{e}"))
 
-        report = topic_dir / "report.md"
-        if report.exists():
-            files.append(str(report))
-            report_text = report.read_text(encoding="utf-8")
-            note_md = note_md + "\n\n---\n\n# 调研报告\n\n" + report_text
+        if report_pipeline_complete:
+            try:
+                report = resolve_current_output(topic_dir) / "report.md"
+                files.append(str(report))
+                report_text = report.read_text(encoding="utf-8")
+                note_md = note_md + "\n\n---\n\n# 调研报告\n\n" + report_text
+            except (PackageStageError, OSError) as exc:
+                q.put(("log", f"⚠ 九段结果校验失败：{exc}"))
 
         q.put(("result", {"note_md": note_md, "files": files}))
 
@@ -178,7 +193,7 @@ def run_video_note(  # noqa: PLR0915 - Gradio 流式生成器，单函数承载�
     log: list[str] = [
         f"主题：{topic}",
         f"模式：视频笔记（共 {len(urls)} 个 URL）",
-        "流程：下载 → 转写 → AI 笔记 → 落盘" + (" → 4 阶段调研报告" if also_make_report else ""),
+        "流程：下载 → 转写 → AI 笔记 → 落盘" + (" → 完整九段调研报告" if also_make_report else ""),
         "—" * 20,
     ]
     yield "\n".join(log), "", None, out_dir
@@ -219,12 +234,14 @@ def run_video_note(  # noqa: PLR0915 - Gradio 流式生成器，单函数承载�
 
 _STAGE_CN = {
     "collect": "采集",
-    "deepen": "反偏差深挖",
     "clean": "清洗",
     "extract": "抽取",
-    "organize": "构建知识树",
+    "knowledge": "构建知识树",
+    "inspect": "盲区检视",
+    "targeted": "靶向补搜",
+    "merge": "证据合并",
+    "qgate": "质量闸门",
     "report": "生成报告",
-    "backward": "反向传播",  # P2-6：评估知识树质量 → 修正查询 → 回到 collect
 }
 _STATUS_ICON = {
     "started": "▶",
@@ -245,9 +262,6 @@ def run_web(  # noqa: PLR0915 - Gradio 事件处理，单函数承载多模式�
     engines,
     rounds,
     style,
-    max_nodes,
-    min_nodes,
-    do_extract,
     pdf_path,
     mineru_cmd,
     translate,
@@ -256,16 +270,14 @@ def run_web(  # noqa: PLR0915 - Gradio 事件处理，单函数承载多模式�
     base_url,
     api_key,
     work_dir,
-    do_deepen=True,
     # P1/P2 新增
     core_kw="",
     facets_csv="",
     from_year=None,
     to_year=None,
     deep_search=False,
-    profile_iterations=1,
     relevance_filter=False,
-    backward_rounds=0,
+    max_rounds=2,
 ):
     """Gradio 事件处理：流式产出 (日志, 报告markdown, 文件列表, 输出目录)。"""
     topic = (topic or "").strip()
@@ -273,14 +285,7 @@ def run_web(  # noqa: PLR0915 - Gradio 事件处理，单函数承载多模式�
         yield "⚠ 请先填写调研主题。", "", None, ""
         return
 
-    stages = ["collect"]
-    # 反偏差深挖（仅网页调研有意义；PDF 摄取无需深挖）
-    if do_deepen and mode != "PDF 调研":
-        stages.append("deepen")
-    stages.append("clean")
-    if do_extract:
-        stages.append("extract")
-    stages += ["organize", "report"]
+    stages = list(_NINE_STAGES)
 
     # collector：P1 核心词/维度标签 + P2 时间窗口 + deep-search
     collector_cfg: dict = {
@@ -297,10 +302,6 @@ def run_web(  # noqa: PLR0915 - Gradio 事件处理，单函数承载多模式�
         collector_cfg["to_year"] = int(to_year)
     if deep_search:
         collector_cfg["deep_search"] = True
-    # deepen：P2-4 画像迭代轮数（≥2 启用同名消歧+时间线回溯）
-    deepen_cfg: dict = {}
-    if int(profile_iterations) >= 2:
-        deepen_cfg["profile_iterations"] = int(profile_iterations)
     # cleaner：P2-5 LLM 相关性过滤
     cleaner_cfg: dict = {}
     if relevance_filter:
@@ -310,17 +311,13 @@ def run_web(  # noqa: PLR0915 - Gradio 事件处理，单函数承载多模式�
         "topic": topic,
         "work_dir": work_dir or "./research-output",
         "stages": stages,
+        "mode": "standard",
+        "nine_loop": {"max_rounds": int(max_rounds)},
         "collector": collector_cfg,
-        "organizer": {"max_nodes": int(max_nodes), "min_nodes": int(min_nodes)},
         "reporter": {"style": style},
     }
-    if deepen_cfg:
-        overrides["deepen"] = deepen_cfg
     if cleaner_cfg:
         overrides["cleaner"] = cleaner_cfg
-    # P2-6 反向传播轮数：>0 启用
-    if int(backward_rounds) > 0:
-        overrides["max_backward_rounds"] = int(backward_rounds)
     llm: dict = {}
     if provider:
         llm["provider"] = provider
@@ -357,6 +354,7 @@ def run_web(  # noqa: PLR0915 - Gradio 事件处理，单函数承载多模式�
     yield "\n".join(log), "", None, str(topic_dir)
 
     failed = None
+    pipeline_result = None
     while True:
         kind, payload = q.get()
         if kind == "event":
@@ -371,24 +369,50 @@ def run_web(  # noqa: PLR0915 - Gradio 事件处理，单函数承载多模式�
             log.append(f"❌ 运行出错：{payload}")
             yield "\n".join(log), "", None, str(topic_dir)
         elif kind == "result":
-            pass
+            pipeline_result = payload
         elif kind == "done":
             break
 
-    report = topic_dir / "report.md"
     if failed:
         log.append(f"\n流程在「{_STAGE_CN.get(failed, failed)}」阶段失败。")
         yield "\n".join(log), "", None, str(topic_dir)
         return
 
-    md = report.read_text(encoding="utf-8") if report.exists() else "（未生成报告）"
-    tree_dir = topic_dir / "tree"
+    expected_stages = _NINE_STAGES
+    stage_complete = (
+        pipeline_result is not None
+        and pipeline_result.verdict == "STOP_SUCCESS"
+        and set(expected_stages).issubset(
+            set(pipeline_result.stages_completed) | set(pipeline_result.stages_skipped)
+        )
+    )
+    final_dir = None
+    if stage_complete:
+        try:
+            _summary, _state, final_dir = validate_current_run(topic_dir)
+            result_report = pipeline_result.report_result.report_path
+            if final_dir is None or result_report.parent.resolve() != final_dir.resolve():
+                final_dir = None
+        except PackageStageError:
+            final_dir = None
+    complete = stage_complete and final_dir is not None
+    report = final_dir / "report.md" if final_dir else None
+    md = (
+        report.read_text(encoding="utf-8")
+        if complete and report is not None and report.is_file()
+        else "（九段管线未完整完成，未提供报告）"
+    )
+    tree_dir = final_dir / "tree" if final_dir else None
     files: list[str] = []
-    if report.exists():
+    if complete and report is not None and report.is_file():
         files.append(str(report))
-    if tree_dir.exists():
+    if complete and tree_dir is not None and tree_dir.exists():
         files += [str(p) for p in sorted(tree_dir.glob("*.md"))]
-    log.append("\n✅ 完成！报告见右侧，可下载全部文件。")
+    log.append(
+        "\n✅ 九段管线完成！报告见右侧，可下载全部文件。"
+        if complete
+        else "\n⚠ 九段管线未完成。"
+    )
     yield "\n".join(log), md, files or None, str(topic_dir)
 
 
@@ -440,9 +464,6 @@ def build_ui():  # noqa: PLR0915 - Gradio 布局 + 事件绑定，单函数承�
                             rounds = gr.Slider(
                                 1, 3, value=2, step=1, label="搜索轮次（多轮关键词）"
                             )  # noqa: E501
-                            do_deepen = gr.Checkbox(
-                                label="反偏差深挖（实体拆分 + 缺口补搜，更慢更全）", value=True
-                            )
                             core_kw = gr.Textbox(
                                 label="核心词（去锚锚点，可空）",
                                 placeholder="topic 含机构名时填人物名，如 康怡琳",
@@ -484,31 +505,17 @@ def build_ui():  # noqa: PLR0915 - Gradio 布局 + 事件绑定，单函数承�
                             value="report",
                             label="报告风格",
                         )
-                        with gr.Row():
-                            min_nodes = gr.Slider(2, 7, value=4, step=1, label="最少节点")
-                            max_nodes = gr.Slider(3, 10, value=7, step=1, label="最多节点")
-                        do_extract = gr.Checkbox(
-                            label="启用实体/三元组抽取（更慢，更细）", value=False
-                        )
-
                         with gr.Accordion("反偏差与质量（高级）", open=False):
-                            profile_iterations = gr.Slider(
-                                1,
-                                4,
-                                value=1,
-                                step=1,
-                                label="画像迭代轮数（≥2 启用同名消歧 + 时间线回溯）",
-                            )
                             relevance_filter = gr.Checkbox(
                                 label="LLM 相关性过滤（按主题给文档评分，剔低分；显著降噪）",
                                 value=False,
                             )
-                            backward_rounds = gr.Slider(
+                            max_rounds = gr.Slider(
                                 0,
-                                3,
-                                value=0,
+                                10,
+                                value=2,
                                 step=1,
-                                label="反向传播轮数（>0 启用知识树质量评估循环，每轮重跑后续阶段）",
+                                label="最多补搜轮数",
                             )
 
                         with gr.Accordion("LLM 设置（默认读环境变量）", open=False):
@@ -554,9 +561,6 @@ def build_ui():  # noqa: PLR0915 - Gradio 布局 + 事件绑定，单函数承�
                         engines,
                         rounds,
                         style,
-                        max_nodes,
-                        min_nodes,
-                        do_extract,
                         pdf_path,
                         mineru_cmd,
                         translate,
@@ -565,15 +569,13 @@ def build_ui():  # noqa: PLR0915 - Gradio 布局 + 事件绑定，单函数承�
                         base_url,
                         api_key,
                         work_dir_tab1,
-                        do_deepen,
                         core_kw,
                         facets_csv,
                         from_year,
                         to_year,
                         deep_search,
-                        profile_iterations,
                         relevance_filter,
-                        backward_rounds,
+                        max_rounds,
                     ],
                     outputs=[log_box, report_md, files, out_dir_box],
                     api_name="run",
@@ -624,7 +626,7 @@ def build_ui():  # noqa: PLR0915 - Gradio 布局 + 事件绑定，单函数承�
                                 label="转写语言",
                             )
                             v_also_report = gr.Checkbox(
-                                label="同时生成调研报告（视频笔记 + 4 阶段管道）",
+                                label="同时生成完整九段调研报告",
                                 value=False,
                             )
 

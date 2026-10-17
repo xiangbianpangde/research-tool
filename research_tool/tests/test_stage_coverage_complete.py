@@ -12,7 +12,12 @@ from types import SimpleNamespace
 
 import pytest
 
-from research_tool.domain.errors import CollectError, UrlBlockedError
+from research_tool.domain.errors import (
+    CollectError,
+    LLMAuthenticationError,
+    StageError,
+    UrlBlockedError,
+)
 from research_tool.domain.models import (
     CleanerConfig,
     CleanResult,
@@ -329,7 +334,7 @@ class _ScoresLLM:
 
 
 @pytest.mark.asyncio
-async def test_cleaner_relevance_scores_delete_keep_and_default_missing_score(tmp_path):
+async def test_cleaner_relevance_scores_delete_low_and_keep_high(tmp_path):
     clean_dir = tmp_path / "clean"
     clean_dir.mkdir()
     low = clean_dir / "low.md"
@@ -345,15 +350,60 @@ async def test_cleaner_relevance_scores_delete_keep_and_default_missing_score(tm
         CleanerConfig(relevance_threshold=0.5, relevance_batch_size=2)
     )
 
-    filtered = await cleaner.filter_relevance(result, _ScoresLLM([0.1]), "topic")
+    filtered = await cleaner.filter_relevance(result, _ScoresLLM([0.1, 0.9]), "topic")
 
     assert not low.exists()
     assert filtered.files == [high]
     assert filtered.quality_report["low"].issues == ["relevance:0.1", "low_relevance"]
+    assert high.exists()
+    assert filtered.quality_report["high"].issues == []
 
 
 @pytest.mark.asyncio
-async def test_cleaner_relevance_non_auth_error_defaults_to_keep(tmp_path):
+@pytest.mark.parametrize(
+    "scores",
+    [
+        [],
+        [0.1],
+        [0.1, 0.9, 1.0],
+        [-0.1, 0.9],
+        [0.1, 1.1],
+        [float("nan"), 0.9],
+        [0.1, float("inf")],
+    ],
+    ids=["empty", "missing", "extra", "negative", "above_one", "nan", "infinite"],
+)
+async def test_cleaner_relevance_rejects_invalid_batch_scores(tmp_path, scores):
+    clean_dir = tmp_path / "clean"
+    clean_dir.mkdir()
+    paths = [clean_dir / "low.md", clean_dir / "high.md"]
+    for path in paths:
+        path.write_text("body", encoding="utf-8")
+    quality = {
+        path.stem: FileQuality(original_size=4, cleaned_size=4, score=1)
+        for path in paths
+    }
+    result = CleanResult(files=paths, quality_report=quality, clean_dir=clean_dir)
+
+    with pytest.raises(StageError, match="相关性评分数量或范围无效") as exc_info:
+        await Cleaner().filter_relevance(result, _ScoresLLM(scores), "topic")
+
+    assert exc_info.value.stage == "clean"
+    assert all(path.read_text(encoding="utf-8") == "body" for path in paths)
+    assert all(item.issues == [] for item in result.quality_report.values())
+    assert not (clean_dir / "quality.json").exists()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("error", "expected_error"),
+    [
+        (RuntimeError("temporary"), StageError),
+        (LLMAuthenticationError("unauthorized"), LLMAuthenticationError),
+    ],
+    ids=["model_error", "authentication_error"],
+)
+async def test_cleaner_relevance_errors_never_default_to_keep(tmp_path, error, expected_error):
     clean_dir = tmp_path / "clean"
     clean_dir.mkdir()
     path = clean_dir / "doc.md"
@@ -364,11 +414,18 @@ async def test_cleaner_relevance_non_auth_error_defaults_to_keep(tmp_path):
         clean_dir=clean_dir,
     )
 
-    filtered = await Cleaner().filter_relevance(
-        result, _ScoresLLM(error=RuntimeError("temporary")), "topic"
-    )
+    with pytest.raises(expected_error) as exc_info:
+        await Cleaner().filter_relevance(result, _ScoresLLM(error=error), "topic")
 
-    assert filtered.files == [path]
+    if expected_error is StageError:
+        assert exc_info.value.stage == "clean"
+        assert "拒绝默认放行" in str(exc_info.value)
+        assert exc_info.value.__cause__ is error
+    else:
+        assert exc_info.value is error
+    assert path.read_text(encoding="utf-8") == "body"
+    assert result.quality_report["doc"].issues == []
+    assert not (clean_dir / "quality.json").exists()
 
 
 def test_cleaner_module_wrapper(tmp_path):

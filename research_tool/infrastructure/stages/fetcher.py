@@ -5,7 +5,7 @@
 两者统一返回 (markdown_text, internal_links)。
 
 P6：``fetch`` 外层 ``asyncio.wait_for`` 硬墙，避免 Crawl4AI/httpx 单页挂死
-整条 collect/deepen。墙钟 = ``timeout_sec + HARD_TIMEOUT_GRACE_SEC``。
+整条 collect/targeted。墙钟 = ``timeout_sec + HARD_TIMEOUT_GRACE_SEC``。
 """
 
 from __future__ import annotations

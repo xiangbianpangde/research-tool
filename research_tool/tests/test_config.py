@@ -7,11 +7,19 @@ from research_tool.domain.errors import ConfigValidationError
 from research_tool.domain.models import PipelineConfig
 
 
+EXPECTED_STAGES = [
+    "collect", "clean", "extract", "knowledge", "inspect",
+    "targeted", "merge", "qgate", "report",
+]
+
+
 @pytest.fixture(autouse=True)
 def _isolate_local_deployment_env(monkeypatch):
     """Keep config tests deterministic after `research setup` writes a real .env."""
+    monkeypatch.setattr("research_tool.domain.config._DEFAULT_PATHS", [])
     for name in (
         "RESEARCH_CONFIG",
+        "RESEARCH_WORK_DIR",
         "LLM_PROVIDER",
         "LLM_MODEL",
         "LLM_BASE_URL",
@@ -81,7 +89,7 @@ def test_defaults_when_no_file(tmp_path, monkeypatch):
     monkeypatch.delenv("RESEARCH_CONFIG", raising=False)
     cfg = load_config()
     assert cfg.llm.provider == "deepseek"
-    assert cfg.stages[0] == "collect"
+    assert cfg.stages == EXPECTED_STAGES
 
 
 def test_talk_section_from_yaml_not_dropped(tmp_path):
@@ -119,49 +127,40 @@ pipeline:
 
 
 @pytest.mark.parametrize(
-    ("mode", "expected_stages", "expected_rounds", "expected_deep_search", "expected_backward"),
-    [
-        (
-            "fast",
-            ["collect", "clean", "extract", "organize", "report"],
-            1,
-            False,
-            0,
-        ),
-        (
-            "standard",
-            ["collect", "deepen", "clean", "extract", "organize", "report"],
-            1,
-            False,
-            0,
-        ),
-        (
-            "deep",
-            ["collect", "deepen", "clean", "extract", "organize", "report"],
-            2,
-            True,
-            1,
-        ),
-    ],
+    ("mode", "expected_rounds", "expected_attempts"),
+    [("full", 1, 3), ("standard", 1, 2), ("deep", 2, 2)],
 )
 def test_research_mode_applies_cost_defaults(
-    tmp_path,
-    monkeypatch,
-    mode,
-    expected_stages,
-    expected_rounds,
-    expected_deep_search,
-    expected_backward,
+    tmp_path, monkeypatch, mode, expected_rounds, expected_attempts,
 ):
     monkeypatch.chdir(tmp_path)
 
     cfg = load_config(overrides={"mode": mode})
 
     assert cfg.mode == mode
-    assert cfg.stages == expected_stages
+    assert cfg.stages == EXPECTED_STAGES
     assert cfg.collector.search_rounds == expected_rounds
-    assert cfg.collector.deep_search is expected_deep_search
-    assert cfg.max_backward_rounds == expected_backward
+    assert cfg.llm_stage_attempts == expected_attempts
+    assert cfg.extractor.enabled is True
+    assert cfg.extractor.fail_on_chunk_error is True
+
+
+@pytest.mark.parametrize("mode", ["brief", "fast"])
+def test_removed_research_modes_are_config_errors(tmp_path, monkeypatch, mode):
+    monkeypatch.chdir(tmp_path)
+
+    with pytest.raises(ConfigValidationError, match=mode):
+        load_config(overrides={"mode": mode})
+
+
+@pytest.mark.parametrize("source", ["yaml", "overrides"])
+def test_legacy_deepen_config_is_rejected(tmp_path, monkeypatch, source):
+    monkeypatch.chdir(tmp_path)
+    path = _write(tmp_path, "deepen:\n  profile_iterations: 4\n") if source == "yaml" else None
+    overrides = {"deepen": {"profile_iterations": 4}} if source == "overrides" else None
+
+    with pytest.raises(ConfigValidationError, match="deepen"):
+        load_config(path, overrides=overrides)
 
 
 def test_mode_defaults_do_not_override_explicit_config(tmp_path):
@@ -170,12 +169,13 @@ def test_mode_defaults_do_not_override_explicit_config(tmp_path):
         """
 pipeline:
   mode: deep
-  max_backward_rounds: 0
+  llm_stage_attempts: 4
 collector:
   search_rounds: 3
   deep_search: false
-deepen:
-  profile_iterations: 4
+nine_loop:
+  max_rounds: 4
+  wall_s_max: 120
 """,
     )
 
@@ -184,8 +184,10 @@ deepen:
     assert cfg.mode == "deep"
     assert cfg.collector.search_rounds == 3
     assert cfg.collector.deep_search is False
-    assert cfg.deepen.profile_iterations == 4
-    assert cfg.max_backward_rounds == 0
+    assert cfg.llm_stage_attempts == 4
+    assert cfg.nine_loop.max_rounds == 4
+    assert cfg.nine_loop.wall_s_max == 120
+    assert cfg.stages == EXPECTED_STAGES
 
 
 def test_example_config_keeps_default_stage_order():
@@ -193,4 +195,10 @@ def test_example_config_keeps_default_stage_order():
 
     cfg = load_config(example)
 
-    assert cfg.stages == PipelineConfig().stages
+    assert cfg.stages == EXPECTED_STAGES == PipelineConfig().stages
+    assert cfg.nine_loop.model_dump() == {
+        "max_rounds": 2,
+        "max_high_findings": 0,
+        "max_total_findings": 0,
+        "wall_s_max": 1800,
+    }

@@ -36,8 +36,15 @@ SearchEngine = Literal[
     "twitter",
 ]
 ExtractTask = Literal["ner", "re", "triple"]
-StageName = Literal["collect", "deepen", "clean", "extract", "organize", "report"]
-ResearchMode = Literal["brief", "full", "fast", "standard", "deep"]
+StageName = Literal[
+    "collect", "clean", "extract", "knowledge", "inspect", "targeted", "merge", "qgate", "report"
+]
+ResearchMode = Literal["full", "standard", "deep"]
+
+NINE_STAGES = (
+    "collect", "clean", "extract", "knowledge", "inspect",
+    "targeted", "merge", "qgate", "report",
+)
 
 
 class LLMConfig(BaseModel):
@@ -79,6 +86,26 @@ class ExpertLibrary(BaseModel):
     experts: list[ExpertEntry] = Field(default_factory=list)
 
 
+class CollectionStrategyConfig(BaseModel):
+    """Collection-time entity, profile and evidence-gap search strategies."""
+
+    enabled: bool = True
+    profile_extract: bool = True
+    profile_iterations: int = Field(default=1, ge=1, le=5)
+    min_new_files_per_iter: int = Field(default=2, ge=0)
+    min_profile_confidence: float = Field(default=0.85, ge=0.0, le=1.0)
+    timeline_backtrack: bool = True
+    disambiguation: bool = True
+    depth: int = Field(default=2, ge=1, le=3)
+    breadth: int = Field(default=4, ge=2, le=8)
+    entity_split: bool = True
+    max_entities: int = Field(default=5, ge=1, le=8)
+    gap_detection: bool = True
+    contradiction_check: bool = True
+    max_input_chars: int = Field(default=20000, gt=0)
+    per_file_chars: int = Field(default=300, gt=0)
+
+
 class CollectorConfig(BaseModel):
     """采集配置。依据 01 §2.3 + 04 collector 段。"""
 
@@ -107,6 +134,7 @@ class CollectorConfig(BaseModel):
     max_total_results: int = Field(default=40, gt=0)  # 多轮去重后的总量上限
     # 用 LLM 动态生成贴主题的多轮查询（替代模板扩展，需提供 llm）
     llm_query_expansion: bool = False
+    strategies: CollectionStrategyConfig = Field(default_factory=CollectionStrategyConfig)
     # 用户显式提供的额外查询（最高优先级，直接并入搜索；适合点名要找的论文/方法）
     extra_queries: list[str] = Field(default_factory=list)
     # 核心词（P1）：两阶段搜索的去锚锚点。设置后 Phase2 用它（而非含机构名的
@@ -117,7 +145,7 @@ class CollectorConfig(BaseModel):
     # 如 ["博士", "论文", "南洋理工"]。Phase1（锚定）不加 facets，保证窄查询精准。
     facets: list[str] = Field(default_factory=list)
     # 时间标签（P2）：限定发表年份窗口（含起止）。None=不限。
-    # 学科调研统一过滤；人物调研一般不设（让 deepen 按画像时间线逐节点过滤）。
+    # 学科调研统一过滤；人物调研一般不设（让采集策略按画像时间线逐节点过滤）。
     # 仅支持原生过滤的源生效（openalex/s2/crossref/pubmed），arxiv 客户端过滤，
     # web/wikipedia 忽略。
     from_year: int | None = None
@@ -225,6 +253,7 @@ class CleanerConfig(BaseModel):
     strip_ads: bool = True
     find_content_start: bool = True
     min_content_length: int = Field(default=200, ge=0)
+    max_content_length: int = Field(default=50000, gt=0)
     # MinHash 去重（P2-5）：char n-gram Jaccard 相似度 ≥阈值视为重复，组内保留
     # 最长文本，其余标 dedup_of。0=关闭去重。
     dedup_similarity: float = Field(default=0.85, ge=0.0, le=1.0)
@@ -276,32 +305,6 @@ class ReporterConfig(BaseModel):
     max_length: int = Field(default=30000, gt=0)
 
 
-class DeepenConfig(BaseModel):
-    """反偏差深挖配置（Phase 2）。依据升级计划 §4。"""
-
-    enabled: bool = True  # false 或 --skip deepen 跳过深挖
-    # 画像提取（P1）：从 raw/ 摘要让 LLM 抽结构化画像（中英文名/机构/领域），
-    # 再据此生成注入查询（如补"英文名 NTU"）。失败回退现行实体查询。
-    profile_extract: bool = True
-    # 画像迭代轮数（P2-4）：=1 仅 P1 单轮；≥2 启用 timeline 回溯 + 同名消歧 + 重抽画像循环
-    profile_iterations: int = Field(default=1, ge=1, le=5)
-    min_new_files_per_iter: int = Field(default=2, ge=0)  # 本轮新增文件 <此 → 提前终止
-    min_profile_confidence: float = Field(default=0.85, ge=0.0, le=1.0)  # 画像置信度达此 → 终止
-    timeline_backtrack: bool = True  # 对画像每段经历做带时间窗口的回溯搜索
-    disambiguation: bool = (
-        True  # 同名消歧：LLM 判每份资料是否属于核心实体，他人的移到 raw/_disambig/
-    )
-    depth: int = Field(default=2, ge=1, le=3)  # 深挖轮次
-    breadth: int = Field(default=4, ge=2, le=8)  # 每轮补充查询数上限
-    entity_split: bool = True  # 拆分多实体话题（人物/组织等）
-    max_entities: int = Field(default=5, ge=1, le=8)  # 实体拆分上限（风险 7）
-    gap_detection: bool = True  # 扫描已采内容识别缺失维度
-    contradiction_check: bool = True  # 检测矛盾并反向验证
-    # 喂给 LLM 做缺口分析时的上下文截断（风险 4：每文件取标题+摘要，总量封顶）
-    max_input_chars: int = Field(default=20000, gt=0)
-    per_file_chars: int = Field(default=300, gt=0)
-
-
 class TalkConfig(BaseModel):
     """CVPRTalk：论文 → YouTube 演讲视频关联（organize 后 enrichment）。
 
@@ -320,40 +323,13 @@ class TalkConfig(BaseModel):
 
 
 class NineLoopConfig(BaseModel):
-    """九段管线 feature flag 配置。默认 ON（P7-T9 默认切换，所有者终审批准；
+    """Bounds for the single nine-stage evidence loop; no legacy switch."""
 
-    RT-RF-P7-T9-DEFAULT-SWITCH-01）。kill-switch 角色反转：默认=九段路径，
-    enabled=False = legacy 六段回退（逐字节 legacy，P6 演练已证明）。
-    回滚点：git tag pre-p7-default-switch。
-    """
-
-    enabled: bool = True  # 默认切换后：九段为默认路径；False = legacy 回退
-    gate_enabled: bool = False
-    deepen_as_strategy: bool = False
-    adapter_enabled: bool = False
-    shadow_enabled: bool = False
-    shadow_sample_rate: float = 0.0
-    stages: dict[str, bool] = Field(
-        default_factory=lambda: {
-            s: False for s in (
-                "collect", "clean", "extract", "network",
-                "inspect", "delta", "merge", "report",
-            )
-        }
-    )
-
-    @model_validator(mode="after")
-    def _fill_missing_stage_flags(self) -> "NineLoopConfig":
-        """显式 yaml 只声明部分 stage 时，其余补齐默认关（全集恒 8 键）。"""
-        full = {
-            s: False for s in (
-                "collect", "clean", "extract", "network",
-                "inspect", "delta", "merge", "report",
-            )
-        }
-        full.update(self.stages)
-        self.stages = full
-        return self
+    model_config = {"extra": "forbid"}
+    max_rounds: int = Field(default=2, ge=0, le=10)
+    max_high_findings: int = Field(default=0, ge=0)
+    max_total_findings: int = Field(default=0, ge=0)
+    wall_s_max: float = Field(default=1800, gt=0)
 
 
 class PipelineConfig(BaseModel):
@@ -363,12 +339,12 @@ class PipelineConfig(BaseModel):
     mode: ResearchMode = "full"
     work_dir: Path = Path("./research-output")
     stages: list[StageName] = Field(
-        default_factory=lambda: ["collect", "deepen", "clean", "extract", "organize", "report"]
+        default_factory=lambda: list(NINE_STAGES)
     )
     collector: CollectorConfig = Field(default_factory=CollectorConfig)
-    deepen: DeepenConfig = Field(default_factory=DeepenConfig)
     pdf_ingest: PdfIngestConfig = Field(default_factory=PdfIngestConfig)
     pdf_dir: str | None = None  # 设置后 collect 阶段改为摄取该目录下的 PDF
+    input_dir: Path | None = None  # 已获取的 Markdown，仍由 collect 正式摄入
     cleaner: CleanerConfig = Field(default_factory=CleanerConfig)
     extractor: ExtractorConfig = Field(default_factory=ExtractorConfig)
     organizer: OrganizerConfig = Field(default_factory=OrganizerConfig)
@@ -384,9 +360,16 @@ class PipelineConfig(BaseModel):
     # LLM 健康检查探针超时（秒）。慢端点（如 Paratera/代理链路）可调大，
     # 避免“健康检查超时”误杀阶段（默认 10s 偏紧）。
     llm_healthcheck_timeout_sec: float = Field(default=10.0, ge=1, le=300)
-    # 反向传播（P2-6）：完成一次正向后，让 organizer 评估知识树质量，把稀疏节点/
-    # 知识断层/矛盾产出修正查询回到 collect 重跑。0=不启用（向后兼容）。
-    max_backward_rounds: int = Field(default=0, ge=0, le=3)
+
+    @model_validator(mode="after")
+    def _require_nine_stages(self) -> "PipelineConfig":
+        if self.stages != list(NINE_STAGES):
+            raise ValueError("正式调研必须使用完整九段，不能跳过或重排阶段")
+        if not self.extractor.enabled:
+            raise ValueError("九段主链不能关闭 extract")
+        if self.collector.depth < 2:
+            raise ValueError("正式九段调研要求 collector.depth >= 2，搜索摘要不能替代正文")
+        return self
 
 
 # --------------------------------------------------------------------------- #
@@ -429,8 +412,8 @@ class CollectResult(BaseModel):
     source_audits: list[SourceAudit] = Field(default_factory=list)
 
 
-class DeepenResult(BaseModel):
-    """深挖阶段产出统计。"""
+class CollectionStrategyResult(BaseModel):
+    """Additional searches performed inside collect, not an extra stage."""
 
     entities: list[str] = Field(default_factory=list)  # 拆出的实体
     queries: list[str] = Field(default_factory=list)  # 实际执行的补充查询
@@ -478,6 +461,7 @@ class ExtractResult(BaseModel):
     entities: list[Entity] = Field(default_factory=list)
     relations: list[Relation] = Field(default_factory=list)
     triples: list[Triple] = Field(default_factory=list)
+    claims: list[dict] = Field(default_factory=list)
     schema_: dict | None = Field(default=None, alias="schema")
     output_dir: Path
 
@@ -661,11 +645,12 @@ class PipelineResult(BaseModel):
     stages_completed: list[str] = Field(default_factory=list)
     stages_skipped: list[str] = Field(default_factory=list)
     failed_stage: str | None = None
+    verdict: str | None = None
+    rounds: int = 0
     elapsed_sec: float = 0.0
     stage_metrics: list[StageRunMetric] = Field(default_factory=list)
     run_summary_path: Path | None = None
     collect_result: CollectResult | None = None
-    deepen_result: DeepenResult | None = None
     clean_result: CleanResult | None = None
     extract_result: ExtractResult | None = None
     organize_result: OrganizeResult | None = None

@@ -1,7 +1,7 @@
-"""Stage 1.5: Deepen —— 反偏差递归深挖。
+"""Internal collection strategies that deepen evidence during collection.
 
-依据升级计划 §4。在 Collect 与 Clean 之间插入一个可选阶段，针对 raw/ 已采
-内容做三件事，并把新结果补写回同一个 raw/：
+This helper is called from the canonical nine-stage collection flow. It retains
+the former deepening strategies without introducing a separate pipeline stage.
 
   机制 A（解决偏差）：实体拆分 → 每个实体多视角独立搜索
       例 "康怡琳 中南民族大学" → ["康怡琳", "中南民族大学"]
@@ -9,26 +9,23 @@
   机制 B（解决浅度）：扫描已采内容识别缺失维度 → 生成补充查询，逐轮深挖
   机制 C（解决矛盾）：检测冲突信息 → 反向搜索验证
 
-设计约束（问题清单）：
+策略约束：
   - 风险 4：喂 LLM 做缺口分析的内容必须截断（每文件标题+前 N 字，总量封顶）
-  - 风险 5：写独立完成标记 raw/.deepen_done，避免 resume 误跳
   - 风险 7：实体数 ≤ max_entities，单实体跳过拆分
   - 风险 8/9：补采复用 Collector.fetch_and_store（幂等去重 + 合并 sources.json）
 """
 
 from __future__ import annotations
 
+import logging
 import re
 from pathlib import Path
 
 from pydantic import BaseModel, Field
 
-import logging
-
 from ..llm.base import LLMClient
 from ...domain.errors import LLMAuthenticationError
-from ...domain.models import DeepenConfig, DeepenResult
-from .base import write_text
+from ...domain.models import CollectionStrategyConfig, CollectionStrategyResult
 from .collector import Collector
 
 logger = logging.getLogger(__name__)
@@ -36,8 +33,6 @@ logger = logging.getLogger(__name__)
 # 抓取时写入的注释头：<!-- title: ... -->
 _TITLE_RE = re.compile(r"<!--\s*title:\s*(.*?)\s*-->")
 _COMMENT_LINE = re.compile(r"^\s*<!--.*?-->\s*$")
-
-_DONE_MARKER = ".deepen_done"
 
 
 class _Entities(BaseModel):
@@ -81,17 +76,19 @@ class _OwnsBatch(BaseModel):
 _SYSTEM = "你是严谨的调研规划专家，擅长拆解话题、发现信息缺口、设计互补的搜索查询。"
 
 
-class DeepenStage:
-    """反偏差深挖阶段。复用同一个 Collector 实例做补充搜索+抓取。"""
+class ResearchStrategies:
+    """Collection-time research strategies using the shared Collector."""
 
-    def __init__(self, config: DeepenConfig, collector: Collector, llm: LLMClient) -> None:
+    def __init__(
+        self, config: CollectionStrategyConfig, collector: Collector, llm: LLMClient
+    ) -> None:
         self.config = config
         self.collector = collector
         self.llm = llm
 
-    async def run(  # noqa: PLR0915  # deepen.run; split pending (P1 seed item 6)
+    async def collect_more(  # noqa: PLR0915  # strategy workflow
         self, topic: str, raw_dir: Path, *, core_keyword: str | None = None
-    ) -> DeepenResult:
+    ) -> CollectionStrategyResult:
         raw_dir = Path(raw_dir)
         warnings: list[str] = []
         new_files: list[Path] = []
@@ -136,7 +133,7 @@ class DeepenStage:
                 new_files.extend(t_files)
                 warnings.extend(t_warn)
             if self.config.disambiguation:
-                moved = await self._disambiguate(raw_dir, profile, topic)
+                moved = await self._disambiguate(raw_dir, profile, topic, new_files)
                 if moved:
                     warnings.append(f"消歧移走 {moved} 份疑似同名/无关资料到 raw/_disambig/")
             # 重抽画像（基于新加 / 消歧后的 raw）
@@ -163,9 +160,7 @@ class DeepenStage:
             contra = await self._detect_contradictions(topic, raw_dir)
             await _run_queries(contra)
 
-        # 风险 5：独立完成标记，避免 resume 把 deepen 误判为已完成而跳过
-        write_text(raw_dir / _DONE_MARKER, "deepen completed\n")
-        return DeepenResult(
+        return CollectionStrategyResult(
             entities=entities if len(entities) > 1 else [],
             queries=executed,
             new_files=new_files,
@@ -320,20 +315,24 @@ class DeepenStage:
         raw_dir: Path,
         profile: _Profile,
         topic: str,
+        candidate_files: list[Path],
     ) -> int:
-        """P2-4：同名消歧。LLM 按画像（机构+领域）判每份 raw 文件归属，
-        他人的移到 raw/_disambig/。返回移走数量。
+        """Disambiguate only Markdown files collected by this invocation.
 
-        安全机制：画像 confidence < 0.7 时跳过，避免初次画像不准时误杀。
+        Seed files and pre-existing raw output are never candidates for moving.
+        Low-confidence profiles are skipped to reduce false removals.
         """
         if profile.confidence < 0.7:
             return 0
         if not profile.institutions and not profile.fields:
             return 0
-        titles = [
-            (p, _TITLE_RE.search(p.read_text("utf-8", errors="ignore")))
-            for p in sorted(raw_dir.glob("*.md"))
-        ]
+        titles = []
+        for path in sorted(set(map(Path, candidate_files))):
+            if path.parent != raw_dir or path.suffix != ".md" or not path.is_file():
+                continue
+            titles.append(
+                (path, _TITLE_RE.search(path.read_text("utf-8", errors="ignore")))
+            )
         items = [(p, m.group(1) if m else p.stem) for p, m in titles]
         if not items:
             return 0
@@ -363,12 +362,19 @@ class DeepenStage:
             except Exception as exc:  # noqa: BLE001 - 非鉴权失败则该批默认全部保留
                 logger.debug("同名消歧失败: %s", exc)
                 continue
+            if len(owns) != len(batch):
+                logger.debug(
+                    "同名消歧返回数量不匹配: expected=%d actual=%d",
+                    len(batch),
+                    len(owns),
+                )
+                continue
             for i, (path, _) in enumerate(batch):
-                if i < len(owns) and owns[i] is False and path.exists():
+                if owns[i] is False and path.exists():
                     bucket.mkdir(exist_ok=True)
                     target = bucket / path.name
                     if target.exists():
-                        target.unlink()
+                        continue
                     path.rename(target)
                     moved += 1
         return moved
@@ -450,16 +456,3 @@ class DeepenStage:
             parts.append(block)
             total += len(block)
         return "\n".join(parts)
-
-
-async def deepen(
-    topic: str,
-    config: DeepenConfig,
-    collector: Collector,
-    llm: LLMClient,
-    raw_dir: Path,
-    *,
-    core_keyword: str | None = None,
-) -> DeepenResult:
-    """模块级便捷函数。"""
-    return await DeepenStage(config, collector, llm).run(topic, raw_dir, core_keyword=core_keyword)

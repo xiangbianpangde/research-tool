@@ -10,10 +10,8 @@ from research_tool.domain.models import (
     CleanerConfig,
     ExtractorConfig,
     OrganizerConfig,
-    PipelineConfig,
     ReporterConfig,
 )
-from research_tool.application.pipeline import ResearchPipeline
 from research_tool.infrastructure.stages import Cleaner, Extractor, Organizer, Reporter
 
 RAW = """<!-- source: https://example.com/a -->
@@ -68,48 +66,3 @@ def test_stages_individually(tmp_path, llm):
     rep = asyncio.run(Reporter(ReporterConfig()).run(org.tree_dir, llm, topic="Transformer"))
     assert rep.report_path.exists()
     assert rep.word_count > 0
-
-
-@pytest.mark.asyncio
-async def test_pipeline_skip_collect(tmp_path, llm, monkeypatch):
-    topic_dir = tmp_path / "out" / "transformer"
-    raw = topic_dir / "raw"
-    raw.mkdir(parents=True)
-    (raw / "01-example.com.md").write_text(RAW, encoding="utf-8")
-
-    cfg = PipelineConfig(
-        topic="transformer",
-        work_dir=tmp_path / "out",
-        stages=["clean", "extract", "organize", "report"],
-        cleaner=CleanerConfig(min_content_length=50),
-        organizer=OrganizerConfig(min_nodes=2),
-    )
-    pipe = ResearchPipeline(cfg)
-    monkeypatch.setattr(pipe, "_get_llm", lambda: llm)
-
-    result = await pipe.run("transformer")
-    assert result.failed_stage is None
-    assert "report" in result.stages_completed
-    assert result.report_result.report_path.exists()
-
-
-@pytest.mark.asyncio
-async def test_pipeline_resume_skips(tmp_path, llm, monkeypatch):
-    topic_dir = tmp_path / "out" / "transformer"
-    raw = topic_dir / "raw"
-    raw.mkdir(parents=True)
-    (raw / "01-example.com.md").write_text(RAW, encoding="utf-8")
-    # 预置 clean 输出 → clean 应被跳过
-    clean = topic_dir / "clean"
-    clean.mkdir()
-    (clean / "01-example.com.md").write_text("done", encoding="utf-8")
-
-    cfg = PipelineConfig(
-        topic="transformer",
-        work_dir=tmp_path / "out",
-        stages=["clean"],
-    )
-    pipe = ResearchPipeline(cfg)
-    monkeypatch.setattr(pipe, "_get_llm", lambda: llm)
-    result = await pipe.run("transformer")
-    assert "clean" in result.stages_skipped

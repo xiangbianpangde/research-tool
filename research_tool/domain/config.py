@@ -12,7 +12,6 @@ from __future__ import annotations
 
 import os
 import re
-from copy import deepcopy
 from pathlib import Path
 from typing import Any
 
@@ -20,54 +19,7 @@ import yaml
 from pydantic import ValidationError
 
 from .errors import ConfigValidationError
-from .models import PipelineConfig
-
-_STANDARD_STAGES = ["collect", "deepen", "clean", "extract", "organize", "report"]
-_MODE_DEFAULTS: dict[str, dict[str, Any]] = {
-    "brief": {
-        "mode": "brief",
-        "stages": ["collect", "clean", "report"],
-        "collector": {"search_rounds": 1, "deep_search": False},
-        "deepen": {"profile_iterations": 1},
-        "max_backward_rounds": 0,
-        "llm_stage_attempts": 2,
-    },
-    "full": {
-        "mode": "full",
-        "stages": list(_STANDARD_STAGES),
-        "collector": {"search_rounds": 1, "deep_search": False},
-        "deepen": {"profile_iterations": 1},
-        "extractor": {"enabled": True, "fail_on_chunk_error": True},
-        "max_backward_rounds": 0,
-        "llm_stage_attempts": 3,
-    },
-    "fast": {
-        "mode": "fast",
-        "stages": [stage for stage in _STANDARD_STAGES if stage != "deepen"],
-        "collector": {"search_rounds": 1, "deep_search": False},
-        "deepen": {"profile_iterations": 1},
-        "max_backward_rounds": 0,
-    },
-    "standard": {
-        "mode": "standard",
-        "stages": list(_STANDARD_STAGES),
-        "collector": {"search_rounds": 1, "deep_search": False},
-        "deepen": {"profile_iterations": 1},
-        "max_backward_rounds": 0,
-    },
-    "deep": {
-        "mode": "deep",
-        "stages": list(_STANDARD_STAGES),
-        "collector": {
-            "search_rounds": 2,
-            "deep_search": True,
-            "deep_pages": 2,
-            "deep_sorts": ["relevance", "date"],
-        },
-        "deepen": {"profile_iterations": 2},
-        "max_backward_rounds": 1,
-    },
-}
+from .models import NINE_STAGES, PipelineConfig
 
 # config.yaml 查找顺序
 _DEFAULT_PATHS = [
@@ -116,12 +68,14 @@ def _deep_merge(base: dict, override: dict) -> dict:
 
 def mode_defaults(mode: str) -> dict[str, Any]:
     """Return a fresh cost/quality preset without sharing mutable values."""
-    preset = _MODE_DEFAULTS.get(mode)
-    if preset is None:
+    if mode not in {"full", "standard", "deep"}:
         raise ConfigValidationError(
-            f"未知调研模式: {mode}（推荐 brief/full；兼容 fast/standard/deep）"
+            f"模式 {mode} 已移除；full/standard/deep 均使用完整九段"
         )
-    return deepcopy(preset)
+    return {"mode": mode, "stages": list(NINE_STAGES),
+            "extractor": {"enabled": True, "fail_on_chunk_error": True},
+            "collector": {"search_rounds": 2 if mode == "deep" else 1},
+            "llm_stage_attempts": 3 if mode == "full" else 2}
 
 
 def _find_config(path: str | Path | None) -> Path | None:
@@ -147,11 +101,15 @@ def _flatten_to_pipeline(raw: dict) -> dict:
     yaml 用 `collector:`/`cleaner:` 等段名，PipelineConfig 同名字段；
     `pipeline:` 段下的 work_dir/stages 提升到顶层。
     """
+    if "deepen" in raw:
+        raise ConfigValidationError("deepen 阶段配置已移除；查询策略归入 collector")
+    pipeline_section = raw.get("pipeline") or {}
+    if "max_backward_rounds" in pipeline_section:
+        raise ConfigValidationError("max_backward_rounds 已移除；使用 nine_loop.max_rounds")
     data: dict[str, Any] = {}
     for src, dst in [
         ("llm", "llm"),
         ("collector", "collector"),
-        ("deepen", "deepen"),
         ("pdf_ingest", "pdf_ingest"),
         ("cleaner", "cleaner"),
         ("extractor", "extractor"),
@@ -174,10 +132,11 @@ def _flatten_to_pipeline(raw: dict) -> dict:
         "work_dir",
         "stages",
         "resume",
-        "max_backward_rounds",
         "llm_stage_attempts",
         "llm_retry_backoff_sec",
         "llm_healthcheck_timeout_sec",
+        "pdf_dir",
+        "input_dir",
         # B8：九段管线 flag 键（默认全关）
         "nine_loop",
     ):
@@ -311,6 +270,10 @@ def load_config(
     """
     if overrides is not None and not isinstance(overrides, dict):
         raise ConfigValidationError("overrides 根节点必须是键值映射")
+    if overrides and "deepen" in overrides:
+        raise ConfigValidationError("deepen 阶段配置已移除；查询策略归入 collector")
+    if overrides and "max_backward_rounds" in overrides:
+        raise ConfigValidationError("max_backward_rounds 已移除；使用 nine_loop.max_rounds")
     raw: dict = {}
     cfg_path = _find_config(path)
     if cfg_path is not None:
@@ -346,16 +309,6 @@ def load_config(
             data,
             previous_identity,
             explicit_replacement=explicit_key,
-        )
-    if data.get("mode") == "full":
-        # full 是产物契约，不允许 config.yaml 或 CLI 静默裁掉中间阶段。
-        data = _deep_merge(
-            data,
-            {
-                "stages": list(_STANDARD_STAGES),
-                "deepen": {"enabled": True},
-                "extractor": {"enabled": True, "fail_on_chunk_error": True},
-            },
         )
     _validate_mapping_sections(data)
     # 密钥必须根据最终 provider/base_url 选择；CLI overrides 可能刚切换

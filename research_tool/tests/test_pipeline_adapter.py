@@ -2,7 +2,7 @@
 
 覆盖：
 - MarkdownWriter 落盘（路径生成、权限、磁盘检查）
-- PipelineTrigger 5 阶段管道触发（mock 模式）
+- PipelineTrigger 九段管道触发与完整性判定
 - TagsMerger 合并去重
 - CollectConfigInjector 注入
 - 模块级便捷函数
@@ -10,12 +10,29 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
 
+from research_tool.common.slug import slugify
 from research_tool.domain.errors import VideoIngestError
+from research_tool.domain.models import (
+    NINE_STAGES,
+    CleanerConfig,
+    OrganizerConfig,
+    PipelineConfig,
+    PipelineResult,
+    StageEvent,
+    LLMSummary,
+    Transcript,
+    VideoMeta,
+)
+from research_tool.infrastructure.ingest.notes_schema import assemble_markdown
+from research_tool.infrastructure.llm import MockLLMClient
+from research_tool.nine_loop.evidence import parse_source
 from research_tool.infrastructure.ingest.pipeline_adapter import (
     COLLECT_CONFIG_VERSION,
     E_PIPE_001,
@@ -155,40 +172,124 @@ class TestMarkdownWriter:
 # --------------------------------------------------------------------------- #
 
 
+def _assert_stage_artifacts_have_valid_digests(topic_dir: Path) -> None:
+    state = json.loads((topic_dir / "runtime-state.json").read_text(encoding="utf-8"))
+    assert state["completed_stages"]
+    for record in state["completed_stages"].values():
+        artifact = topic_dir / record["artifact_path"]
+        assert artifact.is_file()
+        assert hashlib.sha256(artifact.read_bytes()).hexdigest() == record["artifact_digest"]
+        envelope = json.loads(artifact.read_text(encoding="utf-8"))
+        assert envelope["v"] == 1 and envelope["error"] is None
+
+
+def _assert_final_output_hashes(topic_dir: Path, summary: dict) -> Path:
+    output_dir = Path("runs") / summary["run_id"] / "final"
+    assert summary["output_dir"] == output_dir.as_posix()
+    report_path = topic_dir / summary["output_dir"] / "report.md"
+    assert report_path.relative_to(topic_dir).as_posix() in summary["files"]
+    for relative, digest in summary["files"].items():
+        assert Path(relative).is_relative_to(output_dir)
+        assert hashlib.sha256((topic_dir / relative).read_bytes()).hexdigest() == digest
+    return report_path
+
+
 class TestPipelineTrigger:
-    """5 阶段管道触发器测试。"""
+    """九段管道触发器：实际本地执行与适配契约。"""
 
     @pytest.mark.asyncio
-    async def test_trigger_stages_run(self, tmp_path: Path):
-        """成功：返回 StagesResult(stages_run=[...], success=True)。"""
-        trigger = PipelineTrigger(stages=["clean", "extract", "organize", "report"])
-
-        # Mock ResearchPipeline.stream 生成 StageEvent 序列
-        async def fake_stream(topic):
-            from research_tool.domain.models import StageEvent
-
-            for stage in ["clean", "extract", "organize", "report"]:
-                yield StageEvent(stage=stage, status="started", message=f"start {stage}")
-                yield StageEvent(stage=stage, status="completed", message=f"done {stage}")
-
-        mock_pipeline = MagicMock()
-        mock_pipeline.stream = fake_stream
-        mock_pipeline._result = MagicMock(failed_stage=None)
-
-        mock_cfg = MagicMock()
-        mock_cfg.work_dir = tmp_path
-
-        with (
-            patch(
-                "research_tool.application.pipeline.ResearchPipeline", return_value=mock_pipeline
+    async def test_trigger_stages_run(self, tmp_path: Path, monkeypatch):
+        """视频 raw/ 进入公开九段流程；旧 stages 参数不能裁剪主链。"""
+        topic = "video evidence"
+        quote = "The measured battery retained 90 percent capacity after 1000 cycles."
+        source_url = "https://www.youtube.com/watch?v=video1"
+        markdown = assemble_markdown(
+            meta=VideoMeta(
+                video_id="video1", platform="youtube", title="Battery test", url=source_url,
             ),
-            patch("research_tool.domain.config.load_config", return_value=mock_cfg),
-        ):
-            result = await trigger.trigger("topic", work_dir=tmp_path)
+            summary=LLMSummary(
+                video_summary=quote + "\n\n" + "Experimental methods and limitations. " * 8,
+            ),
+            screenshots=[],
+            transcript=Transcript(full_text=quote),
+        )
+        source_path = write_markdown(markdown, topic=topic, video_id="video1", work_dir=tmp_path)
+        assert parse_source(source_path.read_text(encoding="utf-8"))["locator"] == source_url
+        configurations = []
+
+        def isolated_config(*args, overrides=None, **kwargs):
+            cfg = PipelineConfig(
+                **overrides,
+                cleaner=CleanerConfig(min_content_length=20, relevance_filter=True),
+                organizer=OrganizerConfig(min_nodes=1, max_nodes=3, min_evidence_per_node=1),
+            )
+            configurations.append(cfg)
+            return cfg
+
+        def reply(prompt, schema):
+            if schema.__name__ == "_ChunkResult":
+                assert quote in prompt
+                return schema(claims=[{"text": quote, "quote": quote, "topic": "Cycle life"}])
+            if schema.__name__ == "_Scores":
+                return schema(scores=[1.0])
+            if schema.__name__ == "ResearchInspection":
+                return schema(findings=[])
+            if schema.__name__ == "ReportOutline":
+                graph = json.loads(prompt.split("DATA:\n", 1)[1])
+                return schema(sections=[{
+                    "heading": "Cycle life",
+                    "claim_ids": [fact["claim_id"] for fact in graph["facts"]],
+                }])
+            if schema.__name__ == "ReportSectionDraft":
+                facts = json.loads(prompt.split("DATA:\n", 1)[1])
+                return schema(paragraphs=[
+                    {"text": fact["text"], "claim_ids": [fact["claim_id"]]}
+                    for fact in facts
+                ])
+            if schema.__name__ == "ReportVerification":
+                data = json.loads(prompt.split("DATA:\n", 1)[1])
+                facts = {fact["claim_id"]: fact for fact in data["facts"]}
+                return schema(checks=[{
+                    "paragraph_index": index,
+                    "supported": paragraph.get("kind") == "heading" and (
+                        paragraph["text"] == "Cycle life"
+                    ) or all(
+                        paragraph["text"] == facts[claim_id]["text"]
+                        for claim_id in paragraph["claim_ids"]
+                    ),
+                    "reason": "Paragraph matches its supplied source quote.",
+                } for index, paragraph in enumerate(data["paragraphs"])])
+            raise AssertionError(f"unexpected schema: {schema.__name__}")
+
+        llm = MockLLMClient(structured_response=reply)
+        monkeypatch.setattr("research_tool.domain.config.load_config", isolated_config)
+        monkeypatch.setattr(
+            "research_tool.infrastructure.llm.base.LLMClient.from_config", lambda cfg: llm
+        )
+        trigger = PipelineTrigger(stages=["clean"], max_retry=0)
+
+        result = await trigger.trigger(topic, work_dir=tmp_path)
 
         assert isinstance(result, StagesResult)
-        assert result.success
-        assert set(result.stages_run) >= {"clean", "extract", "organize", "report"}
+        assert result.success, result.error
+        assert result.error is None and result.retried is False
+        assert configurations[0].input_dir == source_path.parent
+        assert configurations[0].work_dir == tmp_path
+        assert configurations[0].stages == list(NINE_STAGES)
+        assert configurations[0].resume is True
+        topic_dir = tmp_path / slugify(topic)
+        summary = json.loads((topic_dir / "run-summary.json").read_text(encoding="utf-8"))
+        assert summary["verdict"] == "STOP_SUCCESS" and summary["pipeline_complete"] is True
+        assert set(summary["stages_completed"]) | set(summary["stages_skipped"]) == set(NINE_STAGES)
+        assert "collect" in summary["stages_completed"]
+        assert "collect" not in summary["stages_skipped"]
+        _assert_stage_artifacts_have_valid_digests(topic_dir)
+        assert result.stages_run == summary["stages_completed"]
+        report_path = _assert_final_output_hashes(topic_dir, summary)
+        report = report_path.read_text(encoding="utf-8")
+        assert quote in report and source_url in report
+        assert source_path.read_text(encoding="utf-8") == markdown
+        assert llm.calls
 
     @pytest.mark.asyncio
     async def test_trigger_pipeline_failure_returns_failed(self, tmp_path: Path):
@@ -196,14 +297,14 @@ class TestPipelineTrigger:
         trigger = PipelineTrigger(stages=["clean"])
 
         async def fake_stream(topic):
-            from research_tool.domain.models import StageEvent
-
             yield StageEvent(stage="clean", status="started", message="")
             yield StageEvent(stage="clean", status="failed", message="clean failed")
 
         mock_pipeline = MagicMock()
         mock_pipeline.stream = fake_stream
-        mock_pipeline._result = MagicMock(failed_stage="clean")
+        mock_pipeline._result = PipelineResult(
+            topic_dir=tmp_path / "topic", failed_stage="clean", verdict="STOP_ERROR"
+        )
 
         mock_cfg = MagicMock()
         mock_cfg.work_dir = tmp_path
@@ -229,29 +330,52 @@ class TestPipelineTrigger:
         assert "config load failed" in (result.error or "")
 
     @pytest.mark.asyncio
-    async def test_trigger_module_level(self, tmp_path: Path):
-        """模块级便捷函数 trigger_pipeline 也能工作。"""
-
+    @pytest.mark.parametrize(
+        ("completed", "skipped", "verdict", "success"),
+        [
+            (list(NINE_STAGES), [], "STOP_SUCCESS", True),
+            ([stage for stage in NINE_STAGES if stage not in {"targeted", "merge"}],
+             ["targeted", "merge"], "STOP_SUCCESS", True),
+            (["clean"], [], "STOP_SUCCESS", False),
+            ([], [], "STOP_SUCCESS", False),
+            (list(NINE_STAGES), [], "STOP_BUDGET", False),
+            (list(NINE_STAGES), [], "CONTINUE", False),
+            (list(NINE_STAGES), [], None, False),
+        ],
+        ids=["complete", "no_gap", "partial", "empty", "budget", "continue", "no_verdict"],
+    )
+    async def test_trigger_module_level_completion_contract(
+        self, tmp_path: Path, completed, skipped, verdict, success
+    ):
+        """独立适配契约：只有九段完成/明确跳过且闸门成功才返回 success。"""
         async def fake_stream(topic):
-            from research_tool.domain.models import StageEvent
-
-            yield StageEvent(stage="clean", status="completed", message="")
+            for stage in completed:
+                yield StageEvent(stage=stage, status="completed", message="")
+            for stage in skipped:
+                yield StageEvent(stage=stage, status="skipped", message="")
 
         mock_pipeline = MagicMock()
         mock_pipeline.stream = fake_stream
-        mock_pipeline._result = MagicMock(failed_stage=None)
-
-        mock_cfg = MagicMock()
-        mock_cfg.work_dir = tmp_path
+        mock_pipeline._result = PipelineResult(
+            topic_dir=tmp_path / "topic", stages_completed=completed,
+            stages_skipped=skipped, verdict=verdict,
+        )
 
         with (
             patch(
                 "research_tool.application.pipeline.ResearchPipeline", return_value=mock_pipeline
             ),
-            patch("research_tool.domain.config.load_config", return_value=mock_cfg),
+            patch("research_tool.domain.config.load_config", return_value=PipelineConfig()),
         ):
-            result = await trigger_pipeline("topic", work_dir=tmp_path, stages=["clean"])
+            result = await trigger_pipeline(
+                "topic", work_dir=tmp_path, stages=["clean"]
+            )
+
         assert isinstance(result, StagesResult)
+        assert result.success is success
+        assert result.stages_run == completed
+        assert result.retried is (not success)
+        assert result.error == (None if success else "failed_stage=incomplete_nine_stage_run")
 
 
 # --------------------------------------------------------------------------- #

@@ -2,16 +2,15 @@
 
 设计依据：
 - [DD-001:M-008 pipeline_adapter] 4 子模块
-  (Markdown 落盘 / 5 阶段管道触发 / tags 合并 / Collect 配置注入)
+  (Markdown 落盘 / 九阶段管道触发 / tags 合并 / Collect 配置注入)
 - [DD-001:IC-022/IC-023/IC-024/CE-009] 接口契约
 - [DD-001:FS-008] 文件结构（research_tool/pipeline_adapter.py）
-- [DD-001:FR-006] 下游 5 阶段管道零改动（用 resume=True 机制让 collect 跳过已有 raw/）
+- [DD-001:FR-006] 视频 raw/ 通过 input_dir 接入九阶段主链
 
 职责：
 - Markdown 落盘：写 raw/<topic>/video_<video_id>.md，权限 0o644
   磁盘剩余 < 100MB 时报警
-- 5 阶段管道触发：复用 ResearchPipeline
-  (不修改 collect/deepen/clean/extract/organize/report 任何代码)
+- 九阶段管道触发：复用 ResearchPipeline
 - tags 合并：大小写不敏感去重 + 保留首次出现顺序
 - Collect 配置注入：bool 返回，失败 WARN + 回退默认
 
@@ -31,6 +30,8 @@ from typing import Final
 
 from ...common.logging_config import emit_log, get_logger
 from ...domain.errors import ErrorCode, VideoIngestError, register_error
+from ...domain.models import NINE_STAGES
+from ...common.slug import slugify
 
 logger = get_logger(__name__)
 
@@ -61,7 +62,7 @@ COLLECT_CONFIG_VERSION: Final[str] = "1.0.0"
 
 @dataclass(frozen=True)
 class StagesResult:
-    """5 阶段管道触发结果（IC-023）。"""
+    """九阶段管道触发结果（IC-023）。"""
 
     stages_run: list[str] = field(default_factory=list)
     success: bool = False
@@ -185,17 +186,17 @@ class MarkdownWriter:
 
 
 # --------------------------------------------------------------------------- #
-# PipelineTrigger（5 阶段管道触发 IC-023）
+# PipelineTrigger（完整九阶段管道触发 IC-023）
 # --------------------------------------------------------------------------- #
 
 
 class PipelineTrigger:
-    """5 阶段管道触发器（IC-023）。
+    """完整九阶段管道触发器（IC-023）。
 
     复用 application/pipeline.py:ResearchPipeline；不修改任何 Stage 实现。
     设计要点：
-    - 默认跳过 deepen（视频源已有 raw/ 内容，deepen 反而会搜索更多无关注入）
-    - resume=True 必传：让 collect 阶段检测到 raw/ 已有 video_*.md → 跳过
+    - 所有正式报告都运行固定九段链
+    - 视频笔记以主题目录下 raw/ 作为 input_dir 输入 collect 阶段
     - 失败重试 1 次（FDR-M008-003）
     """
 
@@ -204,9 +205,8 @@ class PipelineTrigger:
         stages: list[str] | None = None,
         max_retry: int = PIPELINE_MAX_RETRY,
     ) -> None:
-        # 默认阶段列表：跳过 collect（已由 video markdown 提供）和 deepen（视频源不再二次深挖）
-        # 保留 clean → extract → organize → report
-        self._stages = stages or ["clean", "extract", "organize", "report"]
+        # 保留参数兼容旧调用方，但不允许调用方裁剪正式研究阶段。
+        self._stages = list(NINE_STAGES)
         self._max_retry = max_retry
 
     async def trigger(
@@ -214,7 +214,7 @@ class PipelineTrigger:
         topic: str,
         work_dir: str | Path,
     ) -> StagesResult:
-        """触发 5 阶段管道（IC-023）。
+        """触发完整九阶段管道（IC-023）。
 
         Args:
             topic: 主题
@@ -228,6 +228,9 @@ class PipelineTrigger:
         from ...application.pipeline import ResearchPipeline
         from ...domain.config import load_config
 
+        topic_dir = Path(work_dir) / slugify(topic)
+        input_dir = topic_dir / RAW_DIR_NAME
+
         try:
             cfg = load_config(
                 config_path=None,
@@ -235,7 +238,8 @@ class PipelineTrigger:
                     "topic": topic,
                     "work_dir": str(work_dir),
                     "stages": self._stages,
-                    "resume": True,  # 让 collect 检测到 raw/ 已有 video_*.md → 跳过
+                    "input_dir": str(input_dir),
+                    "resume": True,
                 },
             )
         except Exception as e:  # noqa: BLE001 - 配置加载失败应返回失败结果而非抛错（IC-023 语义）
@@ -269,7 +273,14 @@ class PipelineTrigger:
                     elif ev.status == "failed":
                         failed_stage = ev.stage
                 result = pipeline._result
-                success = failed_stage is None and result is not None
+                success = (
+                    failed_stage is None
+                    and result is not None
+                    and result.verdict == "STOP_SUCCESS"
+                    and set(NINE_STAGES).issubset(
+                        set(result.stages_completed) | set(result.stages_skipped)
+                    )
+                )
                 elapsed = int((time.monotonic() - start) * 1000)
                 if attempt > 0:
                     retried = True
@@ -283,7 +294,11 @@ class PipelineTrigger:
                     success=success,
                     duration_ms=elapsed,
                     retried=retried,
-                    error=None if success else f"failed_stage={failed_stage}",
+                    error=(
+                        None
+                        if success
+                        else f"failed_stage={failed_stage or 'incomplete_nine_stage_run'}"
+                    ),
                 )
             except Exception as e:  # noqa: BLE001
                 last_err = e
@@ -294,7 +309,7 @@ class PipelineTrigger:
                     continue
                 register_error(
                     ErrorCode.E_DL_001_NETWORK_TIMEOUT.value,
-                    scene="5 阶段管道触发失败",
+                    scene="九阶段管道触发失败",
                     cause=str(e),
                     suggestion="查看 M-010 错误码 + 检查 LLM API key",
                 )

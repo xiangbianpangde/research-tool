@@ -8,13 +8,14 @@ async filter_relevance() 是可选 LLM 过滤步骤，pipeline 在 process 之�
 from __future__ import annotations
 
 import re
+import math
 from html import unescape
 from pathlib import Path
 
 from pydantic import BaseModel, Field
 
 from ..llm.base import LLMClient
-from ...domain.errors import LLMAuthenticationError
+from ...domain.errors import LLMAuthenticationError, StageError
 from ...domain.models import CleanerConfig, CleanResult, FileQuality
 from .base import ensure_dir, write_json, write_text
 
@@ -56,6 +57,11 @@ def _looks_binary(text: str, sample: int = 4000) -> bool:
 
 
 def _split_meta(text: str) -> tuple[str, str]:
+    if text.startswith("---"):
+        end = text.find("\n---", 3)
+        if end >= 0:
+            boundary = end + len("\n---")
+            return text[:boundary], text[boundary:].lstrip("\r\n")
     lines = text.splitlines()
     i = 0
     while i < len(lines) and (_META_LINE.match(lines[i]) or not lines[i].strip()):
@@ -108,6 +114,10 @@ def _find_content_start(lines: list[str]) -> int:
     for idx, ln in enumerate(lines):
         if _is_linkish(ln):
             continue
+        # A short, complete evidence sentence is already substantive content.
+        # Length alone must not discard early experimental results.
+        if len(ln.strip()) >= _SHORT_LEN and re.search(r"[.!?。！？]", ln):
+            return idx
         if len(ln.strip()) >= _CONTENT_START_MIN:
             return idx
     return 0  # 未找到则不裁剪
@@ -238,6 +248,7 @@ class Cleaner:
         lines = _truncate_tail(lines)
 
         cleaned = _BLANKS.sub("\n\n", "\n".join(lines)).strip()
+        cleaned = cleaned[:cfg.max_content_length]
         if header:
             cleaned = header + "\n\n" + cleaned
         return cleaned
@@ -287,7 +298,7 @@ class Cleaner:
                 dedup_items.append((src.stem, _shingles(cleaned_body), body_len))
 
         # MinHash 去重：相似组保留最长，其余从 clean/ 删除并标 dedup_of:<胜者>
-        if dedup_items:
+        if dedup_items and self.config.dedup_similarity > 0:
             losers = _dedup_groups(dedup_items, self.config.dedup_similarity)
             for loser_name, winner_name in losers.items():
                 loser_path = clean_dir / f"{loser_name}.md"
@@ -334,8 +345,14 @@ class Cleaner:
                 scores = list(res.scores)
             except LLMAuthenticationError:
                 raise
-            except Exception:  # noqa: BLE001 - 非鉴权失败时全批默认通过
-                scores = [1.0] * len(batch)
+            except Exception as exc:  # noqa: BLE001 - explicit fail-closed batch validation
+                raise StageError("clean", "相关性评分失败，拒绝默认放行") from exc
+
+            if len(scores) != len(batch) or any(
+                not isinstance(score, (int, float)) or not math.isfinite(score)
+                or not 0 <= score <= 1 for score in scores
+            ):
+                raise StageError("clean", "相关性评分数量或范围无效")
 
             for i, path in enumerate(batch):
                 score = scores[i] if i < len(scores) else 1.0

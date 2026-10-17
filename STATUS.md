@@ -1,57 +1,43 @@
-# research-tool 开发状态
+# research-tool 当前状态
 
-## 当前恢复分支（2026-10-16）
+更新：2026-10-17。历史基线为 4ab1412，审计提交为 60881ca；开发分支 codex/nine-stage-only，工作区 /Users/xbpd/.codex/worktrees/nine-stage-only/research-tool。实现、独立审查修复与本地验收已完成，正在提交及提升主分支。原目录的旧 master 和未提交工作须完整保留。
 
-当前开发分支为 codex/nine-stage-only，固定历史基线提交 4ab1412；工作区 /Users/xbpd/.codex/worktrees/nine-stage-only/research-tool。后续以此分支开发，九段唯一主链通过验收后再提升为主分支。原 master 和原目录的未提交改动保留。
+## 已实现
 
-已完成：恢复源码核对、四文件历史补丁提交、三份 CPA/gpt-6-luna 只读审计、126 项相关基线测试。九段主链尚未接通，未删除旧代码，未做真实联网/模型/DRB 验证；全包 Ruff 仍有 46 项原有告警。
+ResearchPipeline 是唯一正式九段调度：collect、clean、extract、knowledge、inspect、targeted、merge、qgate、report。inspect/qgate 先判断质量，CONTINUE 才触发 targeted/merge 并重检，STOP_SUCCESS 才报告。补搜正文再次清洗和抽取。旧分派、brief/fast、旧独立阶段 CLI、quick_collect、shadow/flags 及旧 deepen 配置均已移除或拒绝。
 
-审计证据、裁剪边界、验收要求和唯一下一步见 [九段唯一主链裁剪计划](docs/plan/NINE-STAGE-ONLY-TRIM-PLAN.md)。下一步先按该文档的行为验收接通正文证据链和单一九段调度，随后裁掉被替代的旧路径。
+Deepen 有价值的实体拆分、画像、时间线、消歧和查询扩展迁入 collect 内部 ResearchStrategies。PDF/视频保留为输入适配。来源正文哈希、精确跨度、增量合并、运行锁、原子状态和 CAS 已接入。
 
-## 以下为恢复时保留的历史状态
+最终产物位于主题下 runs/<run_id>/final/。CLI 成功出口、status、WebUI 和 wiki-stage 统一校验当前 run_id、runtime 阶段、文件集合和 SHA-256。旧根目录报告/知识树保持原样。
 
-以下完成标记和测试数属于旧版本记录，不代表当前九段主链已通过验收。
+## 验证与证据
 
-| 功能点 | 状态 | 备注 |
-|--------|------|------|
-| FP01: 六阶段管道 | ✅ | Collect→Deepen→Clean→Extract→Organize→Report；`brief/full` 产物契约 + stage completion marker + LLM 阶段有界重试 |
-| FP02: 搜索后端 | ✅ | SearchEngine 注册含 opencli；常用 web/openalex/crossref/arxiv/s2/pubmed/wikipedia/github/news/tavily/bilibili/youtube/x + opencli 浏览器兜底 |
-| FP03: LLM 抽象 | ✅ | 5 provider：DeepSeek/OpenAI/Anthropic/Ollama/MiniMax；可配置 connect/read/request 超时与 sdk_max_retries |
-| FP04: CLI 接口 | ✅ | 主命令含 collect/ingest-pdf/ocr-engines/clean/extract/organize/report/run/status/ui/config/setup/wiki-stage/publish-wiki |
-| FP05: Python SDK | ✅ | `research()` / `quick_collect()` 便捷函数 |
-| FP06: Web UI | ✅ | Gradio 可视化界面 |
-| FP07: PDF 摄取 | ✅ | MinerU 集成（+ custom/paddleocr-vl/unlimited-ocr/vision-llm 可插拔引擎） |
-| FP08: 反偏差深挖 | ✅ | 实体拆分 + 画像注入 + 缺口检测 + 同名消歧 |
-| FP09: 反向传播 | ✅ | 知识树质量评估循环；已测试（R11，test_pipeline_backward.py） |
-| FP10: Research→Wiki P1 | ✅ | `wiki-stage` 内容寻址不可变包；禁止 legacy `publish-wiki` 写 active Vault |
-| FP11: 交互式部署 | ✅ | `research setup` + 档位契约/preflight/回执；详见 README |
-| FP12: 收束与持续优化 | ✅ | 包名 research_tool、MiniMax 视频默认、M-010 错误码、SSRF、gitleaks、ruff 清扫 |
+| 检查 | 结果 | 证据 |
+|---|---|---|
+| 全量 pytest | 957 passed / 3 skipped | /private/tmp/research-tool-nine-reviewed-all.xml |
+| Ruff | 通过 | ruff check --no-cache research_tool/ pyproject.toml |
+| 差异空白 | 通过 | git diff --check |
+| 本地九段冒烟 | 补搜闭环和零模型调用恢复通过 | /private/tmp/research-tool-nine-accepted-smoke/smoke-receipt.json |
+| CLI run / resume | 完整链、补搜和已校验缓存复用通过 | /private/tmp/research-tool-nine-ui-acceptance/cli-reviewed.log、cli-resume.log |
+| CLI 成果损坏 | 运行结束后损坏报告会退出失败 | test_cli_validates_committed_report_before_success |
+| 真实浏览器成功 | 完整九段、补搜和下载通过 | /private/tmp/research-tool-nine-ui-acceptance/reviewed-success.snapshot.txt、reviewed-success.download.txt |
+| 真实浏览器失败 | 鉴权失败后清空报告与下载 | /private/tmp/research-tool-nine-ui-acceptance/reviewed-failure.json.txt |
+| status / Wiki | 当前成果校验和不可变打包通过 | /private/tmp/research-tool-nine-ui-acceptance/cli-reviewed-status.log、cli-reviewed-wiki.log |
+| wheel | 构建及关键模块/旧调度缺席检查通过 | /private/tmp/research-tool-nine-wheel-accepted/research_tool-0.1.1-py3-none-any.whl |
+| 原工作区保护 | 29 tracked、10 untracked 哈希及 HEAD 相同 | /private/tmp/research-tool-original-workspace-20261017.json |
 
-## 测试权威值
+浏览器下载报告 HTTP 200，SHA-256 为 8cc44cc5a88b27b3f19ed3488c0fc2a37ddac14c43750d4e813ae876ea8480c1，与当前成功运行摘要相同。失败运行 STOP_ERROR、pipeline_complete=false，无 final 指针，旧文件没有变化。
 
-| 指标 | 值 | 备注 |
-|------|----|------|
-| pytest collect | **840** | 以 `pytest --collect-only` 为准（2026-07-28 复验） |
-| 推荐模式 | `brief` / `full` | 兼容 `fast` / `standard` / `deep` |
+三个 skip 为两项 Windows-only cookie 测试和未在 dist 放置 wheel 的检查；本轮已单独构建 wheel 并验证同一打包内容要求。Ruff 使用 /Users/xbpd/.local/bin/ruff，Python 使用 /opt/anaconda3/envs/research-tool/bin/python。
 
-## 技术债
+Pi /review 对入口进行了审查：CLI 成功出口缺少再次校验的告警已复现并修复，另一个坏 runtime schema 告警经加载器校验及四种异常 JSON 形状复现判为误报。原始报告在 /private/tmp/research-tool-nine-entry-review.md。
 
-| 问题 | 优先级 | 发现节点 |
-|------|--------|---------|
-| 覆盖率报告（pytest-cov 未默认启用） | 🟡 中 | v0.1.1 收束 / R13 |
-| Git commit-msg 钩子（commitlint 配置已就位，pre-commit/CI 强制未落地） | 🟡 中 | v0.1.1 收束 |
-| ✅ VideoIngest 错误码字典与 raise 站点脱节 — R10 已解决 | ✅ 已解决 | 2026-07 Round 10 |
-| 4 个死错误码常量（定义+导出但从不 raise） | 🟢 低 | 2026-07 Round 10 |
-| deepen.run 函数过长（已 noqa PLR0915，拆分仍 P1） | 🟢 低 | v0.1.1 收束 |
-| webui 长函数（run_video_note/run_web/build_ui 已 noqa PLR0915） | 🟢 低 | v0.1.1 收束 |
-| SSRF 封禁表可配置（198.18.0.0/15 当前豁免以兼容本机 DNS 代理） | 🟢 低 | 2026-07 SSRF |
-| 桥接脚本 --use-minimax-summary 标志冗余 | 🟢 低 | 2026-07 Round 8 |
-| vestigial register_error 覆盖保留（M-010 状态覆盖设计未做） | 🟡 中 | 2026-07 Round 12 |
-| deliverable.md + deliverable-track-*.md 含重命名前 src/ 路径 | 🟢 低 | 2026-07 Round 12 |
-| P3-1：presentation→infrastructure 导入偏差列表未扩 | 🟢 低 | 2026-07 Round 12 |
-| P3-2：ocr_cmd `--` 分隔符（文件名参数注入，极低风险） | 🟢 低 | 2026-07 Round 12 |
-| TD-03 `cli.py` 历史硬编码本机路径（wiki-stage 默认已改为相对路径） | 🟡 中 | 2026-07-21 R13 |
-| TD-04 多处 `except ... pass` 静默吞错 | 🟡 中 | 2026-07-21 R13 |
-| 缺 pytest CI workflow | 🟡 中 | 2026-07-21 R13 |
-| Star/文档增长（badge、截图、英文 Quick Start）仍空 | 🟡 中 | 2026-07-21 R13 |
-| 2026-07 全项目审核（Round 13 audit） | ✅ 已完成 | 2026-07-21 |
+## 验证边界
+
+冒烟、CLI 和 UI 验收只替换搜索、抓取和模型外部 I/O；本地生产管线、文件状态、报告及浏览器交互实际执行。它们不代表联网调研质量。模型支持关系核验也可能出错，不是语义真值证明。
+
+本轮未调用真实研究 API、未运行 DeepResearch Bench，未复现历史 52.77。恢复基线及限制见 [NINE-STAGE-BASELINE.json](docs/plan/NINE-STAGE-BASELINE.json)；裁剪依据见 [实施记录](docs/plan/NINE-STAGE-ONLY-TRIM-PLAN.md)。
+
+独立核心审查发现的四项问题已修复：旧模型缺口只有绑定本轮新增事实和解决理由才能关闭；正式主链拒绝 depth=1，snippet/discovery 元数据不进入事实账本；报告标题一并做支持核验；墙钟超时记录阶段及失败指标。Wiki 来源正文另按内容哈希归档，archiveRef 可在包内取回，幂等重试检查篡改。运行契约版本进入输入指纹，避免误用收紧前缓存。
+
+唯一剩余步骤：提交本分支并按用户授权提升主分支，保留旧分支及原工作区。

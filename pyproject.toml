@@ -21,7 +21,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-# 六阶段 LLM 客户端（DeepSeek/OpenAI/Ollama/MiniMax 共用 openai SDK）
+# 调研 LLM 客户端（DeepSeek/OpenAI/Ollama/MiniMax 共用 openai SDK）
 llm = ["openai>=1.0", "anthropic>=0.40"]
 # 重量级抓取：Crawl4AI（按架构设计 07）。安装后需执行 `crawl4ai-setup` 装浏览器。
 crawl = ["crawl4ai>=0.4"]

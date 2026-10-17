@@ -5,8 +5,8 @@
 - CLI 入口：`research run "主题" --video-url "URL"` 走通
 - 多 URL 并发调度
 - URL 白名单 + 非白名单拒绝
-- 下游 5 阶段管道触发（mock pipeline）
-- 产物验证：raw/<topic>/video_<video_id>.md 文件结构
+- 下游九段入口触发契约和本地 Markdown 输入的实际消费/恢复
+- 产物验证：<topic>/raw/video_<video_id>.md 文件结构
 
 所有外部依赖（yt-dlp / whisper / LLM）都 mock 掉。
 """
@@ -14,6 +14,8 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
+import json
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -25,9 +27,14 @@ from research_tool.application.video_pipeline import (
     VideoPipeline,
     validate_video_url,
 )
+from research_tool.common.slug import slugify
 from research_tool.domain.errors import ErrorCode, ResearchToolError, VideoIngestError
 from research_tool.domain.models import (
+    NINE_STAGES,
+    CleanerConfig,
     LLMSummary,
+    OrganizerConfig,
+    PipelineConfig,
     Transcript,
     TranscriptSegment,
     VideoURL,
@@ -37,7 +44,22 @@ from research_tool.infrastructure.ingest.pipeline_adapter import (
     VIDEO_FILENAME_PREFIX,
     StagesResult,
 )
+from research_tool.infrastructure.llm import MockLLMClient
+from research_tool.nine_loop.evidence import parse_source
 from research_tool.presentation.cli import app
+
+
+@pytest.fixture(autouse=True)
+def _isolate_cli_configuration(monkeypatch):
+    """入口测试不用本机 config.yaml、环境密钥或真实模型客户端。"""
+    def config(*args, overrides=None, **kwargs):
+        return PipelineConfig(**(overrides or {}))
+
+    monkeypatch.setattr("research_tool.presentation.cli.load_config", config)
+    monkeypatch.setattr(
+        "research_tool.infrastructure.llm.base.LLMClient.from_config",
+        lambda cfg: pytest.fail("unexpected real LLM client"),
+    )
 
 
 # --------------------------------------------------------------------------- #
@@ -274,8 +296,8 @@ class TestEndToEndMocked:
         assert elapsed < 0.35
 
     @pytest.mark.asyncio
-    async def test_downstream_5_stage_pipeline_triggered(self, tmp_path: Path):
-        """run_pipeline=True + 至少 1 成功 → 触发下游 5 阶段管道。"""
+    async def test_downstream_nine_stage_pipeline_triggered(self, tmp_path: Path):
+        """视频成功落盘后将 topic/work_dir 交给九段适配入口。"""
 
         async def fake_download(url: VideoURL) -> DownloadResult:
             return make_fake_download_result(tmp_path)
@@ -296,9 +318,9 @@ class TestEndToEndMocked:
             summarizer_fn=fake_summarize,
         )
 
-        # mock 5 阶段管道
+        # 这里只验证视频编排到适配器的交接；下游实际执行见消费用例。
         mock_stages_result = StagesResult(
-            stages_run=["clean", "extract", "organize", "report"],
+            stages_run=list(NINE_STAGES),
             success=True,
             duration_ms=500,
         )
@@ -315,6 +337,10 @@ class TestEndToEndMocked:
 
         # 验证 trigger 被调用
         mock_trigger.assert_called_once()
+        assert mock_trigger.call_args.args == ("t",)
+        assert mock_trigger.call_args.kwargs["work_dir"] == tmp_path
+        assert report.success_count == 1
+        assert Path(report.results[0].markdown_path).is_file()
         assert report.stages_result is mock_stages_result
 
 
@@ -425,14 +451,18 @@ class TestCliVideoUrl:
         """>10 URL 立即拒绝。"""
         runner = CliRunner()
         urls = [f"https://www.bilibili.com/video/BV{i:010d}" for i in range(11)]
-        runner.invoke(
-            app,
-            ["run", "t", "--video-url", urls[0], "--video-url", urls[1], "-o", str(tmp_path)],
-        )
-        # 不应进入 process_videos
-        # 实际：typer 允许多次 --video-url 累积为 list；只有 2 个时应正常
-        # 此测试仅验证 2 个 URL 不触发拒绝
-        # 11+ URL 的真正测试在下面
+        args = ["run", "t", "-o", str(tmp_path)]
+        for url in urls:
+            args.extend(["--video-url", url])
+        with patch(
+            "research_tool.application.video_pipeline.process_videos",
+            AsyncMock(side_effect=AssertionError("rejected URLs reached downloader")),
+        ) as process:
+            result = runner.invoke(app, args)
+
+        assert result.exit_code != 0
+        assert "超过上限 10" in result.output
+        process.assert_not_called()
 
     def test_cli_no_video_url_falls_through_to_normal_run(self, tmp_path: Path):
         """无 --video-url → 走原 run 命令（收集搜索）。"""
@@ -481,61 +511,159 @@ class TestUrlWhitelistRejection:
 
 
 # --------------------------------------------------------------------------- #
-# 下游零改动验证：Collect 阶段能消费 video_<id>.md
+# 下游消费：视频 Markdown 经 input_dir 进入唯一九段链
 # --------------------------------------------------------------------------- #
 
 
+def _assert_stage_artifacts_have_valid_digests(topic_dir: Path) -> None:
+    state = json.loads((topic_dir / "runtime-state.json").read_text(encoding="utf-8"))
+    assert state["completed_stages"]
+    for record in state["completed_stages"].values():
+        artifact = topic_dir / record["artifact_path"]
+        assert artifact.is_file()
+        assert hashlib.sha256(artifact.read_bytes()).hexdigest() == record["artifact_digest"]
+        envelope = json.loads(artifact.read_text(encoding="utf-8"))
+        assert envelope["v"] == 1 and envelope["error"] is None
+
+
 class TestDownstreamConsumption:
-    """验证 video_<id>.md 产物能被现有 Collect 阶段直接消费（不改动 Collect 代码）。"""
+    """真实本地文件和 MockLLM 经公开 run() 检查消费及恢复行为。"""
+
+    @pytest.fixture
+    async def local_video(self, tmp_path: Path):
+        from research_tool.application.video_pipeline import build_video_task_func
+
+        quote = "The measured battery retained 90 percent capacity after 1000 cycles."
+        source_url = "https://www.bilibili.com/video/BV1xx"
+        topic = "video consumer"
+        download = make_fake_download_result(tmp_path, video_id="BV1xx", title="Battery video")
+        summary = LLMSummary(
+            video_summary=quote + "\n\n" + "Experimental methods and limitations. " * 8,
+        )
+        task = build_video_task_func(
+            topic=topic, work_dir=tmp_path,
+            downloader=MagicMock(download=AsyncMock(return_value=download)),
+            transcriber_fn=lambda *args: Transcript(full_text=quote),
+            summarizer_fn=lambda *args: summary,
+        )
+        path = await task(source_url)
+        markdown = path.read_text(encoding="utf-8")
+        assert parse_source(markdown)["locator"] == source_url
+        config = PipelineConfig(
+            topic=topic, work_dir=tmp_path, input_dir=str(path.parent), resume=True,
+            cleaner=CleanerConfig(min_content_length=20, relevance_filter=True),
+            organizer=OrganizerConfig(min_nodes=1, max_nodes=3, min_evidence_per_node=1),
+        )
+
+        def reply(prompt, schema):
+            if schema.__name__ == "_ChunkResult":
+                assert quote in prompt
+                return schema(claims=[{"text": quote, "quote": quote, "topic": "Cycle life"}])
+            if schema.__name__ == "_Scores":
+                return schema(scores=[1.0])
+            if schema.__name__ == "ResearchInspection":
+                return schema(findings=[])
+            if schema.__name__ == "ReportOutline":
+                graph = json.loads(prompt.split("DATA:\n", 1)[1])
+                return schema(sections=[{
+                    "heading": "Cycle life",
+                    "claim_ids": [fact["claim_id"] for fact in graph["facts"]],
+                }])
+            if schema.__name__ == "ReportSectionDraft":
+                facts = json.loads(prompt.split("DATA:\n", 1)[1])
+                return schema(paragraphs=[
+                    {"text": fact["text"], "claim_ids": [fact["claim_id"]]}
+                    for fact in facts
+                ])
+            if schema.__name__ == "ReportVerification":
+                data = json.loads(prompt.split("DATA:\n", 1)[1])
+                facts = {fact["claim_id"]: fact for fact in data["facts"]}
+                return schema(checks=[{
+                    "paragraph_index": index,
+                    "supported": paragraph.get("kind") == "heading" and (
+                        paragraph["text"] == "Cycle life"
+                    ) or all(
+                        paragraph["text"] == facts[claim_id]["text"]
+                        for claim_id in paragraph["claim_ids"]
+                    ),
+                    "reason": "Paragraph matches its supplied source quote.",
+                } for index, paragraph in enumerate(data["paragraphs"])])
+            raise AssertionError(f"unexpected schema: {schema.__name__}")
+
+        return config, MockLLMClient(structured_response=reply), path, markdown, quote, source_url
 
     @pytest.mark.asyncio
-    async def test_collector_recognizes_video_markdown(self, tmp_path: Path):
-        """模拟 Collect 阶段的 has_output 检测：raw/*.md 存在 → 视为已完成。"""
-        # 1) 落盘一个 video markdown
-        from research_tool.infrastructure.ingest.pipeline_adapter import write_markdown
+    async def test_collector_consumes_video_markdown_through_nine_stages(self, local_video):
+        """raw/ 文件作为 collect 输入，正文和来源必须到达最终报告。"""
+        from research_tool.application.pipeline import ResearchPipeline
 
-        md = "---\nvideo_id: BV1xx\nvideo_title: test\n---\nbody"
-        topic = "test consumer"
-        video_id = "BV1xx"
-        out_path = write_markdown(md, topic=topic, video_id=video_id, work_dir=tmp_path)
-        assert out_path.exists()
+        config, llm, path, markdown, quote, source_url = local_video
+        topic_dir = config.work_dir / slugify(config.topic)
+        prior_report = topic_dir / "report.md"
+        prior_report.write_text("Prior report remains unchanged.", encoding="utf-8")
+        prior_tree = topic_dir / "tree" / "N1.md"
+        prior_tree.parent.mkdir()
+        prior_tree.write_text("Prior knowledge remains unchanged.", encoding="utf-8")
 
-        # 2) 模拟 Collect 阶段的 has_output 检查（用现有基础设施代码）
-        from research_tool.infrastructure.stages.base import has_output
-        from research_tool.common.slug import slugify
+        result = await ResearchPipeline(config, llm=llm).run()
 
-        topic_slug = slugify(topic)
-        topic_dir = tmp_path / topic_slug
-        raw_dir = topic_dir / "raw"
-        # 现有 collect 阶段的 pattern 是 ["*.md"]
-        has = has_output(raw_dir, ["*.md"])
-        assert has is True, "video_<id>.md 应被 Collect 视为已有产物，触发 resume 跳过"
+        assert result.failed_stage is None
+        assert result.verdict == "STOP_SUCCESS" and result.report_result is not None
+        assert set(result.stages_completed) | set(result.stages_skipped) == set(NINE_STAGES)
+        assert "collect" in result.stages_completed
+        assert "collect" not in result.stages_skipped
+        _assert_stage_artifacts_have_valid_digests(topic_dir)
+        summary = json.loads(result.run_summary_path.read_text(encoding="utf-8"))
+        output_dir = Path("runs") / summary["run_id"] / "final"
+        assert summary["output_dir"] == output_dir.as_posix()
+        report_path = result.report_result.report_path
+        assert report_path == topic_dir / output_dir / "report.md"
+        assert report_path.relative_to(topic_dir).as_posix() in summary["files"]
+        for relative, digest in summary["files"].items():
+            assert Path(relative).is_relative_to(output_dir)
+            assert hashlib.sha256((topic_dir / relative).read_bytes()).hexdigest() == digest
+        report = report_path.read_text(encoding="utf-8")
+        assert quote in report and source_url in report
+        assert prior_report.read_text(encoding="utf-8") == "Prior report remains unchanged."
+        assert prior_tree.read_text(encoding="utf-8") == "Prior knowledge remains unchanged."
+        assert path.parent == config.work_dir / slugify(config.topic) / "raw"
+        assert path.read_text(encoding="utf-8") == markdown
+        assert llm.calls
 
-    def test_collector_skips_when_video_markdown_exists(self, tmp_path: Path):
-        """如果 raw/ 已有 video_<id>.md，run pipeline 时 Collect 自动跳过（resume=True）。"""
-        # 写一个 video markdown
-        from research_tool.infrastructure.ingest.pipeline_adapter import write_markdown
-        from research_tool.common.slug import slugify
+    @pytest.mark.asyncio
+    async def test_resume_skips_verified_video_outputs(self, local_video):
+        """完整运行后恢复，已核验产物保持一致且不再请求模型。"""
+        from research_tool.application.pipeline import ResearchPipeline
 
-        md = "# video\n"
-        topic = "test"
-        out_path = write_markdown(md, topic=topic, video_id="v1", work_dir=tmp_path)
-        assert out_path.exists()
+        config, llm, path, markdown, quote, source_url = local_video
+        first = await ResearchPipeline(config, llm=llm).run()
+        assert first.verdict == "STOP_SUCCESS" and first.report_result is not None
+        first_report = first.report_result.report_path.read_bytes()
+        resumed_llm = MockLLMClient(
+            structured_response=lambda *args: pytest.fail("resume called the model")
+        )
 
-        # 用现有 collect 阶段代码验证
-        from research_tool.infrastructure.stages.base import has_output
-        from research_tool.application.pipeline import _stage_output
+        resumed = await ResearchPipeline(config, llm=resumed_llm).run()
 
-        topic_slug = slugify(topic)
-        topic_dir = tmp_path / topic_slug
-        out_dir, patterns = _stage_output("collect", topic_dir)
-        # 关键断言：Collect 阶段的 has_output 检测通过 → skip
-        assert has_output(out_dir, patterns) is True
-        # 同时确认 clean/extract/organize 阶段也会被触发
-        for stage in ("clean", "extract", "organize", "report"):
-            out_dir, patterns = _stage_output(stage, topic_dir)
-            # 初始状态：除 collect 外都没有输出
-            assert has_output(out_dir, patterns) is False
+        assert resumed.failed_stage is None and resumed.verdict == "STOP_SUCCESS"
+        assert resumed.report_result is not None
+        assert resumed.report_result.report_path == first.report_result.report_path
+        assert resumed.report_result.report_path.read_bytes() == first_report
+        assert resumed_llm.calls == []
+        topic_dir = config.work_dir / slugify(config.topic)
+        _assert_stage_artifacts_have_valid_digests(topic_dir)
+        summary = json.loads(resumed.run_summary_path.read_text(encoding="utf-8"))
+        assert summary["pipeline_complete"] is True
+        output_dir = Path("runs") / summary["run_id"] / "final"
+        assert summary["output_dir"] == output_dir.as_posix()
+        assert resumed.report_result.report_path == topic_dir / output_dir / "report.md"
+        metrics = summary["stage_metrics"]
+        assert metrics
+        assert all(
+            metric["status"] == "skipped" and metric["duration_sec"] == 0
+            for metric in metrics
+        )
+        assert path.read_text(encoding="utf-8") == markdown
 
 
 # --------------------------------------------------------------------------- #

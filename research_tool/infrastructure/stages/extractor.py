@@ -9,14 +9,16 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 from pathlib import Path
 
 from pydantic import BaseModel, Field
 
 from ..llm.base import LLMClient, gather_fail_fast
-from ...domain.errors import LLMAuthenticationError, StageError
+from ...domain.errors import LLMAuthenticationError, LLMError, StageError
 from ...domain.models import Entity, ExtractorConfig, ExtractResult, Relation, Triple
 from .base import ensure_dir, write_json
+from ...nine_loop.evidence import parse_source
 
 _SYSTEM = (
     "你是信息抽取专家。从给定文本中精确抽取知识，只依据文本本身，不臆造。" "所有输出为合法 JSON。"
@@ -46,6 +48,7 @@ class _ChunkResult(BaseModel):
     entities: list[_LEntity] = Field(default_factory=list)
     relations: list[_LRelation] = Field(default_factory=list)
     triples: list[_LTriple] = Field(default_factory=list)
+    claims: list[dict[str, str]] = Field(default_factory=list)
 
 
 def _chunk(text: str, size: int, overlap: int) -> list[str]:
@@ -85,6 +88,10 @@ def _build_prompt(config: ExtractorConfig, chunk: str) -> str:
     if "triple" in config.tasks:
         parts.append("抽取 triples: [{head, relation, tail}]（用于知识图谱）。")
     parts.append("\n未涉及的字段返回空数组。\n\n--- 文本 ---\n")
+    parts.insert(1, (
+        "同时提取有实质内容的事实 claims:[{text,quote,topic}]；quote 必须逐字复制下面正文的"
+        "完整证据句；topic 为简短子主题。禁止用URL或标题代替正文证据。\n"
+    ))
     parts.append(chunk)
     return "".join(parts)
 
@@ -95,6 +102,29 @@ def _line_of(text_lines: list[str], needle: str) -> int:
         if nl in ln.lower():
             return i
     return 0
+
+
+def _verified_claims(path: Path, claims: list[dict[str, str]]) -> list[dict]:
+    """Bind extracted quotations to real body offsets before storing facts."""
+    source = parse_source(path.read_text(encoding="utf-8"))
+    verified = []
+    for proposed in claims:
+        quote = proposed.get("quote", "").strip()
+        start = source["text"].find(quote) if quote else -1
+        if start < 0 or not source["locator"]:
+            raise StageError("extract", "模型引用不在来源正文中，停止抽取")
+        claim_id = hashlib.sha256((source["source_id"] + quote).encode()).hexdigest()
+        verified.append({
+            "claim_id": claim_id,
+            "text": quote,
+            "topic": proposed.get("topic", "").strip() or source["title"] or "证据",
+            "citations": [{
+                "source_id": source["source_id"], "locator": source["locator"],
+                "content_sha256": source["content_sha256"], "text": quote,
+                "start_offset": start, "end_offset": start + len(quote),
+            }],
+        })
+    return verified
 
 
 class Extractor:
@@ -128,24 +158,30 @@ class Extractor:
                     )
                 except LLMAuthenticationError:
                     raise
-                except Exception:  # noqa: BLE001 - 非鉴权单块失败不应整批中断
-                    return source_file, file_lines, _ChunkResult(), True
-                return source_file, file_lines, res, False
+                except LLMError as exc:
+                    return source_file, file_lines, _ChunkResult(), exc
+                except Exception as exc:  # noqa: BLE001 - aggregate chunk failures
+                    return source_file, file_lines, _ChunkResult(), exc
+                return source_file, file_lines, res, None
 
         results = await gather_fail_fast(_do(job) for job in jobs)
-        failed_chunks = sum(1 for *_rest, failed in results if failed)
+        failures = [error for *_rest, error in results if error is not None]
+        failed_chunks = len(failures)
         if self.config.fail_on_chunk_error and failed_chunks:
-            raise StageError(
+            error = StageError(
                 "extract",
                 f"LLM 块抽取失败 {failed_chunks}/{len(results)}；未写入完成产物，可安全续跑",
             )
+            raise error from failures[0]
 
         entities: list[Entity] = []
+        claims: list[dict] = []
         relations: list[Relation] = []
         triples: list[Triple] = []
         e_seen, r_seen, t_seen = set(), set(), set()
 
         for source_file, file_lines, res, _failed in results:
+            claims.extend(_verified_claims(input_dir / source_file, res.claims))
             for e in res.entities:
                 key = (e.name.lower(), e.type.lower())
                 if key in e_seen:
@@ -197,6 +233,8 @@ class Extractor:
             }
 
         write_json(out_dir / "entities.json", [e.model_dump() for e in entities])
+        claims = list({claim["claim_id"]: claim for claim in claims}.values())
+        write_json(out_dir / "claims.json", claims)
         write_json(out_dir / "relations.json", [r.model_dump() for r in relations])
         write_json(out_dir / "triples.json", [t.model_dump() for t in triples])
         if schema is not None:
@@ -206,6 +244,7 @@ class Extractor:
             entities=entities,
             relations=relations,
             triples=triples,
+            claims=claims,
             schema=schema,
             output_dir=out_dir,
         )

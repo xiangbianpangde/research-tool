@@ -17,10 +17,16 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from ...nine_loop.runtime_state import RuntimeState, RuntimeStateError
+
 
 MAX_FILES = 5_000
 MAX_FILE_BYTES = 8_000_000
 MAX_PACKAGE_BYTES = 100_000_000
+NINE_STAGES = (
+    "collect", "clean", "extract", "knowledge", "inspect",
+    "targeted", "merge", "qgate", "report",
+)
 SOURCE_RE = re.compile(r"^<!--\s*source:\s*(https?://[^\s]+)\s*-->$", re.MULTILINE)
 FETCHED_RE = re.compile(r"^<!--\s*fetched:\s*([^\s]+)\s*-->$", re.MULTILINE)
 SECRET_PATTERNS: tuple[tuple[str, re.Pattern[bytes]], ...] = (
@@ -67,6 +73,126 @@ def _safe_source(source: Path) -> Path:
     return lexical.resolve(strict=True)
 
 
+def _validate_stage_records(
+    summary: dict[str, Any], state: dict[str, Any]
+) -> tuple[set[str], set[str]]:
+    completed = summary.get("stages_completed")
+    skipped = summary.get("stages_skipped")
+    if not isinstance(completed, list) or not isinstance(skipped, list):
+        raise PackageStageError("run summary stage records must be arrays")
+    if any(not isinstance(stage, str) for stage in [*completed, *skipped]):
+        raise PackageStageError("run summary contains an invalid stage record")
+    completed_set, skipped_set = set(completed), set(skipped)
+    if (len(completed_set) != len(completed) or len(skipped_set) != len(skipped)
+            or completed_set & skipped_set
+            or not (completed_set | skipped_set).issubset(NINE_STAGES)):
+        raise PackageStageError("run summary stage records are inconsistent")
+    runtime_stages = {key.split(":", 1)[0] for key in state["completed_stages"]}
+    if not completed_set.issubset(runtime_stages):
+        raise PackageStageError("run summary claims stages absent from runtime state")
+    if skipped_set - {"targeted", "merge"} or skipped_set & runtime_stages:
+        raise PackageStageError("run summary contains an invalid skipped stage")
+    return completed_set, skipped_set
+
+
+def _validate_final_files(
+    root: Path, run_id: str, files: dict[str, str]
+) -> Path:
+    expected_output = f"runs/{run_id}/final"
+    output = root / expected_output
+    if not output.is_dir() or output.is_symlink():
+        raise PackageStageError("current run final output directory is missing")
+    required = {"report.md", "sources.json", "tree/00-主表.md", "tree/knowledge.json"}
+    relative_files = {
+        name[len(expected_output) + 1:]
+        for name in files if name.startswith(expected_output + "/")
+    }
+    if not required.issubset(relative_files):
+        raise PackageStageError("run summary omits required final artifacts")
+    actual_files: set[str] = set()
+    for candidate in output.rglob("*"):
+        if candidate.is_symlink():
+            raise PackageStageError("symlinks are forbidden in current final output")
+        if candidate.is_file():
+            actual_files.add(candidate.relative_to(root).as_posix())
+    if actual_files != set(files):
+        raise PackageStageError("run summary file list does not match current final output")
+    for relative, digest in files.items():
+        candidate = root / relative
+        if not relative.startswith(expected_output + "/") or not candidate.is_file():
+            raise PackageStageError(f"invalid or missing final artifact: {relative}")
+        if not candidate.resolve().is_relative_to(output.resolve()):
+            raise PackageStageError(f"final artifact escapes output directory: {relative}")
+        if _digest(candidate.read_bytes()) != digest:
+            raise PackageStageError(f"final artifact digest mismatch: {relative}")
+    return output
+
+
+def validate_current_run(source: Path) -> tuple[dict[str, Any], dict[str, Any], Path | None]:
+    """Validate topic summary, runtime state and successful final file hashes."""
+    root = _safe_source(source)
+    if root.name == "final" and root.parent.parent.name == "runs":
+        root = _safe_source(root.parent.parent.parent)
+    try:
+        summary = json.loads((root / "run-summary.json").read_text(encoding="utf-8"))
+        state = RuntimeState(root).read_current()
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError, RuntimeStateError) as exc:
+        raise PackageStageError(f"current nine-stage run is invalid: {exc}") from exc
+    if not isinstance(summary, dict):
+        raise PackageStageError("run summary must be a JSON object")
+    run_id = summary.get("run_id")
+    if not isinstance(run_id, str) or not re.fullmatch(r"[0-9a-f]{32}", run_id):
+        raise PackageStageError("run summary has an invalid run_id")
+    if run_id != state["run_id"]:
+        raise PackageStageError("run summary run_id does not match runtime state")
+    if summary.get("version") != 1 or summary.get("output_contract") != "nine-stage":
+        raise PackageStageError("run summary is not a supported nine-stage result")
+    if summary.get("stages") != list(NINE_STAGES):
+        raise PackageStageError("run summary has an invalid stage contract")
+    completed_set, skipped_set = _validate_stage_records(summary, state)
+    output_dir = summary.get("output_dir")
+    files = summary.get("files")
+    if not isinstance(files, dict) or any(
+        not isinstance(name, str) or not isinstance(digest, str)
+        or not re.fullmatch(r"[0-9a-f]{64}", digest)
+        for name, digest in files.items()
+    ):
+        raise PackageStageError("run summary file hashes are invalid")
+    successful = (
+        summary.get("pipeline_complete") is True or summary.get("verdict") == "STOP_SUCCESS"
+    )
+    if not successful:
+        if summary.get("pipeline_complete") is not False or output_dir is not None or files:
+            raise PackageStageError("incomplete run summary contains success output claims")
+        return summary, state, None
+
+    expected_output = f"runs/{run_id}/final"
+    if (summary.get("pipeline_complete") is not True
+            or summary.get("verdict") != "STOP_SUCCESS"
+            or output_dir != expected_output
+            or completed_set | skipped_set != set(NINE_STAGES)
+            or "report" not in completed_set):
+        raise PackageStageError("run summary does not describe a complete successful run")
+    output = _validate_final_files(root, run_id, files)
+    return summary, state, output
+
+
+def resolve_current_output(source: Path) -> Path:
+    """Resolve a topic to its verified current final output, preserving legacy inputs."""
+    root = _safe_source(source)
+    summary_root = root
+    if root.name == "final" and root.parent.parent.name == "runs":
+        summary_root = _safe_source(root.parent.parent.parent)
+    if not (summary_root / "run-summary.json").exists():
+        return root
+    _summary, _state, output = validate_current_run(summary_root)
+    if output is None:
+        raise PackageStageError("current nine-stage run has no successful final output")
+    if root.name == "final" and root.resolve() != output.resolve():
+        raise PackageStageError("requested final directory is not the current run output")
+    return output
+
+
 def _files(source: Path) -> list[tuple[Path, bytes, os.stat_result]]:
     found: list[tuple[Path, bytes, os.stat_result]] = []
     total = 0
@@ -107,6 +233,37 @@ def _files(source: Path) -> list[tuple[Path, bytes, os.stat_result]]:
 def _source_records(files: list[tuple[Path, bytes, os.stat_result]]) -> list[dict[str, str]]:
     records: list[dict[str, str]] = []
     for relative, data, _ in files:
+        if relative.as_posix() == "sources.json":
+            try:
+                sources = json.loads(data.decode("utf-8"))
+            except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+                raise PackageStageError("final sources.json is invalid") from exc
+            if not isinstance(sources, list):
+                raise PackageStageError("final sources.json must contain an array")
+            for source in sources:
+                if not isinstance(source, dict):
+                    raise PackageStageError("final source record must be an object")
+                source_id = source.get("source_id")
+                locator = source.get("locator")
+                body = source.get("text")
+                content_hash = source.get("content_sha256")
+                source_path = source.get("path", "")
+                if (not isinstance(source_id, str) or not source_id
+                        or not isinstance(locator, str) or not locator
+                        or not isinstance(body, str) or not isinstance(content_hash, str)
+                        or not isinstance(source_path, str)
+                        or _digest(body.encode("utf-8")) != content_hash):
+                    raise PackageStageError("final source evidence is incomplete or has a bad hash")
+                records.append({
+                    "sourceId": source_id,
+                    "url": locator,
+                    "fetchedAt": "unknown",
+                    "sha256": content_hash,
+                    "archiveRef": f"research-archive://sha256/{content_hash}",
+                    "artifactPath": relative.as_posix(),
+                    "sourcePath": source_path,
+                })
+            continue
         if relative.suffix.lower() != ".md":
             continue
         text = data.decode("utf-8", errors="replace")
@@ -125,8 +282,21 @@ def _source_records(files: list[tuple[Path, bytes, os.stat_result]]) -> list[dic
             "sha256": content_hash,
             "archiveRef": f"research-archive://sha256/{content_hash}",
             "artifactPath": relative.as_posix(),
+            "sourcePath": relative.as_posix(),
         })
     return sorted(records, key=lambda item: (item["sourceId"], item["artifactPath"]))
+
+
+def _source_body_archives(
+    files: list[tuple[Path, bytes, os.stat_result]],
+) -> dict[str, bytes]:
+    bodies = {}
+    for relative, data, _ in files:
+        if relative.as_posix() == "sources.json":
+            for source in json.loads(data.decode("utf-8")):
+                body = source["text"].encode("utf-8")
+                bodies[_digest(body)] = body
+    return bodies
 
 
 def _intake_documents(
@@ -154,6 +324,7 @@ def _intake_documents(
             f"  - fetched_at: {item['fetchedAt']}",
             f"  - sha256: `{item['sha256']}`",
             f"  - archive_ref: `{item['archiveRef']}`",
+            f"  - source_path: {item['sourcePath']}",
         ])
     source_manifest = ("\n".join(lines) + "\n").encode()
     report_doc = (
@@ -185,7 +356,11 @@ def _manifest(
     core: dict[str, Any] = {
         "schemaVersion": 1,
         "producer": "research-tool/wiki-stage-p1",
-        "sourceSlug": source.name,
+        "sourceSlug": (
+            source.parent.parent.parent.name
+            if source.name == "final" and source.parent.parent.name == "runs"
+            else source.name
+        ),
         "verification": "unverified",
         "target": "isolated_research_draft",
         "promotion": "forbidden",
@@ -208,6 +383,12 @@ def _manifest(
             "evidence": sorted(item["artifactPath"] for item in sources),
         },
     }
+    bodies = _source_body_archives(files)
+    if bodies:
+        core["sourceBodyArchives"] = [
+            {"sha256": digest, "bytes": len(body), "archivePath": f"archive/{digest}.blob"}
+            for digest, body in sorted(bodies.items())
+        ]
     intake_documents = _intake_documents(core, files)
     core["intakeDocuments"] = [
         {"path": name, "sha256": _digest(data), "bytes": len(data)}
@@ -221,7 +402,7 @@ def _manifest(
 def plan_stage_package(source: Path, destination: Path) -> dict[str, Any]:
     """Return a deterministic plan without creating the destination."""
     del destination  # the dry-run must not inspect or create a mutable target
-    manifest, files, _ = _manifest(_safe_source(source))
+    manifest, files, _ = _manifest(resolve_current_output(source))
     return {
         "packageId": manifest["packageId"],
         "packageHash": manifest["packageHash"],
@@ -249,7 +430,7 @@ def _verify_existing(package_path: Path, manifest: dict[str, Any]) -> None:
     if _digest(_canonical(core)) != existing["packageHash"]:
         raise PackageStageError("existing package integrity check failed")
     expected_archives = set()
-    for artifact in existing["artifacts"]:
+    for artifact in [*existing["artifacts"], *existing.get("sourceBodyArchives", [])]:
         relative = Path(artifact["archivePath"])
         expected_archives.add(relative.name)
         target = package_path / relative
@@ -282,7 +463,7 @@ def _verify_existing(package_path: Path, manifest: dict[str, Any]) -> None:
 
 def build_stage_package(source: Path, destination: Path) -> StagePackage:
     """Atomically snapshot source artifacts under a content-addressed directory."""
-    source = _safe_source(source)
+    source = resolve_current_output(source)
     manifest, files, intake_documents = _manifest(source)
     destination = Path(os.path.abspath(destination.expanduser()))
     package_path = destination / manifest["packageId"]
@@ -297,7 +478,9 @@ def build_stage_package(source: Path, destination: Path) -> StagePackage:
     try:
         artifact_root = temporary / "archive"
         artifact_root.mkdir(parents=True, exist_ok=True, mode=0o700)
-        for _relative, data, _ in files:
+        archive_payloads = {_digest(data): data for _relative, data, _ in files}
+        archive_payloads.update(_source_body_archives(files))
+        for data in archive_payloads.values():
             target = artifact_root / f"{_digest(data)}.blob"
             if not target.exists():
                 target.write_bytes(data)

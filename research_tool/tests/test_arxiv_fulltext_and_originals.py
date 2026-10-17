@@ -10,6 +10,7 @@
 from __future__ import annotations
 
 import json
+import socket
 
 import pytest
 
@@ -68,6 +69,13 @@ def _reset(monkeypatch):
     _ScriptedClient.script = []
     _ScriptedClient.init_kwargs = []
     monkeypatch.setattr(fetcher_mod.httpx, "AsyncClient", _ScriptedClient)
+
+    def resolve_arxiv(host, port, *args, **kwargs):
+        assert host in {"arxiv.org", "www.arxiv.org"}
+        return [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("93.184.216.34", port or 0))]
+
+    # Replace only external DNS; Fetcher's production SSRF guard still runs.
+    monkeypatch.setattr(socket, "getaddrinfo", resolve_arxiv)
 
 
 def test_arxiv_url_parsing():
@@ -161,4 +169,24 @@ async def test_save_originals_disabled_writes_nothing(tmp_path):
     )
     r = await f.fetch("https://arxiv.org/abs/2607.02703")
     assert r.ok and len(r.markdown) > 3000
+    assert not (tmp_path / "_originals").exists()
+
+
+@pytest.mark.asyncio
+async def test_arxiv_private_dns_is_blocked_before_http(tmp_path, monkeypatch):
+    monkeypatch.setattr(
+        socket,
+        "getaddrinfo",
+        lambda *args, **kwargs: [
+            (socket.AF_INET, socket.SOCK_STREAM, 6, "", ("127.0.0.1", 443))
+        ],
+    )
+    _ScriptedClient.script = [_Response(200, text=_ARXIV_HTML)]
+    fetcher = Fetcher(prefer_crawl4ai=False, originals_dir=tmp_path / "_originals")
+
+    result = await fetcher.fetch("https://arxiv.org/abs/2607.02703")
+
+    assert not result.ok
+    assert "SSRF guard" in result.error and "blocked address" in result.error
+    assert len(_ScriptedClient.script) == 1
     assert not (tmp_path / "_originals").exists()

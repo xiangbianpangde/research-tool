@@ -83,10 +83,8 @@ def eval_task(task: dict, report: dict, threshold: float) -> dict:
     augment = report.get("augment") or {}
     if augment.get("status") == "augmented" and augment.get("model_claims"):
         sys_claims = [c["claim"] for c in augment["model_claims"]]
-        sys_sources = [c.get("source_ids", []) for c in augment["model_claims"]]
     else:
         sys_claims = [c["text"] for c in claims_block]
-        sys_sources = [c.get("citations", []) for c in claims_block]
     gold_claims = task["weighted_gold_claims"]
     matched = greedy_match(sys_claims, gold_claims, threshold)
 
@@ -156,8 +154,8 @@ def main(argv: list[str] | None = None) -> int:
     gold_path = REPO / "dataset/v1/tasks/pilot-gold.jsonl" \
         if nonlocal_gold else DEV
     reports_root = REPO / nonlocal_reports if nonlocal_reports else RUNS
-    dev = {json.loads(l)["case_id"]: json.loads(l)
-           for l in gold_path.read_text(encoding="utf-8").splitlines()}
+    dev = {json.loads(line)["case_id"]: json.loads(line)
+           for line in gold_path.read_text(encoding="utf-8").splitlines()}
     per_task = []
     for case_id in sorted(dev):
         art = reports_root / case_id / "artifacts/report.json"
@@ -193,7 +191,7 @@ def main(argv: list[str] | None = None) -> int:
     }
     OUT.write_text(json.dumps(summary, sort_keys=True, ensure_ascii=False,
                               indent=2) + "\n", encoding="utf-8")
-    print(f"evaluated {n}/{len(dev)} tasks | "
+    print(f"evaluated {n}/{len(dev)} tasks | "  # noqa: T201 - command-line evaluator output
           f"P={agg['mean_precision']} R={agg['mean_recall']} "
           f"F1={agg['mean_f1']} cit={agg['mean_citation_coverage']}")
     return 0

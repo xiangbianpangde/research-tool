@@ -12,14 +12,14 @@ def test_public_sdk_imports() -> None:
     from research_tool import (
         MockLLMClient,
         ResearchPipeline,
+        create_pipeline,
         load_config,
-        quick_collect,
         research,
     )
 
     assert hasattr(research_tool, "__version__")
     assert callable(research)
-    assert callable(quick_collect)
+    assert callable(create_pipeline)
     assert callable(ResearchPipeline)
     assert callable(MockLLMClient)
     assert callable(load_config)

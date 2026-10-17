@@ -1,6 +1,6 @@
 # 九段唯一主链裁剪计划
 
-状态：历史基线已提交、裁剪审计已完成；九段迁移和代码删除均未实施。
+状态（2026-10-17）：唯一九段、证据引用、补搜闭环和版本化成果消费已实现。全量957项通过，Ruff与CLI/浏览器验收通过；核心独立审查问题已修复，提交收尾中。最终状态与证据以 STATUS.md 为入口。
 
 基线：分支 codex/nine-stage-only，提交 4ab1412a40b0c15824a23a63175538ffc267b4dc。该提交从 94a5c09f 恢复 52.77 跑批基底，并重放了历史会话中记录的四个源码补丁。主工作区 /Users/xbpd/Projects/research-tool 保持未修改。
 
@@ -12,11 +12,11 @@ collect → clean → extract → knowledge → inspect → targeted → merge �
 
 上面列出九种规范阶段，不要求在没有缺口时无条件补搜。控制流先由 inspect 交给 qgate；CONTINUE 才触发 targeted → merge，再回到 inspect/qgate；STOP_SUCCESS 才允许发布正式 report。targeted 取得的新资料仍须经过清洗和抽取。预算耗尽、取消或错误保留失败/未完成记录，不伪装成质量通过的报告。
 
-## 本轮范围
+## 最初审计阶段的范围（实现已获用户后续授权）
 
-本轮交付为建立可恢复的开发分支、核对基线、完成裁剪审计并记录下一步。不在本轮执行大规模删除或将分支升为主分支。后续实现全部在本分支推进；完成验收后按用户授权将其作为主分支。主分支当前名为 master。
+最初先建立分支并只读审计；用户随后要求“现在开始”“继续”，已授权实施。开发全部在本分支推进，完成验收后按用户授权作为主分支；原 master 与未提交内容须完整保留。
 
-## 当前事实
+## 恢复基线的审计事实（历史，不是当前实现）
 
 - ResearchPipeline 当前仍按 config.stages 执行旧的 collect → deepen → clean → extract → organize → report；nine_loop 只解析 flag，没有驱动分派。
 - nine_loop/e2e.py 当前只有 collect → network → inspect → gate → report 五段，并且 collect 是离线 seed + identity 适配，不是搜索采集。
@@ -76,9 +76,9 @@ collect → clean → extract → knowledge → inspect → targeted → merge �
 9. 运行受影响测试、Ruff、完整离线测试及可复现的 CLI 操作，清楚区分外部 mock、真实本地执行和真实联网。必要的真实付费调研/DRB 另用明确批次执行，不把离线结果作为成绩复现。
 10. 验收完成后提升为主分支：先保留旧 master 和未提交工作，再使主分支最终文件树与验收分支一致。不能简单合并 master 的后续提交而重新引入已裁掉的代码，也不在当前有未提交改动的目录切换或 reset。
 
-## 当前不做的事
+## 审计阶段排除项（后续实施以用户授权为准）
 
-- 不删除旧代码。
+- 初次审计未删除代码；用户后续授权实施后已裁掉无调用的旧执行路径。
 - 不运行真实联网调研、DRB、付费 LLM 或修改生产配置。
 - 不把历史 52.77 作为新九段链的行为证明。
 - 不把旧 Organizer/Deepen 的同名能力直接判为冗余。
@@ -101,3 +101,12 @@ collect → clean → extract → knowledge → inspect → targeted → merge �
     /Users/xbpd/.local/bin/ruff check --no-cache research_tool/ pyproject.toml
 
 原始报告：/private/tmp/research-tool-nine-stage-baseline-4ab1412.xml；/private/tmp/research-tool-nine-stage-baseline-4ab1412-ruff.json。本次不新增测试或 UI 单元测试，报告中记录的验收场景供下一步行为实现使用。
+
+
+## 实施结果（2026-10-17）
+
+唯一 ResearchPipeline 已取代旧分派；CONTINUE 实际补搜、清洗、抽取、合并并重检。来源正文与引用跨度校验、报告段落支持检查、原子持久状态和CAS已接通。Deepen策略在collect内部保留。旧flags/shadow、五节点fixture运行器与重复模型适配代码已删除；离线质量评测工具仍独立保留。
+
+成果位于 runs/<run_id>/final/，旧根目录报告和树不移动或覆盖。CLI、status、WebUI与Wiki打包验证当前运行身份、阶段记录和完整文件哈希。测试保留有效失败行为并迁移旧入口契约。验收方法及证据从 [STATUS.md](../../STATUS.md) 进入。
+
+独立审查收尾：模型缺口在后续轮次中默认保留，关闭必须引用本轮新增fact并说明理由；报告章节标题参与支持核验；depth=1及snippet/discovery记录不能作为正式正文；超时记录停止阶段。Wiki导出增加正文内容寻址blob并验证幂等重试中的内容完整性。新增针对性失败回归先复现后修复，最终957通过/3跳过。

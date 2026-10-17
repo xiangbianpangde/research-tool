@@ -654,10 +654,13 @@ class Collector:
             fname = f"{idx:02d}-{safe_filename(domain)}-{_url_hash(hit.url)}.md"
             fpath = raw_dir / fname
             via = f'{hit.source_engine}_search("{topic}")'
+            evidence_kind = ("discovery" if _is_video_url(hit.url) else
+                             "snippet" if self.config.depth == 1 else "body")
             header = (
                 f"<!-- source: {hit.url} -->\n"
                 f"<!-- title: {hit.title} -->\n"
                 f"<!-- fetched: {_now_iso()} -->\n"
+                f"<!-- evidence_kind: {evidence_kind} -->\n"
                 f"<!-- via: {via} -->\n\n"
             )
             write_text(fpath, header + fr.markdown)

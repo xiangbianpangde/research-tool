@@ -8,13 +8,12 @@ from types import SimpleNamespace
 import pytest
 
 from research_tool.domain.errors import LLMAuthenticationError
-from research_tool.domain.models import DeepenConfig
+from research_tool.domain.models import CollectionStrategyConfig
 from research_tool.infrastructure.search.base import SearchResult
-from research_tool.infrastructure.stages.deepen import (
-    DeepenStage,
+from research_tool.infrastructure.stages.research_strategies import (
+    ResearchStrategies,
     _Profile,
     _TimelineNode,
-    deepen,
 )
 
 
@@ -48,8 +47,8 @@ class StubCollector:
         return SimpleNamespace(files=list(self.files), warnings=list(self.fetch_warnings))
 
 
-def make_stage(config: DeepenConfig | None = None, llm=None, collector=None) -> DeepenStage:
-    return DeepenStage(config or DeepenConfig(), collector or StubCollector(), llm or ScriptLLM())
+def make_stage(config: CollectionStrategyConfig | None = None, llm=None, collector=None) -> ResearchStrategies:
+    return ResearchStrategies(config or CollectionStrategyConfig(), collector or StubCollector(), llm or ScriptLLM())
 
 
 def seed_raw(raw: Path, name: str = "01.md", body: str = "useful body") -> Path:
@@ -65,7 +64,7 @@ async def test_run_profile_iteration_timeline_disambiguation_and_confidence_stop
     seed_raw(raw)
     collector = StubCollector()
     stage = make_stage(
-        DeepenConfig(
+        CollectionStrategyConfig(
             entity_split=False,
             breadth=2,
             profile_iterations=3,
@@ -97,7 +96,7 @@ async def test_run_profile_iteration_timeline_disambiguation_and_confidence_stop
     monkeypatch.setattr(stage, "_timeline_search", fake_timeline)
     monkeypatch.setattr(stage, "_disambiguate", fake_disambiguate)
 
-    result = await stage.run("Ada", raw)
+    result = await stage.collect_more("Ada", raw)
 
     assert timeline_file in result.new_files
     assert "timeline warning" in result.warnings
@@ -114,7 +113,7 @@ async def test_run_stops_profile_iteration_when_profile_missing_and_gap_missing(
     raw = tmp_path / "raw"
     raw.mkdir()
     stage = make_stage(
-        DeepenConfig(
+        CollectionStrategyConfig(
             entity_split=False,
             profile_iterations=2,
             depth=2,
@@ -123,10 +122,10 @@ async def test_run_stops_profile_iteration_when_profile_missing_and_gap_missing(
         )
     )
 
-    result = await stage.run("topic", raw)
+    result = await stage.collect_more("topic", raw)
 
     assert result.entities == []
-    assert (raw / ".deepen_done").exists()
+    assert not (raw / ".deepen_done").exists()
 
 
 @pytest.mark.asyncio
@@ -134,7 +133,7 @@ async def test_run_profile_iteration_stops_when_too_few_new_files(tmp_path, monk
     raw = tmp_path / "raw"
     seed_raw(raw)
     stage = make_stage(
-        DeepenConfig(
+        CollectionStrategyConfig(
             entity_split=False,
             profile_iterations=2,
             timeline_backtrack=False,
@@ -150,20 +149,20 @@ async def test_run_profile_iteration_stops_when_too_few_new_files(tmp_path, monk
         return profile
 
     monkeypatch.setattr(stage, "_extract_profile", fake_profile)
-    result = await stage.run("Ada", raw)
+    result = await stage.collect_more("Ada", raw)
     assert result.queries
 
 
 @pytest.mark.asyncio
 async def test_split_entities_normalizes_deduplicates_and_falls_back():
     llm = ScriptLLM(lambda p, s: s(entities=[" A ", "", "A", "B", "C"]))
-    stage = make_stage(DeepenConfig(max_entities=2), llm=llm)
+    stage = make_stage(CollectionStrategyConfig(max_entities=2), llm=llm)
     assert await stage._split_entities("topic") == ["A", "B"]
 
     empty = make_stage(llm=ScriptLLM(lambda p, s: s(entities=[])))
     assert await empty._split_entities("topic") == ["topic"]
 
-    disabled = make_stage(DeepenConfig(entity_split=False))
+    disabled = make_stage(CollectionStrategyConfig(entity_split=False))
     assert await disabled._split_entities("topic") == ["topic"]
 
 
@@ -224,7 +223,7 @@ async def test_timeline_search_early_returns_skips_blank_and_propagates_warnings
     collector = StubCollector()
     added = raw / "added.md"
     collector.files = [added]
-    stage = make_stage(DeepenConfig(breadth=2), collector=collector)
+    stage = make_stage(CollectionStrategyConfig(breadth=2), collector=collector)
 
     assert await stage._timeline_search(_Profile(), "topic", raw) == ([], [])
     assert await stage._timeline_search(_Profile(name="Ada"), "topic", raw) == ([], [])
@@ -246,40 +245,92 @@ async def test_timeline_search_early_returns_skips_blank_and_propagates_warnings
 
 
 @pytest.mark.asyncio
-async def test_disambiguate_guard_errors_and_replaces_existing_target(tmp_path):
+async def test_disambiguate_guard_errors_and_preserves_target_collision(tmp_path):
     raw = tmp_path / "raw"
     raw.mkdir()
     stage = make_stage()
-    assert await stage._disambiguate(raw, _Profile(confidence=0.69), "t") == 0
-    assert await stage._disambiguate(raw, _Profile(confidence=0.9), "t") == 0
+    assert await stage._disambiguate(raw, _Profile(confidence=0.69), "t", []) == 0
+    assert await stage._disambiguate(raw, _Profile(confidence=0.9), "t", []) == 0
     assert await stage._disambiguate(
-        raw, _Profile(name="Ada", fields=["AI"], confidence=0.9), "t"
+        raw, _Profile(name="Ada", fields=["AI"], confidence=0.9), "t", []
     ) == 0
 
-    source = seed_raw(raw, "01.md")
+    seed = seed_raw(raw, "01.md", "seed material")
+    source = seed_raw(raw, "02-new.md", "new material")
     stage.llm = ScriptLLM(lambda p, s: RuntimeError("boom"))
     assert await stage._disambiguate(
-        raw, _Profile(name="Ada", institutions=["Lab"], confidence=0.9), "t"
+        raw, _Profile(name="Ada", institutions=["Lab"], confidence=0.9), "t", [seed, source]
     ) == 0
+    assert seed.exists()
     assert source.exists()
 
     stage.llm = ScriptLLM(lambda p, s: LLMAuthenticationError("401"))
     with pytest.raises(LLMAuthenticationError):
         await stage._disambiguate(
-            raw, _Profile(name="Ada", fields=["AI"], confidence=0.9), "t"
+            raw, _Profile(name="Ada", fields=["AI"], confidence=0.9), "t", [source]
         )
 
     bucket = raw / "_disambig"
     bucket.mkdir()
-    target = bucket / source.name
+    target = bucket / "02-new.md"
     target.write_text("old", encoding="utf-8")
     stage.llm = ScriptLLM(lambda p, s: s(owns=[False]))
     moved = await stage._disambiguate(
-        raw, _Profile(name="Ada", fields=["AI"], confidence=0.9), "t"
+        raw, _Profile(name="Ada", fields=["AI"], confidence=0.9), "t", [source]
     )
+    assert moved == 0  # collision is preserved; existing content is not overwritten
+    assert seed.exists()
+    assert source.exists()
+    assert target.read_text(encoding="utf-8") == "old"
+
+
+@pytest.mark.asyncio
+async def test_disambiguate_moves_only_current_run_files(tmp_path):
+    raw = tmp_path / "raw"
+    raw.mkdir()
+    seed = seed_raw(raw, "01-seed.md", "seed material")
+    fresh = seed_raw(raw, "02-fresh.md", "fresh material")
+    stage = make_stage(llm=ScriptLLM(lambda p, s: s(owns=[False])))
+
+    moved = await stage._disambiguate(
+        raw,
+        _Profile(name="Ada", fields=["AI"], confidence=0.9),
+        "t",
+        [fresh],
+    )
+
     assert moved == 1
-    assert not source.exists()
-    assert target.read_text(encoding="utf-8").startswith("<!-- title: Seed -->")
+    assert seed.exists()
+    assert not fresh.exists()
+    assert (raw / "_disambig" / fresh.name).read_text(encoding="utf-8").endswith(
+        "fresh material"
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("owns", [[False], [False, True, False]])
+async def test_disambiguate_rejects_partial_or_extra_ownership_results(tmp_path, owns):
+    raw = tmp_path / "raw"
+    raw.mkdir()
+    seed = seed_raw(raw, "01-seed.md", "seed material")
+    fresh = seed_raw(raw, "02-fresh.md", "fresh material")
+    fresh_two = seed_raw(raw, "03-fresh.md", "more fresh material")
+    stage = make_stage()
+    stage.llm = ScriptLLM(lambda p, s: s(owns=owns))
+
+    moved = await stage._disambiguate(
+        raw,
+        _Profile(name="Ada", fields=["AI"], confidence=0.9),
+        "t",
+        [fresh, fresh_two],
+    )
+
+    assert moved == 0
+    assert seed.exists()
+    assert fresh.exists()
+    assert fresh_two.exists()
+    assert not (raw / "_disambig" / fresh.name).exists()
+    assert not (raw / "_disambig" / fresh_two.name).exists()
 
 
 def test_profile_queries_cover_anchor_and_alias_only_paths():
@@ -334,20 +385,19 @@ def test_read_digest_skips_oserror_uses_filename_and_stops_at_total_limit(tmp_pa
         return text.replace("<!-- title: Seed -->\n", "")
 
     monkeypatch.setattr(Path, "read_text", fake_read)
-    stage = make_stage(DeepenConfig(per_file_chars=20, max_input_chars=35))
+    stage = make_stage(CollectionStrategyConfig(per_file_chars=20, max_input_chars=35))
     digest = stage._read_digest(raw)
     assert "02-plain" in digest
     assert "03-overflow" not in digest
 
 
 @pytest.mark.asyncio
-async def test_module_level_deepen_delegates_and_collects_warnings(tmp_path):
+async def test_collect_more_returns_queries_and_collector_warnings(tmp_path):
     raw = tmp_path / "raw"
     raw.mkdir()
     collector = StubCollector()
-    result = await deepen(
-        "topic",
-        DeepenConfig(
+    result = await ResearchStrategies(
+        CollectionStrategyConfig(
             entity_split=False,
             profile_extract=False,
             gap_detection=False,
@@ -355,8 +405,6 @@ async def test_module_level_deepen_delegates_and_collects_warnings(tmp_path):
         ),
         collector,
         ScriptLLM(lambda p, s: s(queries=["q"])),
-        raw,
-        core_keyword="focus",
-    )
+    ).collect_more("topic", raw, core_keyword="focus")
     assert result.queries == ["q"]
     assert result.warnings == ["search warning", "fetch warning"]

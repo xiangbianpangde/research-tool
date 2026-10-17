@@ -1,120 +1,40 @@
 # research-tool — AI 项目上下文
 
-## 当前分支入口（2026-10-16）
+先核对 Git 根目录、分支和未提交状态，再读 [STATUS.md](STATUS.md)。事实以源码、runtime 与验收产物为准。来源与裁剪边界见 [裁剪记录](docs/plan/NINE-STAGE-ONLY-TRIM-PLAN.md)，使用说明见 [README.md](README.md)。
 
-当前开发在 codex/nine-stage-only 独立工作区进行。先读 [STATUS.md](STATUS.md) 和其中指向的 [九段唯一主链裁剪计划](docs/plan/NINE-STAGE-ONLY-TRIM-PLAN.md)，核验当前 HEAD 后继续；该计划记录已恢复基线、审计证据、未验证内容和唯一下一步。下方架构及测试数字是恢复版的历史说明，不是新九段验收结论。
+## 开发约定
 
-用户要求后续以本分支开发，验收完成后作为主分支；当前不要把旧 master 的后续代码合回，也不要修改原工作区的未提交内容。子 Agent 必须显式使用 CPA/gpt-6-luna，不能使用其他模型。
+- 基线 `4ab1412`；开发分支 codex/nine-stage-only，独立工作区 /Users/xbpd/.codex/worktrees/nine-stage-only/research-tool。用户授权验收后提升为主分支，当前状态见 STATUS。
+- 原目录 /Users/xbpd/Projects/research-tool 的旧分支及未提交工作必须保留；不得 reset、clean、stash、覆盖或将其后续实现整体合回。
+- 用户取消了子 Agent 指定模型限制。默认单 Agent，独立任务才委派，明确所有权并复核。
+- 本次代码迁移可编辑必要源码；执行正式调研时不得为运行方便改源码/生产配置，用 CLI、临时配置与环境变量。
 
-> **⚠️ 仅供 AI Agent 读取**，新会话自动加载。人类请读 `README.md`。
+## 唯一正式主链
 
----
+ResearchPipeline.run/stream 固定 collect、clean、extract、knowledge、inspect、targeted、merge、qgate、report。初次知识构建后 inspect/qgate；CONTINUE 才 targeted → merge → inspect/qgate，STOP_SUCCESS 才报告。补搜正文必须清洗和抽取。无缺口的 targeted/merge 记录为不适用；取消、失败或预算停止不能伪装成功。
 
-## 项目概述
+禁止恢复旧五/六段分派、brief/fast、阶段跳过、quick_collect 或 shadow/kill-switch。旧 Deepen 的实体拆分、画像、时间线、消歧和查询扩展属于 collect 内部 ResearchStrategies。PDF/视频保留为输入适配。
 
-Python 核心引擎 + 多接口层的调研工具：给定主题 → 自动产出知识树 / 调研报告。
-六阶段管道（Collect → Deepen → Clean → Extract → Organize → Report），
-Stage 之间仅通过文件系统通信，可中断、可恢复、可独立调试。
+## 源码与状态
 
----
+- application/pipeline.py：唯一编排、恢复、预算和摘要。
+- nine_loop/evidence.py、runtime_state.py：正文/span/hash、运行锁、原子状态及 CAS。
+- nine_loop/knowledge_min.py、merge_min.py、research.py：图谱、增量合并、检视/门控/报告。
+- presentation/cli.py、webui.py：CLI/Gradio；infrastructure/export/wiki_stage.py：当前成果校验与不可变包。
+- infrastructure/stages/：真实采集/抓取/清洗/抽取/内部策略；domain/models.py、config.py：配置校验。路径均相对 research_tool/。
 
-## 目录索引
+本主链使用现有 URL guard 与 Python 正文哈希；零调用旧 Rust 适配器已删除，不能宣称仍执行或逐比特等价。
 
-```
-.                                ← 项目根（即工作区根）
-├── research_tool/               # Python 包（按 01-架构 五层组织）
-│   ├── __init__.py              #   公开 API 入口
-│   ├── presentation/            #   表现层
-│   │   ├── cli.py               #     Typer CLI（11 命令）
-│   │   └── webui.py             #     Gradio Web 界面
-│   ├── application/             #   应用层
-│   │   ├── pipeline.py          #     ResearchPipeline 编排
-│   │   ├── video_pipeline.py    #     V1.1 VideoIngest 编排
-│   │   └── video_concurrent_orchestrator.py  # 视频并发调度
-│   ├── domain/                  #   领域层
-│   │   ├── models.py            #     30+ Pydantic 模型
-│   │   ├── config.py            #     YAML 配置加载
-│   │   └── errors.py            #     7 异常类 + V1.1 错误码体系
-│   ├── infrastructure/          #   基础设施层
-│   │   ├── stages/              #     6 个 Stage 实现
-│   │   ├── llm/                 #     LLM 客户端抽象（5 provider）
-│   │   ├── search/              #     12 个搜索后端
-│   │   └── ingest/              #     PDF/视频摄取（9 模块）
-│   └── common/                  #   公共工具
-│       ├── logging_config.py    #     统一日志
-│       ├── slug.py              #     中文→文件名
-│       ├── translate.py         #     Markdown 翻译
-│       └── url_guard.py         #     SSRF 防护
-├── research_tool/tests/         # pytest（417 passed / 5 skipped）
-├── docs/                        # 文档资产
-│   ├── reports/                 #   收束报告 + 交接展示
-│   ├── plan/                    #   项目计划
-│   └── templates/               #   模板
-├── meta/                        # 元信息（CODE_MAP）
-├── worklogs/                    # 工作日志 + decisions/
-│   └── decisions/               #   ADR（收束节点产出）
-├── pyproject.toml               # 项目元数据 + ruff
-├── .pre-commit-config.yaml
-├── README.md / AGENTS.md / STATUS.md
-└── AGENTS.md                 # 本文件（给 AI 读）
-```
+阶段以 Protocol v1 envelope 提交；runtime-state.json 记录输入指纹、run_id、阶段和 latest digest。只读状态查看不得创建锁文件。恢复只复用输入和文件摘要有效的提交。
 
----
+产物隔离到指定 output：主题下有 artifacts/<run_id>/、runs/<run_id>/initial/、targeted-N/、final/。final 含报告、sources、知识树和图 JSON。run-summary.json 指向当前运行及完整 final 哈希。不得移动或覆盖根目录历史 report.md/tree/。
 
-## 架构分层（严格 01-架构规范）
+状态/WebUI/Wiki 必须验证 run_id、runtime 阶段、final 文件集合及哈希。引用覆盖 1.0 是原文跨度及模型支持检查的结构指标，不代表语义真值或 52.77 分复现。
 
-```
-research_tool/presentation/   表现层   ← cli.py / webui.py
-        ↓ 单向依赖
-research_tool/application/    应用层   ← pipeline.py / video_pipeline.py
-        ↓
-research_tool/domain/         领域层   ← models.py / config.py / errors.py
-        ↓
-research_tool/infrastructure/ 基础设施 ← stages/ / llm/ / search/ / ingest/
-        ↑
-research_tool/common/         公共工具 ← logging_config.py / slug.py / translate.py / url_guard.py（横切，各层均可引用）
-```
+## 验证
 
-**已知偏差**（3 处有意简化，详见下方规范表 01-架构）：
+环境 /opt/anaconda3/envs/research-tool/bin/python。运行受影响测试、全量 `python -B -m pytest -q -p no:cacheprovider research_tool/tests`、`ruff check --no-cache research_tool/ pyproject.toml`、`git diff --check`，以及隔离目录 scripts/smoke_e2e.py。
 
-- `presentation/cli.py` 的 `_make_llm()` 直接构造 LLMClient（表现层→基础设施）——CLI 薄封装简化；管道自身通过 `load_config` + `ResearchPipeline` 正确分层。
-- `infrastructure/ingest/pipeline_adapter.py` 在函数内懒加载 `application.pipeline.ResearchPipeline`（基础设施→应用层上引）——避免视频摄入硬依赖应用层导入时序。
-- `common/translate.py` 引用 `infrastructure.llm.base.LLMClient`（公共层→基础设施）——翻译工具复用 LLM 抽象的权衡。
+保留有效的搜索/模型/摄入/安全测试，不能恢复旧分派或删除失败场景变绿。UI 通过真实浏览器验证，不新增 UI 单元测试；区分实现、自动测试、外部 fixture、本地交互、联网质量与用户验收。
 
----
-
-## 规范遵守状态（2026-05 收束节点；2026-07 持续优化更新）
-
-| 规范 | 状态 | 备注 |
-|------|------|------|
-| 01-架构 | 🟡 | 分层总体 OK；3 处有意简化：`cli._make_llm` 跨层、`ingest/pipeline_adapter` 懒上引 application、`common/translate` 引用 infra/llm。P3-1 待扩展：`cli.py:33`、`webui.py:78` 的 presentation→infrastructure 导入 |
-| 02-代码 | ✅ | print()→logging 完成；配置 ruff；异常加 as exc+日志 |
-| 03-Git | 🟡 | gitleaks CI 已生效；commitlint 配置已就位（`meta/commitlint.config.js`），pre-commit/CI 强制待落地 |
-| 04-API | N/A | 无 HTTP API（CLI + Gradio 本地工具） |
-| 05-测试 | ✅ | 454 passed / 5 skipped；FP09 反向循环已覆盖（R11，test_pipeline_backward.py，8 用例）；覆盖率待测（pytest-cov 待安装） |
-| 06-文档 | ✅ | README + AGENTS.md + STATUS.md；本轮对齐代码现状；docstring 覆盖公共 API |
-| 08-图谱 | N/A | 中小项目，未达启用门槛（< 5 万行, < 10 模块） |
-
----
-
-## 常见任务速查
-
-| 用户说 | AI 做什么 |
-|--------|----------|
-| "修复 bug" | 先跑相关测试确认重现 → 修改 → pytest 全绿 |
-| "添加搜索源" | 参考 `search/` 下现有后端模式：继承 SearchBackend → 注册到 `__init__.py` 工厂 |
-| "新增 Stage" | 参考 `stages/` 下模式：类 + 模块级便捷函数 → `__init__.py` 注册 |
-| "修改配置" | 改 `models.py` 对应 Config → 同步 `config.example.yaml` → 测试 |
-| "重构" | 先读本文件了解架构 → 修改 → pytest + ruff check 全绿 |
-
----
-
-## 当前状态
-
-- **版本**: 0.1.1
-- **测试**: 454 passed / 5 skipped
-- **Python**: >=3.11
-- **LLM**: 5 provider（DeepSeek / OpenAI / Anthropic / Ollama / MiniMax）；`from_config` 把 openai/deepseek/ollama/minimax 路由到 `OpenAILLMClient`（OpenAI 兼容），anthropic 走 `AnthropicLLMClient`
-- **搜索源**: 12 个后端（DDG/OpenAlex/Crossref/arXiv/S2/PubMed/Wikipedia/GitHub/GoogleNews/Tavily/Bilibili/X）；`SearchEngine` Literal 含 14 名（`scholar`→arxiv、`x`/`twitter`→x_backend 为别名）
-- **错误码（M-010）**: 26 个 VideoIngest 错误码，全功能（3 段式 format_error + 仲裁退出码 resolve_exit_code；R9 CLI 接线 + R10 注册遗留码 + 对齐 register/raise）
-- **反向循环（FP09）**: 已覆盖（R11，test_pipeline_backward.py，8 用例）
+当前进度与交接维护 STATUS 入口；详细证据放现有 plan/reports 边界。历史基线清单不可改；未经用户要求不写长期记忆或个人全局规则。

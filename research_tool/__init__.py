@@ -66,7 +66,7 @@ from .domain.models import (
 )
 from .infrastructure.ingest import PdfIngestor, ingest_pdfs
 from .application.pipeline import ResearchPipeline, create_pipeline
-from .infrastructure.stages import Cleaner, Collector, Extractor, Organizer, Reporter
+from .infrastructure.stages import Cleaner, Collector, Extractor, Organizer
 from .common.translate import translate_markdown
 
 __version__ = "0.1.1"
@@ -81,7 +81,6 @@ __all__ = [
     "Cleaner",
     "Extractor",
     "Organizer",
-    "Reporter",
     "PdfIngestor",
     "ingest_pdfs",
     "translate_markdown",
@@ -101,7 +100,6 @@ __all__ = [
     "MockLLMClient",
     "load_config",
     "research",
-    "quick_collect",
     "ResearchToolError",
     "ConfigValidationError",
     "StageError",
@@ -127,12 +125,3 @@ async def research(
         overrides["llm"]["model"] = llm_model
     config = load_config(config_path, overrides=overrides)
     return await ResearchPipeline(config).run(topic)
-
-
-async def quick_collect(
-    topic: str, max_results: int = 8, work_dir: str | Path = "./research-output"
-) -> list[dict]:
-    """仅采集便捷函数（03 §5）。返回 sources 列表。"""
-    cfg = CollectorConfig(max_results_per_engine=max_results)
-    result = await Collector(cfg).run(topic, Path(work_dir) / "quick")
-    return [s.model_dump() for s in result.sources]

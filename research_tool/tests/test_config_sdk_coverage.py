@@ -54,6 +54,7 @@ def _clear_config_env(monkeypatch: pytest.MonkeyPatch) -> None:
 def _isolate_local_deployment_env(monkeypatch):
     """Keep SDK config tests independent from the developer's deployed .env."""
     _clear_config_env(monkeypatch)
+    monkeypatch.setattr(config_module, "_DEFAULT_PATHS", [])
 
 
 def test_override_provider_selects_matching_secret(monkeypatch, tmp_path):
@@ -208,7 +209,7 @@ def test_config_resolution_merge_and_all_environment_secrets(monkeypatch, tmp_pa
     path.write_text(
         "topic: ${EMBEDDED}-topic\n"
         'collector:\n  extra_queries: ["${EMBEDDED}", fixed]\n'
-        "pipeline:\n  resume: false\n  max_backward_rounds: 2\n",
+        "pipeline:\n  resume: false\nnine_loop:\n  max_rounds: 3\n",
         encoding="utf-8",
     )
     monkeypatch.setenv("RESEARCH_CONFIG", str(path))
@@ -219,7 +220,7 @@ def test_config_resolution_merge_and_all_environment_secrets(monkeypatch, tmp_pa
 
     assert cfg.topic == "value-topic"
     assert cfg.work_dir == Path("env-output")
-    assert cfg.resume is False and cfg.max_backward_rounds == 2
+    assert cfg.resume is False and cfg.nine_loop.max_rounds == 3
     assert cfg.llm.provider == "minimax" and cfg.llm.model == "MiniMax-M2"
     assert cfg.llm.api_key == "preferred-minimax-key-that-is-much-longer"
     assert cfg.collector.depth == 3
@@ -287,31 +288,6 @@ async def test_public_research_helper_builds_and_runs_pipeline(monkeypatch, mode
     assert result is sentinel and captured["run_topic"] == "topic"
     assert captured["overrides"]["llm"]["provider"] == "minimax"
     assert ("model" in captured["overrides"]["llm"]) is (model is not None)
-
-
-@pytest.mark.asyncio
-async def test_public_quick_collect_returns_serialized_sources(monkeypatch, tmp_path):
-    captured: dict = {}
-
-    class Source:
-        def model_dump(self):
-            return {"url": "https://example.com/paper"}
-
-    class FakeCollector:
-        def __init__(self, config):
-            captured["config"] = config
-
-        async def run(self, topic, path):
-            captured["topic"] = topic
-            captured["path"] = path
-            return SimpleNamespace(sources=[Source()])
-
-    monkeypatch.setattr(research_tool, "Collector", FakeCollector)
-    result = await research_tool.quick_collect("topic", max_results=3, work_dir=tmp_path)
-
-    assert result == [{"url": "https://example.com/paper"}]
-    assert captured["config"].max_results_per_engine == 3
-    assert captured["path"] == tmp_path / "quick"
 
 
 def test_package_import_best_effort_when_dotenv_import_fails(monkeypatch):

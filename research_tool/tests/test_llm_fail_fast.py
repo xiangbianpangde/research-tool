@@ -1,21 +1,19 @@
 from __future__ import annotations
 
 import asyncio
-from pathlib import Path
 
 import pytest
 
-from research_tool.application.pipeline import ResearchPipeline
 from research_tool.domain.errors import LLMAuthenticationError, LLMError, classify_llm_error
-from research_tool.domain.models import ExtractorConfig, PipelineConfig
+from research_tool.domain.models import ExtractorConfig
 from research_tool.infrastructure.llm import MockLLMClient
 from research_tool.infrastructure.stages.collector import Collector, _llm_build_queries
-from research_tool.infrastructure.stages.deepen import DeepenStage
+from research_tool.infrastructure.stages.research_strategies import ResearchStrategies
 from research_tool.infrastructure.stages.extractor import Extractor
 from research_tool.infrastructure.stages.cleaner import Cleaner
 from research_tool.infrastructure.stages.organizer import Organizer, _Node, _NodePlan, _SourceDoc
 from research_tool.common.translate import translate_markdown
-from research_tool.domain.models import CleanerConfig
+from research_tool.domain.models import CleanerConfig, CollectionStrategyConfig
 
 
 class _StatusError(Exception):
@@ -53,14 +51,14 @@ async def test_collector_query_expansion_does_not_fallback_on_401():
 
 
 @pytest.mark.asyncio
-async def test_deepen_does_not_write_done_marker_after_401(tmp_path):
+async def test_collection_strategies_propagate_401_without_legacy_marker(tmp_path):
     raw = tmp_path / "raw"
     raw.mkdir()
     collector = Collector()
-    stage = DeepenStage(PipelineConfig().deepen, collector, _AuthFailLLM())
+    strategies = ResearchStrategies(CollectionStrategyConfig(), collector, _AuthFailLLM())
 
     with pytest.raises(LLMAuthenticationError):
-        await stage.run("paper", raw)
+        await strategies.collect_more("paper", raw)
 
     assert not (raw / ".deepen_done").exists()
 
@@ -137,78 +135,3 @@ async def test_organizer_cancels_sibling_node_requests_after_401(tmp_path, monke
 async def test_translate_does_not_return_original_text_on_401():
     with pytest.raises(LLMAuthenticationError):
         await translate_markdown("English paper text", _AuthFailLLM())
-
-
-class _HealthLLM(MockLLMClient):
-    def __init__(self, order: list[str]) -> None:
-        super().__init__()
-        self.order = order
-
-    async def healthcheck(self, timeout_sec: float = 10.0) -> None:
-        self.order.append("health")
-
-
-@pytest.mark.asyncio
-async def test_pipeline_healthchecks_before_each_executed_llm_stage(tmp_path, monkeypatch):
-    order: list[str] = []
-    cfg = PipelineConfig(
-        topic="paper",
-        work_dir=tmp_path,
-        stages=["collect", "deepen", "clean", "extract", "organize", "report"],
-        resume=False,
-    )
-    pipe = ResearchPipeline(cfg)
-    llm = _HealthLLM(order)
-    monkeypatch.setattr(pipe, "_get_llm", lambda: llm)
-
-    async def fake_exec(stage: str, topic: str, topic_dir: Path, result) -> None:
-        order.append(stage)
-        if stage == "collect":
-            result.collect_result = None
-
-    monkeypatch.setattr(pipe, "_exec", fake_exec)
-
-    result = await pipe.run("paper")
-
-    assert result.failed_stage is None
-    assert order == [
-        "collect",
-        "health",
-        "deepen",
-        "clean",
-        "health",
-        "extract",
-        "health",
-        "organize",
-        "health",
-        "report",
-    ]
-
-
-@pytest.mark.asyncio
-async def test_pipeline_stops_all_later_stages_when_healthcheck_is_401(tmp_path, monkeypatch):
-    order: list[str] = []
-    cfg = PipelineConfig(
-        topic="paper",
-        work_dir=tmp_path,
-        stages=["collect", "deepen", "clean", "extract", "organize", "report"],
-        resume=False,
-    )
-    pipe = ResearchPipeline(cfg)
-
-    class FailingHealth(_HealthLLM):
-        async def healthcheck(self, timeout_sec: float = 10.0) -> None:
-            self.order.append("health")
-            raise LLMAuthenticationError("LLM 鉴权失败")
-
-    monkeypatch.setattr(pipe, "_get_llm", lambda: FailingHealth(order))
-
-    async def fake_exec(stage: str, topic: str, topic_dir: Path, result) -> None:
-        order.append(stage)
-
-    monkeypatch.setattr(pipe, "_exec", fake_exec)
-
-    result = await pipe.run("paper")
-
-    assert result.failed_stage == "deepen"
-    assert order == ["collect", "health"]

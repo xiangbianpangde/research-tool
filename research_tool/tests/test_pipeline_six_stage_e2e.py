@@ -1,210 +1,185 @@
+"""The former six-stage E2E coverage, expressed through the nine-stage API."""
+
 from __future__ import annotations
 
+import asyncio
 import json
 
 import pytest
 
 from research_tool.application.pipeline import ResearchPipeline
-from research_tool.domain.errors import LLMAuthenticationError
-from research_tool.domain.models import (
-    CleanerConfig,
-    CollectorConfig,
-    DeepenConfig,
-    OrganizerConfig,
-    PipelineConfig,
-    PipelineResult,
-    TalkConfig,
-)
-from research_tool.application.talk_linker import TalkEnrichReport
+from research_tool.domain.errors import LLMAuthenticationError, LLMError
+from research_tool.domain.models import CollectorConfig
 from research_tool.infrastructure.llm import MockLLMClient
-from research_tool.infrastructure.search.base import SearchHit, SearchResult
-from research_tool.infrastructure.stages.collector import Collector
+from research_tool.infrastructure.search.base import SearchHit
 from research_tool.infrastructure.stages.fetcher import FetchResult, Fetcher
+from research_tool.tests.test_nine_loop_runner import QUOTE, SECOND, config, model_reply
 
 OFFICIAL = "https://official.example/paper"
 RELATED = "https://doi.org/10.1000/related"
-
-
-def _structured(prompt, schema):
-    name = schema.__name__
-    if name == "_Queries":
-        return schema(queries=[])
-    if name == "_ChunkResult":
-        return schema(
-            entities=[{"name": "OfficialPaper", "type": "Paper", "confidence": 1.0}],
-            triples=[{"head": "OfficialPaper", "relation": "studies", "tail": "Workspace"}],
-        )
-    if name == "_Points":
-        return schema(points=["官方论文提出并验证了一个可复现的方法。"])
-    if name == "_NodePlan":
-        return schema(
-            nodes=[
-                {"title": "方法", "core_question": "方法是什么？"},
-                {"title": "证据", "core_question": "证据是什么？"},
-            ],
-            main_thread="方法 → 证据",
-        )
-    return schema()
+VIDEO_URL = "https://www.bilibili.com/video/BV1xx411c7mD"
 
 
 @pytest.mark.asyncio
-async def test_complete_six_stage_pipeline_with_official_source_first(tmp_path, monkeypatch):
-    search_calls: list[str] = []
+async def test_official_source_is_fetched_before_search_and_expansion(
+    tmp_path, monkeypatch
+):
+    order: list[str] = []
 
-    async def fake_search(self, queries, **kwargs):
-        search_calls.append("search")
-        return SearchResult(
-            hits=[SearchHit(url=RELATED, title="Related paper", source_engine="openalex")],
-            warnings=[],
+    class Backend:
+        async def search(self, query, *args, **kwargs):
+            order.append("search")
+            return [
+                SearchHit(
+                    url=RELATED,
+                    title="Related battery study",
+                    source_engine="openalex",
+                )
+            ]
+
+    async def fetch(self, url):
+        order.append("fetch:official" if url == OFFICIAL else "fetch:related")
+        text = QUOTE if url == OFFICIAL else SECOND
+        return FetchResult(
+            url=url,
+            markdown="# Study\n\n" + text + "\n\n" + "Methods and limitations. " * 8,
+            ok=True,
         )
 
-    async def fake_fetch(self, url):
-        body = (
-            "# Official research paper\n\n"
-            "This official paper describes its method, experiments, evidence, limitations, "
-            "and reproducibility details in enough depth for the complete research pipeline. "
-        ) * 5
-        return FetchResult(url=url, markdown=body, ok=True)
-
-    monkeypatch.setattr(Collector, "search_queries", fake_search)
-    monkeypatch.setattr(Fetcher, "fetch", fake_fetch)
+    monkeypatch.setattr("research_tool.infrastructure.stages.collector.get_backend", lambda *a: Backend())
+    monkeypatch.setattr(Fetcher, "fetch", fetch)
     monkeypatch.setattr(
         "research_tool.infrastructure.stages.collector.assert_safe_url", lambda url: None
     )
 
-    cfg = PipelineConfig(
-        topic="official paper",
-        work_dir=tmp_path / "out",
-        stages=["collect", "deepen", "clean", "extract", "organize", "report"],
-        resume=False,
-        collector=CollectorConfig(
-            official_urls=[OFFICIAL],
-            search_engines=["openalex", "crossref", "arxiv"],
-            max_results_per_engine=1,
-            max_total_results=4,
-            min_doc_chars=20,
-            search_cache=False,
-        ),
-        deepen=DeepenConfig(
-            entity_split=False,
-            breadth=2,
-            depth=1,
-            profile_extract=False,
-            gap_detection=False,
-            contradiction_check=False,
-        ),
-        cleaner=CleanerConfig(min_content_length=20),
-        organizer=OrganizerConfig(min_nodes=2, max_nodes=2),
+    pipeline_config = config(tmp_path)
+    pipeline_config.collector = CollectorConfig(
+        official_urls=[OFFICIAL],
+        search_engines=["web"],
+        max_results_per_engine=1,
+        max_total_results=4,
+        min_doc_chars=20,
+        search_cache=False,
+        search_relevance_min_overlap=0,
+        save_originals=False,
+        strategies={"enabled": False},
     )
-    llm = MockLLMClient(chat_response="（mock 生成的完整正文）", structured_response=_structured)
-    pipe = ResearchPipeline(cfg)
-    monkeypatch.setattr(pipe, "_get_llm", lambda: llm)
+    pipeline_config.nine_loop.max_rounds = 0
+    llm = MockLLMClient(structured_response=model_reply)
 
-    result = await pipe.run("official paper")
+    result = await ResearchPipeline(pipeline_config, llm=llm).run()
 
     assert result.failed_stage is None
-    assert result.stages_completed == [
-        "collect",
-        "deepen",
-        "clean",
-        "extract",
-        "organize",
-        "report",
-    ]
-    topic_dir = result.topic_dir
-    assert (topic_dir / "raw" / ".deepen_done").exists()
-    assert list((topic_dir / "clean").glob("*.md"))
-    assert (topic_dir / "extracted" / "entities.json").exists()
-    assert (topic_dir / "tree" / "00-主表.md").exists()
-    assert (topic_dir / "report.md").stat().st_size > 0
-    sources = json.loads((topic_dir / "raw" / "sources.json").read_text(encoding="utf-8"))
-    assert sources[0]["url"] == OFFICIAL
-    assert sources[0]["source_engine"] == "official"
-    assert search_calls
-    assert [call["kind"] for call in llm.calls].count("health") == 4
+    assert result.verdict == "STOP_SUCCESS"
+    assert order[0] == "fetch:official"
+    assert order.index("fetch:official") < order.index("search") < order.index("fetch:related")
+    summary = json.loads(result.run_summary_path.read_text(encoding="utf-8"))
+    run_root = result.topic_dir / "runs" / summary["run_id"]
+    sources = json.loads((run_root / "initial" / "raw" / "sources.json").read_text())
+    assert {source["url"] for source in sources} == {OFFICIAL, RELATED}
+    official = next(source for source in sources if source["url"] == OFFICIAL)
+    assert official["source_engine"] == "official"
+    report = result.report_result.report_path.read_text(encoding="utf-8")
+    assert QUOTE in report and SECOND in report
+    assert OFFICIAL in report and RELATED in report
+
+
+def _video_config(tmp_path):
+    input_dir = tmp_path / "video-input"
+    input_dir.mkdir()
+    body = f"<!-- source: {VIDEO_URL} -->\n<!-- title: Battery research talk -->\n\n{QUOTE}\n\n" + (
+        "Experimental methods, limitations, and reproducibility details. " * 8
+    )
+    source = input_dir / "battery-talk.md"
+    source.write_text(body, encoding="utf-8")
+    pipeline_config = config(tmp_path / "out")
+    pipeline_config.input_dir = input_dir
+    pipeline_config.collector.strategies.enabled = False
+    return pipeline_config, source, body
 
 
 @pytest.mark.asyncio
-async def test_talk_rerun_healthchecks_each_llm_stage(tmp_path, monkeypatch):
-    order: list[str] = []
-    cfg = PipelineConfig(
-        topic="paper",
-        work_dir=tmp_path,
-        stages=["clean", "extract", "organize", "report"],
-        resume=False,
-        cleaner=CleanerConfig(relevance_filter=True),
-        talk=TalkConfig(enabled=True),
-    )
-    pipe = ResearchPipeline(cfg)
-    llm = MockLLMClient()
+async def test_local_video_markdown_flows_through_nine_stage_public_run(tmp_path):
+    pipeline_config, source, original_markdown = _video_config(tmp_path)
+    llm = MockLLMClient(structured_response=model_reply)
 
-    async def healthcheck(timeout_sec: float = 10.0) -> None:
-        order.append("health")
+    result = await ResearchPipeline(pipeline_config, llm=llm).run()
 
-    async def fake_exec(stage, topic, topic_dir, result):
-        order.append(stage)
-
-    async def fake_enrich(self, topic_dir, topic=""):
-        return TalkEnrichReport(files_written=[topic_dir / "raw" / "talk.md"])
-
-    monkeypatch.setattr(llm, "healthcheck", healthcheck)
-    monkeypatch.setattr(pipe, "_get_llm", lambda: llm)
-    monkeypatch.setattr(pipe, "_exec", fake_exec)
-    monkeypatch.setattr(
-        "research_tool.application.talk_linker.TalkLinker.enrich",
-        fake_enrich,
-    )
-
-    events = [
-        event
-        async for event in pipe._run_talk_enrichment(
-            "paper",
-            tmp_path,
-            PipelineResult(topic_dir=tmp_path),
-        )
+    assert result.verdict == "STOP_SUCCESS"
+    assert result.failed_stage is None
+    assert result.report_result is not None
+    summary = json.loads(result.run_summary_path.read_text(encoding="utf-8"))
+    assert summary["stages"] == [
+        "collect", "clean", "extract", "knowledge", "inspect",
+        "targeted", "merge", "qgate", "report",
     ]
-
-    assert not [event for event in events if event.status == "failed"]
-    assert order == ["health", "clean", "health", "extract", "health", "organize"]
+    run_root = result.topic_dir / "runs" / summary["run_id"]
+    copied = next((run_root / "initial" / "raw").glob("*.md"))
+    assert copied.read_text(encoding="utf-8") == original_markdown
+    report = result.report_result.report_path.read_text(encoding="utf-8")
+    assert QUOTE in report and VIDEO_URL in report
+    assert not (result.topic_dir / "report.md").exists()
+    assert {"collect", "clean", "extract", "knowledge", "inspect", "qgate", "report"} <= set(
+        result.stages_completed
+    )
 
 
 @pytest.mark.asyncio
-async def test_talk_rerun_failure_stops_outer_forward_before_report(tmp_path, monkeypatch):
-    order: list[str] = []
-    cfg = PipelineConfig(
-        topic="paper",
-        work_dir=tmp_path,
-        stages=["organize", "report"],
-        resume=False,
-        talk=TalkConfig(enabled=True),
-    )
-    pipe = ResearchPipeline(cfg)
-    llm = MockLLMClient()
-    health_calls = 0
+@pytest.mark.parametrize("failure", ["auth", "model", "cancel"])
+async def test_local_video_model_stop_or_failure_never_publishes_report(
+    tmp_path, failure
+):
+    pipeline_config, _source, _body = _video_config(tmp_path)
+    pipeline_config.llm_retry_backoff_sec = 0
+    started = asyncio.Event()
 
-    async def healthcheck(timeout_sec: float = 10.0) -> None:
-        nonlocal health_calls
-        health_calls += 1
-        order.append("health")
-        if health_calls == 2:
-            raise LLMAuthenticationError("LLM 鉴权失败")
+    if failure == "auth":
+        class FailingLLM(MockLLMClient):
+            async def chat_structured(self, prompt, schema, system=None):
+                if schema.__name__ == "_ChunkResult":
+                    raise LLMAuthenticationError("invalid local test credential")
+                return model_reply(prompt, schema)
 
-    async def fake_exec(stage, topic, topic_dir, result):
-        order.append(stage)
+        llm = FailingLLM()
+        result = await ResearchPipeline(pipeline_config, llm=llm).run()
+        assert result.verdict == "STOP_ERROR"
+        assert result.failed_stage == "extract"
+    elif failure == "model":
+        class FailingLLM(MockLLMClient):
+            attempts = 0
 
-    async def fake_enrich(self, topic_dir, topic=""):
-        return TalkEnrichReport(files_written=[topic_dir / "raw" / "talk.md"])
+            async def chat_structured(self, prompt, schema, system=None):
+                if schema.__name__ == "_ChunkResult":
+                    self.attempts += 1
+                    raise LLMError("offline model failure")
+                return model_reply(prompt, schema)
 
-    monkeypatch.setattr(llm, "healthcheck", healthcheck)
-    monkeypatch.setattr(pipe, "_get_llm", lambda: llm)
-    monkeypatch.setattr(pipe, "_exec", fake_exec)
-    monkeypatch.setattr(
-        "research_tool.application.talk_linker.TalkLinker.enrich",
-        fake_enrich,
-    )
+        llm = FailingLLM()
+        result = await ResearchPipeline(pipeline_config, llm=llm).run()
+        assert llm.attempts == pipeline_config.llm_stage_attempts
+        assert result.verdict == "STOP_ERROR"
+        assert result.failed_stage == "extract"
+    else:
+        class WaitingLLM(MockLLMClient):
+            async def chat_structured(self, prompt, schema, system=None):
+                if schema.__name__ == "_ChunkResult":
+                    started.set()
+                    await asyncio.Event().wait()
+                return model_reply(prompt, schema)
 
-    result = await pipe.run("paper")
+        llm = WaitingLLM()
+        pipeline = ResearchPipeline(pipeline_config, llm=llm)
+        task = asyncio.create_task(pipeline.run())
+        await started.wait()
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+        result = pipeline._result
+        assert result is not None
+        assert result.verdict == "STOP_CANCELLED"
+        assert result.failed_stage == "extract"
 
-    assert result.failed_stage == "organize"
-    assert order == ["health", "organize", "health"]
-    assert "report" not in result.stages_completed
+    assert result.report_result is None
+    assert not list(result.topic_dir.glob("runs/*/final/report.md"))
+    summary = json.loads(result.run_summary_path.read_text(encoding="utf-8"))
+    assert summary["pipeline_complete"] is False
