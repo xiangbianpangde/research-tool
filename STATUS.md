@@ -1,6 +1,6 @@
 # research-tool 当前状态
 
-更新：2026-10-17。历史基线为 4ab1412，审计提交为 60881ca；开发分支 codex/nine-stage-only，工作区 /Users/xbpd/.codex/worktrees/nine-stage-only/research-tool。实现、独立审查修复与本地验收已完成，正在提交及提升主分支。原目录的旧 master 和未提交工作须完整保留。
+更新：2026-10-17。历史基线为 4ab1412，审计提交为 60881ca，九段实现提交为 47f5888。已从 codex/nine-stage-only 建立 main、推送并设为 GitHub 默认分支。后续开发工作区 /Users/xbpd/.codex/worktrees/nine-stage-only/research-tool 位于 main；原目录仍在 master / ab2b0d6，29 tracked 与 10 untracked 文件哈希保持相同。
 
 ## 已实现
 
@@ -40,4 +40,6 @@ Pi /review 对入口进行了审查：CLI 成功出口缺少再次校验的告�
 
 独立核心审查发现的四项问题已修复：旧模型缺口只有绑定本轮新增事实和解决理由才能关闭；正式主链拒绝 depth=1，snippet/discovery 元数据不进入事实账本；报告标题一并做支持核验；墙钟超时记录阶段及失败指标。Wiki 来源正文另按内容哈希归档，archiveRef 可在包内取回，幂等重试检查篡改。运行契约版本进入输入指纹，避免误用收紧前缓存。
 
-唯一剩余步骤：提交本分支并按用户授权提升主分支，保留旧分支及原工作区。
+本轮已完成实现、验收、独立审查修复、提交、main 推送与默认分支切换，并独立回读确认。旧 master 与恢复开发分支保留。后续从上述工作区的 main 继续开发；真实联网质量和历史 52.77 复现仍未验证。
+
+Git 推送钩子在正确的 research-tool Python 3.11 环境下另行重跑，结果为 957 passed / 3 skipped。首次误用系统 Python 3.12 因缺依赖失败；没有绕过提交或推送钩子。

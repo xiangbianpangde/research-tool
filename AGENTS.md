@@ -4,7 +4,7 @@
 
 ## 开发约定
 
-- 基线 `4ab1412`；开发分支 codex/nine-stage-only，独立工作区 /Users/xbpd/.codex/worktrees/nine-stage-only/research-tool。用户授权验收后提升为主分支，当前状态见 STATUS。
+- 基线 `4ab1412`；九段实现 `47f5888` 已从 codex/nine-stage-only 提升到 main，并设为 GitHub 默认分支。后续在 /Users/xbpd/.codex/worktrees/nine-stage-only/research-tool 的 main 开发，当前状态见 STATUS。
 - 原目录 /Users/xbpd/Projects/research-tool 的旧分支及未提交工作必须保留；不得 reset、clean、stash、覆盖或将其后续实现整体合回。
 - 用户取消了子 Agent 指定模型限制。默认单 Agent，独立任务才委派，明确所有权并复核。
 - 本次代码迁移可编辑必要源码；执行正式调研时不得为运行方便改源码/生产配置，用 CLI、临时配置与环境变量。
