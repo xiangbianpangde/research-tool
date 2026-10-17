@@ -3,10 +3,14 @@
 from __future__ import annotations
 
 import hashlib
+import errno
+import builtins
+import runpy
 import json
 import os
 import subprocess
 import sys
+from types import SimpleNamespace
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from threading import Barrier
@@ -185,6 +189,10 @@ def test_start_new_forces_a_new_run_and_preserves_old_artifact(tmp_path: Path) -
     )
     runtime.commit_stage("collect:0", artifact, digest, None)
 
+    assert runtime.read_current()["completed_stages"]["collect:0"]["artifact_path"] == (
+        f"artifacts/{old['run_id']}/collect-0.json"
+    )
+
     fresh = runtime.start_new("fingerprint-a")
 
     assert fresh["run_id"] != old["run_id"]
@@ -245,3 +253,43 @@ print("acquired and committed")
     assert acquired.returncode == 0, acquired.stderr
     assert "acquired and committed" in acquired.stdout
     assert "collect" in runtime.load_or_init("fingerprint-a")["completed_stages"]
+
+
+def test_windows_lock_branch_imports_without_fcntl_and_excludes_reentry(tmp_path, monkeypatch):
+    locked = set()
+    calls = []
+
+    def locking(fd, operation, size):
+        import msvcrt
+        assert size == 1 and os.lseek(fd, 0, os.SEEK_CUR) == 0
+        if operation == msvcrt.LK_UNLCK:
+            locked.clear()
+        elif locked:
+            raise OSError(errno.EACCES, "locked")
+        else:
+            locked.add("byte")
+        calls.append(operation)
+
+    fake = SimpleNamespace(LK_NBLCK=2, LK_UNLCK=0, locking=locking)
+    real_import = builtins.__import__
+
+    def windows_import(name, *args, **kwargs):
+        if name == "fcntl":
+            raise ImportError("fcntl unavailable on Windows")
+        if name == "msvcrt":
+            return fake
+        return real_import(name, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "__import__", windows_import)
+    namespace = runpy.run_path(str(Path(__file__).resolve().parents[1] / "nine_loop/runtime_state.py"))
+    runtime = namespace["RuntimeState"](tmp_path)
+    with runtime.run_lock():
+        with pytest.raises(namespace["RuntimeStateError"], match="already held"):
+            with runtime.run_lock():
+                pass
+    with pytest.raises(ValueError, match="body error"):
+        with runtime.run_lock():
+            raise ValueError("body error")
+    with runtime.run_lock():
+        pass
+    assert calls == [2, 0, 2, 0, 2, 0]

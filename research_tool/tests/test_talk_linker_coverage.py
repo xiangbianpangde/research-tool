@@ -216,3 +216,28 @@ async def test_enrich_ingest_success_partial_failure_and_exception(
     else:
         assert len(report.ingested_urls) == 1
         assert any("部分失败" in warning for warning in report.warnings)
+
+
+@pytest.mark.asyncio
+async def test_ingested_talk_body_is_returned_to_the_supplied_run_directory(tmp_path, monkeypatch):
+    topic_dir = tmp_path / "runs" / "id" / "initial"
+    linker = TalkLinker(TalkConfig(enabled=True, ingest=True))
+    paper = PaperCandidate("Research Paper 1")
+    monkeypatch.setattr(linker, "collect_candidates", lambda root: [paper])
+
+    async def match(*args, **kwargs):
+        return _matched(paper)
+
+    async def ingest(**kwargs):
+        note = Path(kwargs["work_dir"]) / "talks" / "raw" / "video_one.md"
+        note.parent.mkdir(parents=True)
+        note.write_text("actual transcript body")
+        return SimpleNamespace(failed_count=0, success_count=1, results=[
+            SimpleNamespace(status="success", markdown_path=note),
+        ])
+
+    monkeypatch.setattr(linker, "find_talk", match)
+    monkeypatch.setattr("research_tool.application.video_pipeline.process_videos", ingest)
+    report = await linker.enrich(topic_dir, topic="talks")
+    assert (topic_dir / "raw" / "video_one.md").read_text() == "actual transcript body"
+    assert topic_dir / "raw" / "video_one.md" in report.files_written

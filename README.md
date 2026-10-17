@@ -20,7 +20,7 @@
 
 初次知识构建后先 inspect/qgate；CONTINUE 才 targeted → merge 并重新检视。无缺口时记录补搜、合并为不适用。只有 STOP_SUCCESS 才出报告；预算耗尽、取消或错误不发布成功成果。既有模型缺口只有在记录新增事实 ID 及解决理由后才可关闭，不能靠下一轮省略而消失。
 
-阶段使用 Protocol v1 JSON envelope；runtime-state.json 记录输入指纹、run_id、阶段产物摘要与 CAS。`--resume` 只复用输入和已提交文件哈希均有效的缓存。损坏缓存使恢复失败；输入变化建立新运行。
+阶段使用 Protocol v1 JSON envelope；runtime-state.json 记录输入指纹、run_id、阶段产物摘要与 CAS。`--resume` 只复用输入和已提交文件哈希均有效的缓存。损坏缓存使恢复失败；输入变化建立新运行。输入支持单个 PDF 或 PDF 目录，不能同时指定 input_dir 和 pdf_dir；指纹只包含实际摄入文件。
 
 所有成果位于指定 output 的主题目录：`artifacts/<run_id>/` 保存阶段 envelope，`runs/<run_id>/initial/` 保存首次 raw/clean/extracted，`targeted-N/` 保存补搜资料。最终 `runs/<run_id>/final/` 包含 report.md、sources.json、tree/00-主表.md、tree/N*.md 和 tree/knowledge.json。根目录 run-summary.json 是当前索引；消费者校验运行身份、runtime 与全部 final 哈希。历史根目录报告和知识树保留原样。
 
@@ -32,6 +32,8 @@ Python >= 3.11。安装核心：`pip install -e ".[llm,search]"`；WebUI 增加 
 
 CLI overrides > 环境变量 > YAML > 默认值。完整模板见 [docs/config.example.yaml](docs/config.example.yaml)。密钥放本地 .env 或环境变量，不提交 Git；`research config` 显示脱敏配置。
 
+同一个 ResearchPipeline 实例同时只允许一个运行。健康检查、阶段执行和重试等待共同遵守总墙钟预算。正式输出固定 Markdown，reporter.format=html 会报配置错误。
+
 full、standard、deep 执行同一九段链，collector.depth 必须至少为 2；搜索摘要和未转写的视频发现记录不能作为正文证据。brief/fast、--skip、阶段重排、关闭 extract、旧 deepen/max_backward_rounds 和 legacy/shadow 开关报错。画像策略使用 `collector.strategies`；补搜上限与时限使用 `nine_loop.max_rounds`、`nine_loop.wall_s_max`。
 
 ## CLI 与 WebUI
@@ -41,6 +43,8 @@ research run "固态电池商业化现状" -s tavily --mode full --output ./rese
 research run "Graph Neural Networks" -s openalex -s arxiv --from-year 2022 --to-year 2026
 research run "电池循环寿命" --input-dir ./materials/raw
 research run "长上下文技术" --pdf-dir ./papers --translate
+research run "单篇论文" --pdf-dir ./papers/paper.pdf
+research run "论文与演讲" -s arxiv --with-talks
 research run "Transformer 原理" --video-url "https://www.bilibili.com/video/BV1xx411c7mD"
 research run "电池循环寿命" --dry-run
 research status ./research-output/topic-slug
@@ -49,6 +53,8 @@ research ui --port 7861
 ```
 
 搜索保留 DuckDuckGo、Tavily、OpenAlex、Crossref、arXiv、Semantic Scholar、PubMed、Wikipedia、GitHub、Google News、CVPR/DBLP、Bilibili、YouTube、X 和 OpenCLI。`--official-url` 指定先抓取的官方来源，成功后扩展学术检索；其余配置见 `research run --help`。
+
+talk 关联在 Collect 内部执行；发现笔记只供定位，不进入事实账本。设置 talk.ingest=true 后，成功转写的 Markdown 纳入当前运行的清洗与抽取。
 
 独立 collect/clean/extract/organize/report 命令和 quick_collect 已移除。ingest-pdf 与 ocr-engines 是输入准备工具，正式报告使用 run。wiki-stage 只打包当前成功 final；旧 publish-wiki 不支持九段结果。
 

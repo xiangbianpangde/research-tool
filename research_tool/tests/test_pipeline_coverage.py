@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import asyncio
+import time
 from pathlib import Path
 
 import pytest
@@ -17,6 +19,9 @@ from research_tool.domain.models import (
 )
 from research_tool.infrastructure.llm import MockLLMClient
 from research_tool.infrastructure.llm.base import LLMClient
+from research_tool.infrastructure.search.base import SearchHit
+from research_tool.infrastructure.search.youtube_backend import YouTubeBackend
+from research_tool.nine_loop.evidence import parse_source
 from research_tool.tests.test_nine_loop_runner import QUOTE, config as runner_config, model_reply
 
 
@@ -352,6 +357,118 @@ async def test_pdf_translation_uses_real_ingestor_and_mocks_only_ocr(tmp_path, m
     assert "ocr:fixture + translate" in next((result.topic_dir / "runs").glob("*/initial/raw/*.md")).read_text()
     assert result.report_result.report_path.is_file()
     assert any(call["kind"] == "chat" for call in llm.calls)
+
+
+@pytest.mark.asyncio
+async def test_single_pdf_file_can_run_and_resume_then_detect_content_change(tmp_path, monkeypatch):
+    pdf = tmp_path / "paper.pdf"
+    pdf.write_bytes(b"%PDF-1.4 version one")
+    calls = []
+
+    class OCR:
+        name = "fixture"
+
+        def available(self):
+            return type("Status", (), {"available": True})()
+
+        def parse(self, path, output):
+            calls.append(path.read_bytes())
+            return QUOTE
+
+    monkeypatch.setattr("research_tool.infrastructure.ingest.pdf.create_ocr_engine", lambda cfg: OCR())
+    cfg = runner_config(tmp_path / "output", minimum=1)
+    cfg.pdf_dir = str(pdf)
+    first = await ResearchPipeline(cfg, llm=MockLLMClient(structured_response=model_reply)).run()
+    assert first.verdict == "STOP_SUCCESS"
+    first_id = json.loads(first.run_summary_path.read_text())["run_id"]
+    resumed = await ResearchPipeline(cfg, llm=MockLLMClient()).run()
+    assert resumed.verdict == "STOP_SUCCESS" and len(calls) == 1
+    pdf.write_bytes(b"%PDF-1.4 version two")
+    changed = await ResearchPipeline(cfg, llm=MockLLMClient(structured_response=model_reply)).run()
+    assert changed.verdict == "STOP_SUCCESS" and len(calls) == 2
+    assert json.loads(changed.run_summary_path.read_text())["run_id"] != first_id
+    assert first.report_result.report_path.exists()
+
+
+@pytest.mark.asyncio
+async def test_concurrent_same_instance_is_rejected_without_mutating_first_run(tmp_path):
+    entered, release = asyncio.Event(), asyncio.Event()
+
+    class WaitingModel(MockLLMClient):
+        async def chat_structured(self, prompt, schema, system=None):
+            if schema.__name__ == "_ChunkResult":
+                entered.set()
+                await release.wait()
+            return model_reply(prompt, schema)
+
+    pipeline = ResearchPipeline(_input_config(tmp_path), llm=WaitingModel())
+    first = asyncio.create_task(pipeline.run("battery"))
+    await asyncio.wait_for(entered.wait(), 2)
+    try:
+        with pytest.raises(StageError, match="运行"):
+            await asyncio.wait_for(pipeline.run("other topic"), 0.2)
+    finally:
+        release.set()
+    result = await asyncio.wait_for(first, 2)
+    assert result.verdict == "STOP_SUCCESS"
+    assert result.topic_dir.name == "battery"
+    assert not (tmp_path / "other-topic").exists()
+
+
+@pytest.mark.asyncio
+async def test_retry_backoff_cannot_exceed_remaining_wall_budget(tmp_path):
+    class Unavailable(MockLLMClient):
+        async def chat_structured(self, prompt, schema, system=None):
+            raise LLMError("temporary provider failure")
+
+    cfg = _input_config(tmp_path)
+    cfg.llm_retry_backoff_sec = 0.5
+    cfg.nine_loop.wall_s_max = 0.05
+    started = time.monotonic()
+    result = await ResearchPipeline(cfg, llm=Unavailable()).run()
+    assert result.verdict == "STOP_BUDGET"
+    assert result.elapsed_sec < 0.3
+    assert time.monotonic() - started < 0.3
+
+
+@pytest.mark.asyncio
+async def test_talk_option_discovers_video_without_promoting_discovery_to_facts(tmp_path, monkeypatch):
+    cfg = _input_config(tmp_path)
+    (cfg.input_dir / "paper.md").write_text(
+        "<!-- source: https://arxiv.org/abs/2601.12345 -->\n"
+        "<!-- title: Battery Cycle Life Experiment -->\n\n" + QUOTE
+    )
+    cfg.talk.enabled = True
+    searches = []
+
+    async def youtube(self, query, *args, **kwargs):
+        searches.append(query)
+        return [SearchHit(
+            url="https://www.youtube.com/watch?v=battery",
+            title="Battery Cycle Life Experiment", source_engine="youtube",
+        )]
+
+    monkeypatch.setattr(YouTubeBackend, "search", youtube)
+    result = await ResearchPipeline(cfg, llm=MockLLMClient(structured_response=model_reply)).run()
+    assert result.verdict == "STOP_SUCCESS" and searches
+    discovery = next(result.topic_dir.glob("runs/*/initial/raw/talk_*.md"))
+    assert parse_source(discovery.read_text())["evidence_kind"] == "discovery"
+    sources = json.loads((result.report_result.report_path.parent / "sources.json").read_text())
+    assert all("youtube.com" not in source["locator"] for source in sources)
+    assert not list(result.topic_dir.glob("runs/*/initial/clean/talk_*.md"))
+
+
+@pytest.mark.asyncio
+async def test_explicitly_closing_stream_records_cancellation_and_releases_instance(tmp_path):
+    cfg = _input_config(tmp_path)
+    pipeline = ResearchPipeline(cfg, llm=MockLLMClient(structured_response=model_reply))
+    events = pipeline.stream()
+    assert (await anext(events)).status == "started"
+    await events.aclose()
+    summary = json.loads(pipeline._result.run_summary_path.read_text())
+    assert summary["verdict"] == "STOP_CANCELLED" and not summary["pipeline_complete"]
+    completed = await pipeline.run()
+    assert completed.verdict == "STOP_SUCCESS"
 
 
 @pytest.mark.asyncio

@@ -103,7 +103,7 @@ collector:
     breadth: 4
 
 
-# Talk 关联（CVPRTalk）：按论文标题搜索 YouTube talk
+# Talk 关联（Collect 内部）：按论文标题搜索 YouTube talk
 # CLI：research run "..." -s cvpr --with-talks --max-talks 5
 talk:
   enabled: false                 # true 或 --with-talks
@@ -151,7 +151,7 @@ organizer:
 
 # Reporter 配置
 reporter:
-  format: markdown               # markdown | html
+  format: markdown               # 正式九段输出固定 markdown；html 会报错
   style: report                  # report | feasibility | review | article
   max_length: 20000
 

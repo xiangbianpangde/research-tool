@@ -1,6 +1,6 @@
 # research-tool 当前状态
 
-更新：2026-10-17。历史基线为 4ab1412，审计提交为 60881ca，九段实现提交为 47f5888。已从 codex/nine-stage-only 建立 main、推送并设为 GitHub 默认分支。后续开发工作区 /Users/xbpd/.codex/worktrees/nine-stage-only/research-tool 位于 main；原目录仍在 master / ab2b0d6，29 tracked 与 10 untracked 文件哈希保持相同。
+更新：2026-10-17。历史基线为 4ab1412，审计提交为 60881ca，九段实现提交为 47f5888。已从 codex/nine-stage-only 建立 main、推送并设为 GitHub 默认分支。本轮优化工作区 /Users/xbpd/.codex/worktrees/nine-stage-only/research-tool 位于 fix/runtime-input-reliability，基于 main / 488ccea；原目录仍在 master / ab2b0d6，29 tracked 与 10 untracked 文件哈希保持相同。
 
 ## 已实现
 
@@ -43,3 +43,25 @@ Pi /review 对入口进行了审查：CLI 成功出口缺少再次校验的告�
 本轮已完成实现、验收、独立审查修复、提交、main 推送与默认分支切换，并独立回读确认。旧 master 与恢复开发分支保留。后续从上述工作区的 main 继续开发；真实联网质量和历史 52.77 复现仍未验证。
 
 Git 推送钩子在正确的 research-tool Python 3.11 环境下另行重跑，结果为 957 passed / 3 skipped。首次误用系统 Python 3.12 因缺依赖失败；没有绕过提交或推送钩子。
+
+
+## 运行边界与输入优化（2026-10-17）
+
+当前优化分支 fix/runtime-input-reliability，基于488ccea。九段正式主链保持不变。本轮修复：
+
+| 问题 | 改进 |
+|---|---|
+| 单PDF路径在目录检查时失败 | 与PdfIngestor共用文件枚举，支持单PDF及内容变化的新运行 |
+| 输入指纹读取无关文件 | 只哈希实际摄入的Markdown/PDF，避免附件变化导致重复研究 |
+| 同实例并发重入会污染主题和结果 | 实例非阻塞锁；关闭stream记取消并释放锁 |
+| 重试等待和健康检查可超预算 | 同一剩余墙钟预算覆盖健康检查、执行与退避 |
+| talk参数被静默忽略 | 接入collect；discovery明确分类，转写正文回收至本轮raw |
+| 视频适配器load_config关键字错误 | 真实配置加载回归，修正path参数；异步重试用asyncio.sleep |
+| Windows缺少fcntl导致导入失败 | 标准库msvcrt锁分支，状态相对路径统一POSIX分隔符 |
+| HTML输出、双输入被静默忽略 | 正式主链明确拒绝html格式及同时设置input_dir/pdf_dir |
+
+完整回归968 passed / 3 skipped，报告/private/tmp/research-opt-all.xml；Ruff与差异检查通过。离线九段冒烟/private/tmp/research-opt-smoke/smoke-receipt.json通过，包含补搜与零模型恢复调用。锁文件uv lock --check --offline通过。wheel构建和临时隔离安装后import/CLI dry-run通过。
+
+真实浏览器执行单PDF文件输入，报告下载HTTP200，SHA-256为09ae31e2bd336f473e0e15a841e5a1fb52e986b38ccc30c0fea4d46922bd8783，与运行摘要一致。复现脚本及证据在/private/tmp/research-opt-ui/server.py、success.snapshot.txt、success.download.txt；只模拟OCR/模型外部边界，管线和浏览器交互真实执行。Pi /review对五个生产文件给出approve/0 findings，原报告/private/tmp/research-opt-review.md。
+
+限制：Windows锁分支只做本机模拟及POSIX真实竞争，未在Windows真机运行。当前共享Python环境pip check仍发现额外安装的arxiv4.0.0要求lxml>=6.1,<7，但当前lxml5.4.0；该arxiv包不是本项目arXiv后端依赖，uv.lock已锁定lxml6.1.1。没有擅自改共享环境，联网检索与研究质量/DRB仍未验证。原工作区39个既有文件哈希和HEAD复核未变。

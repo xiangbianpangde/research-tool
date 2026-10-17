@@ -369,6 +369,10 @@ class PipelineConfig(BaseModel):
             raise ValueError("九段主链不能关闭 extract")
         if self.collector.depth < 2:
             raise ValueError("正式九段调研要求 collector.depth >= 2，搜索摘要不能替代正文")
+        if self.input_dir is not None and self.pdf_dir is not None:
+            raise ValueError("input_dir 与 pdf_dir 不能同时设置，请明确输入来源")
+        if self.reporter.format != "markdown":
+            raise ValueError("正式九段输出只支持 reporter.format=markdown")
         return self
 
 
