@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# research-tool 交互式一键部署入口（macOS / Linux）
+# research-tool 交互式一键部署入口（macOS）
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"

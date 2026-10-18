@@ -5,7 +5,7 @@
 
 # LLM 配置（必填）。默认 DeepSeek（OpenAI 兼容）。
 llm:
-  provider: deepseek            # openai | deepseek | ollama | anthropic
+  provider: deepseek            # openai | deepseek | ollama | anthropic | minimax | openai_compatible
   model: deepseek-chat          # 模型名
   api_key: ${DEEPSEEK_API_KEY}  # 支持 ${ENV_VAR} 环境变量引用
   base_url: https://api.deepseek.com/v1  # DeepSeek endpoint；OpenAI 留 null
@@ -15,6 +15,13 @@ llm:
   read_timeout_sec: 120         # 单次网络读取超时（不采用 SDK 默认 600s）
   request_timeout_sec: 180      # 整个 chat/stream 调用硬墙
   sdk_max_retries: 0            # 禁 SDK 隐式重试，统一交给 pipeline 有界重试
+  request_options: {}           # 仅允许 extra_body；不在其中放密钥，不可覆盖客户端字段
+  session_id: ${LLM_SESSION_ID} # 可选；网关要求会话路由时发送 x-opencode-session
+  # 对任意 OpenAI 兼容网关，改用 provider: openai_compatible，明确提供 model/base_url；
+  # 密钥通过 LLM_API_KEY 注入。支持 LLM_PROVIDER / LLM_MODEL / LLM_BASE_URL 临时切换。
+  # request_options:
+  #   extra_body:
+  #     thinking: {type: disabled}  # 仅在端点确实支持时启用，不按模型名自动猜参数
 
 # Collector 配置
 collector:
@@ -103,7 +110,7 @@ collector:
     breadth: 4
 
 
-# Talk 关联（CVPRTalk）：按论文标题搜索 YouTube talk
+# Talk 关联（Collect 内部）：按论文标题搜索 YouTube talk
 # CLI：research run "..." -s cvpr --with-talks --max-talks 5
 talk:
   enabled: false                 # true 或 --with-talks
@@ -151,7 +158,7 @@ organizer:
 
 # Reporter 配置
 reporter:
-  format: markdown               # markdown | html
+  format: markdown               # 正式九段输出固定 markdown；html 会报错
   style: report                  # report | feasibility | review | article
   max_length: 20000
 

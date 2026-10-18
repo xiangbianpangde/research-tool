@@ -10,6 +10,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
 from pathlib import Path
@@ -21,8 +22,6 @@ from research_tool.common.slug import slugify
 from research_tool.domain.errors import VideoIngestError
 from research_tool.domain.models import (
     NINE_STAGES,
-    CleanerConfig,
-    OrganizerConfig,
     PipelineConfig,
     PipelineResult,
     StageEvent,
@@ -198,8 +197,16 @@ class TestPipelineTrigger:
     """九段管道触发器：实际本地执行与适配契约。"""
 
     @pytest.mark.asyncio
-    async def test_trigger_stages_run(self, tmp_path: Path, monkeypatch):
-        """视频 raw/ 进入公开九段流程；旧 stages 参数不能裁剪主链。"""
+    async def test_trigger_stages_run_with_real_config(self, tmp_path: Path, monkeypatch):
+        """真实配置加载后视频 raw/ 进入完整九段流程，拒绝错误的加载参数。"""
+        config_path = tmp_path / "config.yaml"
+        config_path.write_text(json.dumps({
+            "cleaner": {"min_content_length": 20, "relevance_filter": True},
+            "organizer": {"min_nodes": 1, "max_nodes": 3, "min_evidence_per_node": 1},
+        }), encoding="utf-8")
+        monkeypatch.setenv("RESEARCH_CONFIG", str(config_path))
+        for env_name in ("LLM_PROVIDER", "LLM_MODEL", "LLM_BASE_URL"):
+            monkeypatch.delenv(env_name, raising=False)
         topic = "video evidence"
         quote = "The measured battery retained 90 percent capacity after 1000 cycles."
         source_url = "https://www.youtube.com/watch?v=video1"
@@ -215,16 +222,6 @@ class TestPipelineTrigger:
         )
         source_path = write_markdown(markdown, topic=topic, video_id="video1", work_dir=tmp_path)
         assert parse_source(source_path.read_text(encoding="utf-8"))["locator"] == source_url
-        configurations = []
-
-        def isolated_config(*args, overrides=None, **kwargs):
-            cfg = PipelineConfig(
-                **overrides,
-                cleaner=CleanerConfig(min_content_length=20, relevance_filter=True),
-                organizer=OrganizerConfig(min_nodes=1, max_nodes=3, min_evidence_per_node=1),
-            )
-            configurations.append(cfg)
-            return cfg
 
         def reply(prompt, schema):
             if schema.__name__ == "_ChunkResult":
@@ -262,7 +259,6 @@ class TestPipelineTrigger:
             raise AssertionError(f"unexpected schema: {schema.__name__}")
 
         llm = MockLLMClient(structured_response=reply)
-        monkeypatch.setattr("research_tool.domain.config.load_config", isolated_config)
         monkeypatch.setattr(
             "research_tool.infrastructure.llm.base.LLMClient.from_config", lambda cfg: llm
         )
@@ -273,10 +269,6 @@ class TestPipelineTrigger:
         assert isinstance(result, StagesResult)
         assert result.success, result.error
         assert result.error is None and result.retried is False
-        assert configurations[0].input_dir == source_path.parent
-        assert configurations[0].work_dir == tmp_path
-        assert configurations[0].stages == list(NINE_STAGES)
-        assert configurations[0].resume is True
         topic_dir = tmp_path / slugify(topic)
         summary = json.loads((topic_dir / "run-summary.json").read_text(encoding="utf-8"))
         assert summary["verdict"] == "STOP_SUCCESS" and summary["pipeline_complete"] is True
@@ -290,6 +282,65 @@ class TestPipelineTrigger:
         assert quote in report and source_url in report
         assert source_path.read_text(encoding="utf-8") == markdown
         assert llm.calls
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("failure_kind", ["exception", "failed_result"])
+    async def test_trigger_retry_yields_to_event_loop(
+        self, tmp_path: Path, monkeypatch, failure_kind: str
+    ):
+        """两种重试路径都让事件循环在重试等待期间继续运行。"""
+        config_path = tmp_path / "config.yaml"
+        config_path.write_text("{}", encoding="utf-8")
+        monkeypatch.setenv("RESEARCH_CONFIG", str(config_path))
+        for env_name in ("LLM_PROVIDER", "LLM_MODEL", "LLM_BASE_URL"):
+            monkeypatch.delenv(env_name, raising=False)
+
+        event = asyncio.Event()
+        attempts = 0
+
+        async def mark_ready():
+            await asyncio.sleep(0)
+            event.set()
+
+        async def successful_stream(topic):
+            for stage in NINE_STAGES:
+                yield StageEvent(stage=stage, status="completed", message="")
+
+        async def failed_stream(topic):
+            yield StageEvent(stage="collect", status="failed", message="retry me")
+
+        def make_pipeline(config):
+            nonlocal attempts
+            attempts += 1
+            if attempts == 2:
+                assert event.is_set(), "event loop must run during the retry delay"
+            if attempts == 1 and failure_kind == "exception":
+                raise RuntimeError("retry me")
+            pipeline = MagicMock()
+            if attempts == 1:
+                pipeline.stream = failed_stream
+                pipeline._result = PipelineResult(
+                    topic_dir=tmp_path / "topic", verdict="STOP_ERROR"
+                )
+            else:
+                pipeline.stream = successful_stream
+                pipeline._result = PipelineResult(
+                    topic_dir=tmp_path / "topic",
+                    stages_completed=list(NINE_STAGES),
+                    verdict="STOP_SUCCESS",
+                )
+            return pipeline
+
+        monkeypatch.setattr(
+            "research_tool.application.pipeline.ResearchPipeline", make_pipeline
+        )
+        ticker = asyncio.create_task(mark_ready())
+        result = await PipelineTrigger().trigger("topic", work_dir=tmp_path)
+        await ticker
+
+        assert result.success and result.retried
+        assert attempts == 2
+        assert event.is_set()
 
     @pytest.mark.asyncio
     async def test_trigger_pipeline_failure_returns_failed(self, tmp_path: Path):

@@ -1,4 +1,4 @@
-"""Durable, CAS-protected state for the nine-stage runtime loop."""
+"""Durable, CAS-protected state using macOS/POSIX file locks."""
 
 from __future__ import annotations
 
@@ -105,7 +105,7 @@ class RuntimeState:
 
             completed = dict(state["completed_stages"])
             completed[stage] = {
-                "artifact_path": str(artifact.relative_to(self.root)),
+                "artifact_path": artifact.relative_to(self.root).as_posix(),
                 "artifact_digest": artifact_digest,
             }
             committed_round = self._round_for_stage(stage)

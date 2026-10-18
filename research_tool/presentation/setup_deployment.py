@@ -53,7 +53,6 @@ FULL_CAPABILITIES = frozenset(
         "core",
         "llm",
         "search",
-        "ui",
         "video",
         "pdf",
         "crawl",
@@ -69,7 +68,6 @@ CAPABILITY_FIXES = MappingProxyType(
         "core": '重新运行：pip install -e ".[llm,search]"',
         "llm": '安装 SDK 并配置匹配的 provider/key：pip install -e ".[llm]"',
         "search": '安装默认 Web/Tavily 搜索：pip install -e ".[search]"',
-        "ui": '安装 Web UI：pip install -e ".[ui]"',
         "video": '安装 .[video] 并配置有效 MINIMAX_API_KEY（默认视频链路必需）',
         "pdf": '安装 MinerU（大体积）：pip install -e ".[pdf]"',
         "crawl": '安装 Crawl4AI：pip install -e ".[crawl]"',
@@ -98,21 +96,21 @@ class ProfileSpec:
 PROFILES: dict[str, ProfileSpec] = {
     "minimal": ProfileSpec(
         "最小可跑",
-        "六阶段 CLI、默认 Web 搜索和全部 LLM 客户端",
+        "九阶段 CLI/SDK、默认 Web 搜索和全部 LLM 客户端",
         frozenset({"core", "llm", "search"}),
         ("llm", "search"),
     ),
     "recommended": ProfileSpec(
         "推荐",
-        "最小档 + Web UI + Crawl4AI 浏览器抓取",
-        frozenset({"core", "llm", "search", "ui", "crawl", "crawl_browser"}),
-        ("llm", "search", "ui", "crawl"),
+        "最小档 + Crawl4AI 网页正文抓取",
+        frozenset({"core", "llm", "search", "crawl", "crawl_browser"}),
+        ("llm", "search", "crawl"),
     ),
     "full": ProfileSpec(
         "完整",
-        "全部 Python 能力，并严格检查 PDF、视频和 X 的系统工具",
+        "全部 CLI/SDK 能力，并严格检查 PDF、视频和 X 的系统工具",
         FULL_CAPABILITIES,
-        ("llm", "search", "ui", "video", "pdf", "crawl"),
+        ("llm", "search", "video", "pdf", "crawl"),
     ),
 }
 

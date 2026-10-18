@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import math
 import re
 from datetime import datetime, timezone
 from pathlib import Path
@@ -18,7 +19,7 @@ from pydantic import BaseModel, Field
 from ..llm.base import LLMClient
 from ...domain.models import CollectorConfig, CollectResult, Source, SourceAudit
 from ..search import get_backend
-from ..search._http import set_default_proxy
+from ..search._http import reset_request_deadline, set_default_proxy, set_request_deadline
 from ..search.base import SearchHit, SearchResult
 from ..search.proxy_preflight import preflight_proxy
 from .base import (
@@ -31,7 +32,11 @@ from .base import (
 )
 from .fetcher import FetchResult, Fetcher
 from ...common.logging_config import get_logger, hash_url
-from ...common.url_guard import assert_safe_url
+from ...common.url_guard import (
+    UrlGuardBusyError,
+    UrlGuardTimeoutError,
+    assert_safe_url_async,
+)
 from ...domain.errors import CollectError, LLMAuthenticationError, UrlBlockedError
 
 logger = get_logger(__name__)
@@ -191,6 +196,17 @@ class Collector:
         self.llm = llm
         self._proxy_preflight_done = False
 
+    async def _assert_safe_url_bounded(self, url: str) -> None:
+        timeout = max(float(self.config.timeout_sec), 0.001)
+        try:
+            await asyncio.wait_for(
+                assert_safe_url_async(url, timeout_sec=timeout), timeout=timeout,
+            )
+        except UrlGuardTimeoutError:
+            raise
+        except asyncio.TimeoutError as exc:
+            raise UrlGuardTimeoutError("Collector DNS guard deadline exceeded") from exc
+
     @staticmethod
     def _increment(audit: SourceAudit, **counts: int) -> SourceAudit:
         """Return an updated immutable audit counter."""
@@ -343,11 +359,26 @@ class Collector:
         for engine, q in scoped:
             if engine != "github":
                 continue
+            timeout = float(self.config.timeout_sec)
+            deadline = asyncio.get_running_loop().time() + timeout
+            token = set_request_deadline(deadline)
             try:
-                batch = await gh.search(q, self.config.max_results_per_engine)
+                # Keep the historical two-positional-argument seam: the
+                # backend's optional deep-search kwargs are not needed here.
+                batch = await asyncio.wait_for(
+                    gh.search(q, self.config.max_results_per_engine), timeout=timeout
+                )
+            except asyncio.TimeoutError:
+                warnings.append(
+                    f"expert scoped github 搜索截止时间超时（>{self.config.timeout_sec:g}s）"
+                    f" query={q!r}"
+                )
+                continue
             except Exception as e:  # noqa: BLE001
                 warnings.append(f"expert scoped github 失败 query={q!r}: {e}")
                 continue
+            finally:
+                reset_request_deadline(token)
             for h in batch:
                 if not h.url or h.url in seen:
                     continue
@@ -375,6 +406,56 @@ class Collector:
         sorts = self.config.deep_sorts or ["relevance"]
         return [(s, p * page_size) for p in range(self.config.deep_pages) for s in sorts]
 
+    def _search_request_budget(self, total_combinations: int, baseline_requests: int = 0) -> int:
+        """Bound deep expansion without starving a configured engine/query pair.
+
+        For N total combinations, E active engines and Q queries, reserve one
+        first-combo baseline sweep E*Q.  Then allow useful result capacity plus
+        an in-flight wave: B=min(N, max(E*Q, ceil(M/P)+C-1)), where M is
+        max_total_results, P max_results_per_engine and C search concurrency.
+        """
+        if total_combinations <= 0:
+            return 0
+        useful_waves = math.ceil(
+            self.config.max_total_results / self.config.max_results_per_engine
+        )
+        return min(
+            total_combinations,
+            max(baseline_requests, useful_waves + self.config.max_concurrent_searches - 1),
+        )
+
+    async def _search_backend_request(
+        self,
+        backend,
+        query: str,
+        *,
+        from_year: int | None,
+        to_year: int | None,
+        sort: str | None,
+        offset: int,
+        semaphore: asyncio.Semaphore,
+    ) -> list[SearchHit]:
+        """Run one backend call under both concurrency and one total deadline."""
+        async with semaphore:
+            timeout = float(self.config.timeout_sec)
+            deadline = asyncio.get_running_loop().time() + timeout
+            token = set_request_deadline(deadline)
+            try:
+                return await asyncio.wait_for(
+                    backend.search(
+                        query,
+                        self.config.max_results_per_engine,
+                        self.config.language,
+                        from_year=from_year,
+                        to_year=to_year,
+                        sort=sort,
+                        offset=offset,
+                    ),
+                    timeout=timeout,
+                )
+            finally:
+                reset_request_deadline(token)
+
     async def search_queries(  # noqa: PLR0915 - search funnel records every terminal path
         self,
         queries: list[str],
@@ -384,12 +465,12 @@ class Collector:
         sort: str | None = None,
         offset: int | None = None,
     ) -> SearchResult:
-        """对给定查询列表跑全部引擎，受 max_concurrent_searches 限流（修复 2），
-        失败收集为 warnings（修复 1），按 URL 去重。Deepen 阶段也复用本方法。
+        """对给定查询列表跑全部引擎，受并发、请求预算和单请求截止时间约束。
 
         P2 时间标签：年份窗口缺省取 config.from_year/to_year（显式传参可覆盖）。
         P2 deep-search：显式 sort/offset → 单次（供画像时间线回溯）；否则
-        config.deep_search 开启时展开 (sort,offset) 矩阵，每查询多次搜索后去重。"""
+        config.deep_search 开启时展开 (sort,offset) 矩阵，每查询多次搜索后去重。
+        """
         if not self._proxy_preflight_done:
             proxy_result = await preflight_proxy(self.config.proxy)
             if not proxy_result.ok:
@@ -425,62 +506,107 @@ class Collector:
             combos = [(None, 0)]
 
         sem = asyncio.Semaphore(self.config.max_concurrent_searches)
-
-        async def _one(backend, query: str, s: str | None, off: int) -> list[SearchHit]:
-            async with sem:
-                return await backend.search(
-                    query,
-                    self.config.max_results_per_engine,
-                    self.config.language,
-                    from_year=fy,
-                    to_year=ty,
-                    sort=s,
-                    offset=off,
-                )
-
-        tasks = []
-        meta: list[tuple[str, str]] = []  # (engine, query)，用于失败时定位
+        planned: list[tuple[str, str, object, str | None, int]] = []
         audits: dict[str, SourceAudit] = {
             str(engine): SourceAudit(engine=str(engine)) for engine in self.config.search_engines
         }
         skip_x = bool(getattr(self, "_x_preflight_failed", False))
+        active_engines: list[tuple[str, object]] = []
         for engine in self.config.search_engines:
-            if skip_x and str(engine) in ("x", "twitter"):
+            name = str(engine)
+            if skip_x and name in ("x", "twitter"):
                 continue
-            backend = get_backend(engine, self.config)
+            active_engines.append((name, get_backend(engine, self.config)))
+        # Query order is deliberate: callers' explicit queries are already
+        # placed first by search_only; the first combo then sweeps every
+        # query×engine pair before deep pages/sorts are expanded.
+        for s, off in combos:
             for query in queries:
-                for s, off in combos:
-                    meta.append((engine, query))
-                    tasks.append(_one(backend, query, s, off))
-                    name = str(engine)
-                    audits[name] = self._increment(audits[name], attempted=1)
-        results = await asyncio.gather(*tasks, return_exceptions=True) if tasks else []
+                for name, backend in active_engines:
+                    planned.append((name, query, backend, s, off))
+
+        baseline_requests = len(active_engines) * len(queries)
+        request_budget = self._search_request_budget(len(planned), baseline_requests)
+        selected = planned[:request_budget]
+        warnings: list[str] = list(early_warnings)
+        if request_budget < len(planned):
+            warnings.append(
+                "搜索请求预算已截断："
+                f"planned={len(planned)}, budget={request_budget}, "
+                f"baseline={baseline_requests}, "
+                "formula=max(engine*query,ceil(max_total_results/max_results_per_engine)+"
+                "max_concurrent_searches-1)"
+            )
 
         hits: list[SearchHit] = []
-        warnings: list[str] = list(early_warnings)
         seen: set[str] = set()
-        for (engine, query), res in zip(meta, results):
-            if isinstance(res, BaseException):
-                warnings.append(f"{engine} 搜索失败 query={query!r}: {res}")
+        width = self.config.max_concurrent_searches
+        for start in range(0, len(selected), width):
+            # Build at most one concurrency wave; do not queue the remaining
+            # combinations after retained capacity has already been reached.
+            wave = selected[start : start + width]
+            tasks: list[asyncio.Task] = []
+            for engine, query, backend, s, off in wave:
+                tasks.append(
+                    asyncio.create_task(
+                        self._search_backend_request(
+                            backend,
+                            query,
+                            from_year=fy,
+                            to_year=ty,
+                            sort=s,
+                            offset=off,
+                            semaphore=sem,
+                        )
+                    )
+                )
+                audits[engine] = self._increment(audits[engine], attempted=1)
+            try:
+                results = await asyncio.gather(*tasks, return_exceptions=True)
+            except BaseException:
+                for task in tasks:
+                    if not task.done():
+                        task.cancel()
+                await asyncio.gather(*tasks, return_exceptions=True)
+                raise
+
+            for (engine, query, _backend, _sort, _offset), res in zip(wave, results):
                 name = str(engine)
-                audits[name] = self._increment(audits[name], failed=1)
-                continue
-            name = str(engine)
-            audits[name] = self._increment(audits[name], hits=len(res))
-            for hit in res:
-                threshold = self.config.search_relevance_min_overlap
-                if threshold > 0 and _hit_relevance(query, hit) < threshold:
-                    warnings.append(f"{engine} 低相关命中已跳过 query={query!r}: {hit.title[:80]}")
-                    audits[name] = self._increment(audits[name], filtered=1)
+                if isinstance(res, asyncio.CancelledError):
+                    raise res
+                if isinstance(res, BaseException):
+                    if isinstance(res, asyncio.TimeoutError):
+                        detail = f"搜索截止时间超时（>{self.config.timeout_sec:g}s）"
+                    else:
+                        detail = str(res) or type(res).__name__
+                    warnings.append(f"{engine} 搜索失败 query={query!r}: {detail}")
+                    audits[name] = self._increment(audits[name], failed=1)
                     continue
-                if hit.url in seen:
-                    audits[name] = self._increment(audits[name], deduplicated=1)
-                    continue
-                seen.add(hit.url)
-                if len(hits) < self.config.max_total_results:
-                    hits.append(hit.model_copy(update={"audit_engine": name}))
-                else:
-                    audits[name] = self._increment(audits[name], filtered=1)
+                audits[name] = self._increment(audits[name], hits=len(res))
+                for hit in res:
+                    threshold = self.config.search_relevance_min_overlap
+                    if threshold > 0 and _hit_relevance(query, hit) < threshold:
+                        warnings.append(
+                            f"{engine} 低相关命中已跳过 query={query!r}: {hit.title[:80]}"
+                        )
+                        audits[name] = self._increment(audits[name], filtered=1)
+                        continue
+                    if hit.url in seen:
+                        audits[name] = self._increment(audits[name], deduplicated=1)
+                        continue
+                    seen.add(hit.url)
+                    if len(hits) < self.config.max_total_results:
+                        hits.append(hit.model_copy(update={"audit_engine": name}))
+                    else:
+                        audits[name] = self._increment(audits[name], filtered=1)
+            completed_requests = start + len(wave)
+            if (
+                len(hits) >= self.config.max_total_results
+                and completed_requests >= baseline_requests
+                and completed_requests < len(selected)
+            ):
+                warnings.append("搜索结果已达保留上限且基线覆盖完成；未启动剩余请求组合")
+                break
         source_audits = [audits[name] for name in sorted(audits)]
         self._pending_source_audits = source_audits
         return SearchResult(
@@ -504,9 +630,11 @@ class Collector:
         if self.config.official_urls and not dry_run:
             try:
                 for url in self.config.official_urls:
-                    assert_safe_url(url)
+                    await self._assert_safe_url_bounded(url)
             except UrlBlockedError as exc:
                 raise CollectError("官方来源 URL 未通过安全校验，已停止学术扩展") from exc
+            except (UrlGuardTimeoutError, UrlGuardBusyError) as exc:
+                raise CollectError("官方来源 DNS 校验超时或容量已满，已停止学术扩展") from exc
             official_hits = [
                 SearchHit(
                     url=url,
@@ -531,10 +659,10 @@ class Collector:
                 if isinstance((url := source.get("url")), str)
             }
             missing = [hit.url for hit in official_hits if hit.url not in recorded_urls]
-            successful_count = max(
-                len(official_hits) - len(missing),
-                len(official_result.files),
-            )
+            # Only the required official primary URLs satisfy this gate.  Files
+            # produced by depth-3 secondary links must never count as primary
+            # success, even when they increase ``official_result.files``.
+            successful_count = len(official_hits) - len(missing)
             if successful_count == 0:
                 details = "; ".join(official_result.warnings) or "未生成有效正文"
                 raise CollectError(f"官方来源抓取失败，已停止学术扩展：{details}")
@@ -570,9 +698,10 @@ class Collector:
         """抓取 hits 并写入 raw/，幂等且防覆盖。
 
         - 按 sources.json 已记录的 URL 去重（同一 URL 不重复抓取/写入）
-        - 文件名 idx 从现有文件数续编、并加 URL 短哈希后缀，避免多次调用
-          （含 Deepen 复用本方法）相互覆盖（修复 3 / 风险 9）
-        - 写完后合并 sources.json（风险 8：来源不断裂）
+        - 文件名 idx 从现有最大序号续编，按输入顺序预留、加 URL 短哈希后缀，
+          避免完成顺序或部分取消后的重试覆盖既有文件
+        - 每个完成项同步写 raw、sources.json 和对应 audit 增量；取消/异常继续抛出，
+          不把持久化部分成果当作 dispatcher 的阶段成功提交
         """
         ensure_dir(raw_dir)
         existing_urls = {
@@ -616,8 +745,7 @@ class Collector:
                         "(not transcribed; use --video-url for full ingest)\n\n"
                         f"{hit.snippet or ''}\n"
                     )
-                    fr = FetchResult(hit.url, body, ok=True)
-                    return hit, fr
+                    return hit, FetchResult(hit.url, body, ok=True)
                 if self.config.depth >= 2:
                     fr = await fetcher.fetch(hit.url)
                 else:
@@ -625,37 +753,60 @@ class Collector:
                     fr = FetchResult(hit.url, hit.snippet, ok=bool(hit.snippet))
                 return hit, fr
 
-        fetched = await asyncio.gather(*[_fetch(h) for h in todo]) if todo else []
-
-        # depth==3：对成功页追踪少量二级内部链接
-        if self.config.depth >= 3 and fetched:
-            extra = await self._follow_links(list(fetched), fetcher, sem, topic)
-            fetched = list(fetched) + extra
-
         files: list[Path] = []
         sources: list[Source] = []
-        idx = self._next_idx(raw_dir)
+        warnings: list[str] = []
+        base_idx = self._next_idx(raw_dir)
         written_urls: set[str] = set(existing_urls)
-        for hit, fr in fetched:
+        # Reserve slots by input order.  Completion order may vary, but a URL's
+        # deterministic index does not depend on which sibling returns first.
+        slots = {id(hit): base_idx + position + 1 for position, hit in enumerate(todo)}
+
+        # Persist search attempts and already-known URL deduplication before any
+        # fetch begins.  Subsequent calls persist only deltas, avoiding double
+        # counting while keeping source-audit.json valid during cancellation.
+        self._append_sources(raw_dir, [])
+        merged_audits = self._persist_audits(raw_dir, list(audits.values()))
+
+        def _persist_one(hit: SearchHit, fr: FetchResult, slot: int) -> None:
+            """Persist one completed fetch and its matching audit delta."""
+            nonlocal merged_audits
             name = hit.audit_engine or hit.source_engine or "unknown"
+            audits.setdefault(name, SourceAudit(engine=name))
             if not fr.ok or not fr.markdown.strip():
+                detail = fr.error or "未返回正文"
+                warnings.append(f"抓取失败 url_hash={hash_url(hit.url)}: {detail}")
                 audits[name] = self._increment(audits[name], fetch_failed=1)
-                continue
+                merged_audits = self._persist_audits(
+                    raw_dir, [SourceAudit(engine=name, fetch_failed=1)]
+                )
+                return
             # 垃圾过滤：正文过短(登录页/导航页/JS空壳)直接丢弃
             if len(fr.markdown.strip()) < self.config.min_doc_chars:
+                warnings.append(f"抓取正文过短，已过滤 url_hash={hash_url(hit.url)}")
                 audits[name] = self._increment(audits[name], filtered=1)
-                continue
+                merged_audits = self._persist_audits(
+                    raw_dir, [SourceAudit(engine=name, filtered=1)]
+                )
+                return
             if hit.url in written_urls:  # 二级链接也可能撞已有 URL
                 audits[name] = self._increment(audits[name], deduplicated=1)
-                continue
+                merged_audits = self._persist_audits(
+                    raw_dir, [SourceAudit(engine=name, deduplicated=1)]
+                )
+                return
             written_urls.add(hit.url)
-            idx += 1
             domain = domain_of(hit.url)
-            fname = f"{idx:02d}-{safe_filename(domain)}-{_url_hash(hit.url)}.md"
+            fname = f"{slot:02d}-{safe_filename(domain)}-{_url_hash(hit.url)}.md"
             fpath = raw_dir / fname
             via = f'{hit.source_engine}_search("{topic}")'
-            evidence_kind = ("discovery" if _is_video_url(hit.url) else
-                             "snippet" if self.config.depth == 1 else "body")
+            evidence_kind = (
+                "discovery"
+                if _is_video_url(hit.url)
+                else "snippet"
+                if self.config.depth == 1
+                else "body"
+            )
             header = (
                 f"<!-- source: {hit.url} -->\n"
                 f"<!-- title: {hit.title} -->\n"
@@ -664,25 +815,98 @@ class Collector:
                 f"<!-- via: {via} -->\n\n"
             )
             write_text(fpath, header + fr.markdown)
-            files.append(fpath)
-            sources.append(
-                Source(
-                    url=hit.url,
-                    title=hit.title,
-                    fetched_at=_now_iso(),
-                    source_engine=hit.source_engine,
-                    content_hash=_sha256(fr.markdown),
-                    snippet=hit.snippet,
-                )
+            source = Source(
+                url=hit.url,
+                title=hit.title,
+                fetched_at=_now_iso(),
+                source_engine=hit.source_engine,
+                content_hash=_sha256(fr.markdown),
+                snippet=hit.snippet,
             )
+            self._append_sources(raw_dir, [source])
+            files.append(fpath)
+            sources.append(source)
             audits[name] = self._increment(audits[name], retained=1)
+            merged_audits = self._persist_audits(raw_dir, [SourceAudit(engine=name, retained=1)])
 
-        self._append_sources(raw_dir, sources)
-        merged_audits = self._persist_audits(raw_dir, list(audits.values()))
+        # Existing URLs are accounted for in the initial persisted audit delta.
+        # New fetches are handled one completion at a time below.
+        tasks = {
+            asyncio.create_task(_fetch(hit)): hit
+            for hit in todo
+        }
+        pending = set(tasks)
+        fetched: list[tuple[SearchHit, FetchResult]] = []
+        processed: set[asyncio.Task] = set()
+        try:
+            while pending:
+                done, pending = await asyncio.wait(
+                    pending, return_when=asyncio.FIRST_COMPLETED
+                )
+                for task in done:
+                    processed.add(task)
+                    hit = tasks[task]
+                    try:
+                        fetched_item = task.result()
+                    except asyncio.CancelledError:
+                        raise
+                    except Exception as exc:  # noqa: BLE001 - preserve non-success semantics
+                        fetched_item = (hit, FetchResult(hit.url, "", ok=False, error=str(exc)))
+                        fetched.append(fetched_item)
+                        try:
+                            _persist_one(*fetched_item, slots[id(hit)])
+                        except Exception as persistence_error:  # noqa: BLE001
+                            logger.warning(
+                                "fetch failure audit flush failed url_hash=%s error_type=%s",
+                                hash_url(hit.url), type(persistence_error).__name__,
+                            )
+                        raise
+                    fetched.append(fetched_item)
+                    _persist_one(*fetched_item, slots[id(hit)])
+        except BaseException:
+            # Best-effort flush must neither replace the original failure nor
+            # prevent sibling cleanup when persistence itself is failing.
+            try:
+                for task in tasks:
+                    if task.done() and task not in processed:
+                        processed.add(task)
+                        hit = tasks[task]
+                        try:
+                            fetched_item = task.result()
+                        except asyncio.CancelledError:
+                            continue
+                        except Exception as exc:  # noqa: BLE001
+                            fetched_item = (hit, FetchResult(hit.url, "", ok=False, error=str(exc)))
+                        fetched.append(fetched_item)
+                        try:
+                            _persist_one(*fetched_item, slots[id(hit)])
+                        except Exception as flush_error:  # noqa: BLE001 - preserve original error
+                            logger.warning(
+                                "partial fetch flush failed url_hash=%s error_type=%s",
+                                hash_url(hit.url), type(flush_error).__name__,
+                            )
+            finally:
+                for task in tasks:
+                    if not task.done():
+                        task.cancel()
+                await asyncio.gather(*tasks, return_exceptions=True)
+            raise
+
+        # depth==3：对成功页追踪少量二级内部链接。  Initial pages are already
+        # durable before this expansion starts, so a later cancellation cannot
+        # erase their committed evidence.
+        if self.config.depth >= 3 and fetched:
+            extra = await self._follow_links(list(fetched), fetcher, sem, topic)
+            next_slot = base_idx + len(todo) + 1
+            for hit, fr in extra:
+                _persist_one(hit, fr, next_slot)
+                next_slot += 1
+
         return CollectResult(
             files=files,
             sources=sources,
             raw_dir=raw_dir,
+            warnings=warnings,
             source_audits=merged_audits,
         )
 
@@ -722,8 +946,13 @@ class Collector:
 
     @staticmethod
     def _next_idx(raw_dir: Path) -> int:
-        """续编文件序号：现有 *.md 数量，避免重置为 0 覆盖既有文件（修复 3）。"""
-        return len([p for p in raw_dir.glob("*.md")])
+        """Return the highest numeric raw prefix, preserving gaps after partial runs."""
+        indexes = []
+        for path in raw_dir.glob("*.md"):
+            match = re.match(r"^(\d+)-", path.name)
+            if match:
+                indexes.append(int(match.group(1)))
+        return max(indexes, default=0)
 
     async def _follow_links(
         self,
@@ -742,20 +971,37 @@ class Collector:
                     targets.append(link)
 
         async def _f(url: str):
-            # SSRF: skip private hrefs before fetch (never call fetcher.fetch on them)
-            try:
-                assert_safe_url(url)
-            except UrlBlockedError:
-                logger.warning("SSRF guard skipped secondary link: %s", hash_url(url))
-                return None
             async with sem:
+                # DNS validation shares the fetch slot; a link batch must not
+                # exhaust resolver admission before its fetches can start.
+                try:
+                    await self._assert_safe_url_bounded(url)
+                except UrlBlockedError:
+                    logger.warning("SSRF guard skipped secondary link: %s", hash_url(url))
+                    return None
+                except (UrlGuardTimeoutError, UrlGuardBusyError) as exc:
+                    logger.warning(
+                        "secondary link DNS guard failed url_hash=%s error_type=%s",
+                        hash_url(url), type(exc).__name__,
+                    )
+                    raise
                 fr = await fetcher.fetch(url)
                 hit = SearchHit(url=url, title="", source_engine="secondary")
                 return hit, fr
 
         if not targets:
             return []
-        results = await asyncio.gather(*[_f(u) for u in targets])
+        tasks = [asyncio.create_task(_f(url)) for url in targets]
+        try:
+            results = await asyncio.gather(*tasks)
+        finally:
+            # gather propagates a failed secondary immediately without
+            # cancelling siblings.  Always cancel/reap them before leaving;
+            # an original secondary error or caller cancellation still raises.
+            for task in tasks:
+                if not task.done():
+                    task.cancel()
+            await asyncio.gather(*tasks, return_exceptions=True)
         return [r for r in results if r is not None]
 
 

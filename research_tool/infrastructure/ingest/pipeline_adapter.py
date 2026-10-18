@@ -20,6 +20,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import os
 import shutil
 import time
@@ -233,7 +234,7 @@ class PipelineTrigger:
 
         try:
             cfg = load_config(
-                config_path=None,
+                path=None,
                 overrides={
                     "topic": topic,
                     "work_dir": str(work_dir),
@@ -287,7 +288,7 @@ class PipelineTrigger:
                 if not success and attempt < self._max_retry:
                     logger.warning("管道触发失败（第 %d 次），重试: %s", attempt + 1, failed_stage)
                     retried = True
-                    time.sleep(0.3 * (2**attempt))
+                    await asyncio.sleep(0.3 * (2**attempt))
                     continue
                 return StagesResult(
                     stages_run=stages_run,
@@ -305,7 +306,7 @@ class PipelineTrigger:
                 if attempt < self._max_retry:
                     logger.warning("管道触发异常（第 %d 次）重试: %s", attempt + 1, e)
                     retried = True
-                    time.sleep(0.3 * (2**attempt))
+                    await asyncio.sleep(0.3 * (2**attempt))
                     continue
                 register_error(
                     ErrorCode.E_DL_001_NETWORK_TIMEOUT.value,

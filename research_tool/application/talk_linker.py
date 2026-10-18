@@ -12,6 +12,7 @@
 from __future__ import annotations
 
 import json
+import hashlib
 import re
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -330,7 +331,8 @@ class TalkLinker:
             f"<!-- from_paper: {match.paper_title} -->\n"
             f"<!-- talk_confidence: {match.confidence:.3f} -->\n"
             f"<!-- fetched: {datetime.now(timezone.utc).isoformat()} -->\n"
-            f"<!-- via: talk_linker -->\n\n"
+            f"<!-- via: talk_linker -->\n"
+            "<!-- evidence_kind: discovery -->\n\n"
             f"# Talk: {match.video_title or match.paper_title}\n\n"
             f"- paper: {match.paper_title}\n"
             f"- video: {match.video_url}\n"
@@ -411,6 +413,7 @@ class TalkLinker:
                     use_cache=True,
                 )
                 report.ingested_urls = list(matched_urls)
+                report.files_written.extend(self._attach_ingested_notes(vr, raw_dir))
                 if vr.failed_count:
                     report.warnings.append(
                         f"VideoIngest 部分失败: success={vr.success_count} fail={vr.failed_count}"
@@ -428,3 +431,24 @@ class TalkLinker:
         }
         done.write_text(json.dumps(summary, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
         return report
+
+    @staticmethod
+    def _attach_ingested_notes(result, raw_dir: Path) -> list[Path]:
+        files = []
+        for item in getattr(result, "results", []):
+            path = getattr(item, "markdown_path", None)
+            if getattr(item, "status", None) != "success" or path is None:
+                continue
+            source = Path(path)
+            data = source.read_bytes()
+            target = raw_dir / source.name
+            if target.exists() and target.read_bytes() != data:
+                digest = hashlib.sha256(data).hexdigest()[:12]
+                target = raw_dir / f"{source.stem}-{digest}{source.suffix}"
+            if not target.exists():
+                with target.open("xb") as handle:
+                    handle.write(data)
+            elif target.read_bytes() != data:
+                raise ValueError("talk transcript destination has conflicting content")
+            files.append(target)
+        return files

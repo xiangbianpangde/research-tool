@@ -22,6 +22,12 @@ _MAX_RETRY_AFTER_SEC = 60.0
 # 后端（wikipedia/openalex/crossref/arxiv/s2/pubmed/github/google_news）及 ddgs/tavily
 # 共用。国内访问这些被墙站点需设代理；传给 httpx 的 proxy= 非 None 时覆盖 trust_env。
 _default_proxy: ContextVar[str | None] = ContextVar("research_tool_search_proxy", default=None)
+# Collector sets an absolute event-loop deadline around each backend request.  A
+# context variable lets existing backends propagate that budget to get_json /
+# get_text without widening their public search signatures.
+_request_deadline: ContextVar[float | None] = ContextVar(
+    "research_tool_search_deadline", default=None
+)
 
 
 def set_default_proxy(proxy: str | None) -> None:
@@ -34,7 +40,22 @@ def get_default_proxy() -> str | None:
     return _default_proxy.get()
 
 
-async def _get(
+def set_request_deadline(deadline: float | None):
+    """Set an absolute event-loop deadline and return the ContextVar token."""
+    return _request_deadline.set(deadline)
+
+
+def reset_request_deadline(token) -> None:
+    """Restore the caller's previous request deadline."""
+    _request_deadline.reset(token)
+
+
+def get_request_deadline() -> float | None:
+    """Read the deadline inherited by a backend's HTTP helper call."""
+    return _request_deadline.get()
+
+
+async def _get(  # noqa: PLR0915 - deadline/retry terminal paths are kept together
     url: str,
     *,
     params: dict | None = None,
@@ -44,16 +65,26 @@ async def _get(
     retries: int = 3,
     backoff_base: float = 1.5,
     proxy: str | None = None,
+    deadline: float | None = None,
 ) -> httpx.Response:
-    """GET，对 429/5xx 与网络错误做指数退避重试，返回 Response（content 已加载）。
+    """GET with retries constrained by one total event-loop deadline.
 
-    proxy 未显式传入时回退模块级默认（set_default_proxy 设置），供国内被墙站点
-    走代理。最终仍失败时抛出最后一次异常，交由调用方（后端的 search）包装为
-    SearchError，再由 Collector 收集进 warnings。
+    ``deadline`` is an absolute ``loop.time()`` value.  When omitted, the
+    deadline inherited from :func:`set_request_deadline` is used.  The
+    existing retryable statuses (429/502/503/504) and final exception types
+    are preserved; only the request/retry wait is clipped to remaining time.
     """
     if retries < 0:
         raise ValueError("retries must be >= 0")
 
+    inherited_deadline = get_request_deadline()
+    if inherited_deadline is None:
+        effective_deadline = deadline
+    elif deadline is None:
+        effective_deadline = inherited_deadline
+    else:
+        # A callee may tighten the caller's budget, never extend it.
+        effective_deadline = min(inherited_deadline, deadline)
     merged_headers = {"User-Agent": _DEFAULT_UA, "Accept": accept}
     if headers:
         merged_headers.update(headers)
@@ -65,9 +96,35 @@ async def _get(
     # 需要代理时走 config.proxy → set_default_proxy，不依赖环境变量隐式劫持。
     use_trust_env = bool(effective_proxy)
 
+    def _remaining() -> float | None:
+        if effective_deadline is None:
+            return None
+        return effective_deadline - asyncio.get_running_loop().time()
+
+    async def _wait(delay: float) -> bool:
+        """Wait at most the remaining budget; return whether retry can continue."""
+        remaining = _remaining()
+        if remaining is None:
+            await asyncio.sleep(delay)
+            return True
+        if remaining <= 0:
+            return False
+        if delay >= remaining:
+            await asyncio.sleep(remaining)
+            return False
+        await asyncio.sleep(delay)
+        return _remaining() > 0
+
+    # AsyncClient's timeout is a per-attempt limit.  ``wait_for`` below is the
+    # total-deadline guard, including transports that ignore client settings.
+    initial_remaining = _remaining()
+    if initial_remaining is not None and initial_remaining <= 0:
+        raise asyncio.TimeoutError("search request deadline exceeded")
+    client_timeout = timeout if initial_remaining is None else min(timeout, initial_remaining)
+
     async with httpx.AsyncClient(
         follow_redirects=True,
-        timeout=timeout,
+        timeout=client_timeout,
         headers=merged_headers,
         proxy=effective_proxy,
         trust_env=use_trust_env,
@@ -75,11 +132,19 @@ async def _get(
         attempt = 0
         while True:
             try:
-                resp = await client.get(url, params=params)
+                remaining = _remaining()
+                if remaining is not None and remaining <= 0:
+                    raise asyncio.TimeoutError("search request deadline exceeded")
+                request = client.get(url, params=params)
+                if remaining is None:
+                    resp = await request
+                else:
+                    resp = await asyncio.wait_for(request, timeout=remaining)
                 if resp.status_code in _RETRY_STATUS and attempt < retries:
-                    # 优先遵循 Retry-After，否则指数退避
+                    # 优先遵循 Retry-After，否则指数退避；不能越过总预算。
                     wait = _retry_after(resp) or backoff_base ** (attempt + 1)
-                    await asyncio.sleep(wait)
+                    if not await _wait(wait):
+                        resp.raise_for_status()
                     attempt += 1
                     continue
                 resp.raise_for_status()
@@ -90,7 +155,8 @@ async def _get(
                 if status is not None and status not in _RETRY_STATUS:
                     raise
                 if attempt < retries:
-                    await asyncio.sleep(backoff_base ** (attempt + 1))
+                    if not await _wait(backoff_base ** (attempt + 1)):
+                        raise
                     attempt += 1
                     continue
                 raise

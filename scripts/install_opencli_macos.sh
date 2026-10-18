@@ -34,7 +34,7 @@ echo "       ${EXT_DIR}"
 echo "  4) 在同一 Chrome 登录 https://x.com"
 echo "  5) 运行: opencli doctor"
 echo "  6) 验证: opencli twitter search \"VGGT\" -n 3 -f json"
-echo "  7) research collect \"主题\" -s x -n 3 --dry-run"
+echo "  7) research run \"主题\" -s x -n 3 --mode full --output ./research-output"
 echo
 opencli daemon restart >/dev/null 2>&1 || true
 opencli doctor || true

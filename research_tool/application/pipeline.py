@@ -10,6 +10,8 @@ import os
 import shutil
 import tempfile
 import time
+import threading
+from contextlib import aclosing
 from collections.abc import AsyncIterator, Callable
 from pathlib import Path
 from typing import Any
@@ -32,6 +34,7 @@ from ..nine_loop.research import (
     assemble_report, gate_decision, inspect_graph, materialize_graph, plan_targeted,
 )
 from ..nine_loop.runtime_state import RuntimeState, RuntimeStateError
+from .talk_linker import TalkLinker
 
 
 def _bytes(value: Any) -> bytes:
@@ -67,6 +70,7 @@ class ResearchPipeline:
         self._state: dict[str, Any] = {}
         self._active = "collect"
         self._started = 0.0
+        self._execution_lock = threading.Lock()
 
     def _get_llm(self) -> LLMClient:
         if self._llm is None:
@@ -80,6 +84,16 @@ class ResearchPipeline:
         return self._result
 
     async def stream(self, topic: str | None = None) -> AsyncIterator[StageEvent]:
+        if not self._execution_lock.acquire(blocking=False):
+            raise StageError("pipeline", "此 Pipeline 实例已有运行，请使用独立实例")
+        try:
+            async with aclosing(self._stream(topic)) as events:
+                async for event in events:
+                    yield event
+        finally:
+            self._execution_lock.release()
+
+    async def _stream(self, topic: str | None = None) -> AsyncIterator[StageEvent]:
         self._state = {}
         self._active = "collect"
         self.topic = (topic or self.config.topic).strip()
@@ -96,7 +110,7 @@ class ResearchPipeline:
                 self._initialize()
                 async for event in self._execute():
                     yield event
-            except asyncio.CancelledError:
+            except (asyncio.CancelledError, GeneratorExit):
                 self._result.verdict = "STOP_CANCELLED"
                 self._result.failed_stage = self._active
                 raise
@@ -118,19 +132,24 @@ class ResearchPipeline:
 
     def _initialize(self) -> None:
         config = self.config.model_dump(mode="json", exclude={"resume", "work_dir"})
-        # Secrets affect neither source identity nor cached report semantics.
+        # Credentials and transport-only session routing affect neither source
+        # identity nor cached report semantics.
         config["llm"].pop("api_key", None)
+        config["llm"].pop("session_id", None)
         for key in ("tavily_api_key", "semantic_scholar_api_key", "github_token", "proxy"):
             config["collector"].pop(key, None)
         inputs = {}
-        for directory in (self.config.input_dir, self.config.pdf_dir):
-            if directory:
-                path = Path(directory).resolve()
-                if not path.is_dir():
-                    raise StageError("collect", "输入目录不存在")
-                inputs[str(path)] = {str(p.relative_to(path)): _hash(p.read_bytes())
-                                     for p in sorted(path.rglob("*")) if p.is_file()}
-        fingerprint = _hash(_bytes({"runtime_contract": 2, "topic": self.topic,
+        if self.config.input_dir:
+            path = Path(self.config.input_dir).resolve()
+            if not path.is_dir():
+                raise StageError("collect", "输入目录不存在")
+            inputs[str(path)] = {p.name: _hash(p.read_bytes())
+                                 for p in sorted(path.glob("*.md")) if p.is_file()}
+        if self.config.pdf_dir:
+            from ..infrastructure.ingest.pdf import _collect_pdfs
+            path = Path(self.config.pdf_dir).resolve()
+            inputs[str(path)] = {p.name: _hash(p.read_bytes()) for p in _collect_pdfs(path)}
+        fingerprint = _hash(_bytes({"runtime_contract": 4, "topic": self.topic,
                                    "config": config, "inputs": inputs}))
         self._state = (self.runtime.load_or_init(fingerprint) if self.config.resume
                        else self.runtime.start_new(fingerprint))
@@ -214,34 +233,28 @@ class ResearchPipeline:
         payload = None
         for attempt in range(1, attempts + 1):
             try:
-                if self._stage_uses_llm(stage):
-                    remaining = self.config.nine_loop.wall_s_max - (
-                        time.monotonic() - self._started
-                    )
-                    if remaining <= 0:
-                        raise TimeoutError("运行时间预算耗尽")
-                    await self._get_llm().healthcheck(
-                        timeout_sec=min(self.config.llm_healthcheck_timeout_sec, remaining)
-                    )
-                value = action()
-                remaining = self.config.nine_loop.wall_s_max - (time.monotonic() - self._started)
-                payload = (
-                    await asyncio.wait_for(value, max(0.001, remaining))
-                    if inspect.isawaitable(value) else value
-                )
+                async with asyncio.timeout(self._remaining()):
+                    if self._stage_uses_llm(stage):
+                        await self._get_llm().healthcheck(
+                            timeout_sec=min(
+                                self.config.llm_healthcheck_timeout_sec, self._remaining(),
+                            )
+                        )
+                    self._remaining()
+                    value = action()
+                    payload = await value if inspect.isawaitable(value) else value
+                    self._remaining()
                 break
             except LLMAuthenticationError:
                 raise
             except StageError as exc:
                 if not isinstance(exc.__cause__, LLMError) or attempt >= attempts:
                     raise
-                if self.config.llm_retry_backoff_sec:
-                    await asyncio.sleep(self.config.llm_retry_backoff_sec * attempt)
+                await self._retry_delay(attempt)
             except LLMError:
                 if attempt >= attempts:
                     raise
-                if self.config.llm_retry_backoff_sec:
-                    await asyncio.sleep(self.config.llm_retry_backoff_sec * attempt)
+                await self._retry_delay(attempt)
         assert payload is not None
         envelope = {
             "v": 1, "run_id": self._state["run_id"], "stage": stage,
@@ -266,6 +279,17 @@ class ResearchPipeline:
         yield StageEvent(stage=stage, status="completed", progress=1.0, message=f"{stage} 完成",
                          data={"duration_sec": time.monotonic() - started, "request_id": key})
 
+    def _remaining(self) -> float:
+        remaining = self.config.nine_loop.wall_s_max - (time.monotonic() - self._started)
+        if remaining <= 0:
+            raise TimeoutError("运行时间预算耗尽")
+        return remaining
+
+    async def _retry_delay(self, attempt: int) -> None:
+        remaining = self._remaining()
+        await asyncio.sleep(min(self.config.llm_retry_backoff_sec * attempt, remaining))
+        self._remaining()
+
     def _stage_uses_llm(self, stage: str) -> bool:
         if stage == "collect":
             return bool(
@@ -288,7 +312,7 @@ class ResearchPipeline:
         result = {}
         for path in paths:
             relative = path.resolve().relative_to(self.root)
-            result[str(relative)] = _hash(path.read_bytes())
+            result[relative.as_posix()] = _hash(path.read_bytes())
         return result
 
     def _verify_files(self, files: dict[str, str]) -> None:
@@ -299,7 +323,9 @@ class ResearchPipeline:
             if _hash(path.read_bytes()) != digest:
                 raise RuntimeStateError("阶段产物内容变化；拒绝使用旧缓存")
 
-    def _documents(self, directory: Path) -> list[dict[str, Any]]:
+    def _documents(
+        self, directory: Path, *, allow_empty: bool = False
+    ) -> list[dict[str, Any]]:
         documents = []
         for path in sorted(directory.glob("*.md")):
             source = parse_source(path.read_text(encoding="utf-8"))
@@ -309,7 +335,7 @@ class ResearchPipeline:
                 raise StageError(self._active, "来源缺少实际正文或定位信息")
             source["path"] = str(path)
             documents.append(source)
-        if not documents:
+        if not documents and not allow_empty:
             raise StageError(self._active, "没有可用的正文资料")
         return documents
 
@@ -335,8 +361,14 @@ class ResearchPipeline:
                 await ResearchStrategies(
                     self.config.collector.strategies, collector, self._get_llm()
                 ).collect_more(self.topic, raw, core_keyword=self.config.collector.core_keyword)
+        talk = None
+        if self.config.talk.enabled:
+            enriched = await TalkLinker(self.config.talk).enrich(work, self.topic, force=True)
+            talk = {"candidates": enriched.candidates,
+                    "matched": len(enriched.matched), "warnings": enriched.warnings,
+                    "files": [str(path) for path in enriched.files_written]}
         documents = self._documents(raw)
-        return {"documents": documents, "directory": str(work),
+        return {"documents": documents, "directory": str(work), "talk": talk,
                 "output_files": [str(path) for path in sorted(raw.glob("*")) if path.is_file()]}
 
     async def _clean_initial(self) -> dict[str, Any]:
@@ -344,11 +376,7 @@ class ResearchPipeline:
 
     async def _clean_work(self, work: Path) -> dict[str, Any]:
         cleaner = Cleaner(self.config.cleaner)
-        cleaned = cleaner.process(work / "raw", work)
-        for path in list(cleaned.files):
-            if parse_source(path.read_text()).get("evidence_kind", "body") != "body":
-                path.unlink()
-                cleaned.files.remove(path)
+        cleaned = cleaner.process(work / "raw", work, evidence_kinds={"body"})
         if self.config.cleaner.relevance_filter:
             cleaned = await cleaner.filter_relevance(cleaned, self._get_llm(), self.topic)
         for path in list(cleaned.files):
@@ -399,21 +427,28 @@ class ResearchPipeline:
         collector = Collector(self.config.collector)
         hits = await collector.search_queries(queries)
         await collector.fetch_and_store(self.topic, hits.hits, work / "raw")
-        self._documents(work / "raw")
+        raw_files = [
+            str(path) for path in sorted((work / "raw").glob("*"))
+            if path.is_file()
+        ]
+        documents = self._documents(work / "raw", allow_empty=True)
+        if not documents:
+            # Search/fetch attempts without usable body evidence are retained as
+            # an empty delta. They must not satisfy or close an evidence gap.
+            return {
+                "queries": queries,
+                "sources": [],
+                "facts": [],
+                "warnings": ["补搜未获得可核验正文；摘要/导航页未进入证据账本"],
+                "output_files": raw_files,
+            }
         cleaned = await self._clean_work(work)
         extracted = await self._extract_work(work)
         return {
             "queries": queries,
             "sources": cleaned["documents"],
             "facts": extracted["facts"],
-            "output_files": [
-                *cleaned["output_files"],
-                *extracted["output_files"],
-                *[
-                    str(path) for path in sorted((work / "raw").glob("*"))
-                    if path.is_file()
-                ],
-            ],
+            "output_files": [*cleaned["output_files"], *extracted["output_files"], *raw_files],
         }
 
     def _merge(self, graph: dict[str, Any], delta: dict[str, Any]) -> dict[str, Any]:
@@ -443,7 +478,7 @@ class ResearchPipeline:
             for path in [final / "report.md", final / "sources.json",
                          *sorted((final / "tree").glob("*"))]:
                 if path.is_file():
-                    files[str(path.relative_to(self.root))] = _hash(path.read_bytes())
+                    files[path.relative_to(self.root).as_posix()] = _hash(path.read_bytes())
         summary = {"version": 1, "run_id": self._state.get("run_id"),
                    "verdict": result.verdict, "rounds": result.rounds,
                    "output_contract": "nine-stage", "stages": list(NINE_STAGES),
@@ -456,7 +491,7 @@ class ResearchPipeline:
                    "stage_metrics": [metric.model_dump() for metric in result.stage_metrics],
                    "files": files,
                    "output_dir": (
-                       str((self.run_root / "final").relative_to(self.root))
+                       (self.run_root / "final").relative_to(self.root).as_posix()
                        if result.verdict == "STOP_SUCCESS" else None
                    ),
                    "elapsed_sec": round(result.elapsed_sec, 3)}

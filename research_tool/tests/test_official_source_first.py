@@ -1,11 +1,12 @@
 from __future__ import annotations
 
 from pathlib import Path
+from unittest.mock import AsyncMock
 
 import pytest
 
 from research_tool.domain.errors import CollectError
-from research_tool.domain.models import CollectResult, CollectorConfig
+from research_tool.domain.models import CollectResult, CollectorConfig, Source
 from research_tool.infrastructure.search.base import SearchHit, SearchResult
 from research_tool.infrastructure.stages.collector import Collector
 
@@ -30,8 +31,8 @@ async def test_official_source_is_fetched_before_bibliographic_search(tmp_path, 
     )
     collector = Collector(cfg)
     monkeypatch.setattr(
-        "research_tool.infrastructure.stages.collector.assert_safe_url",
-        lambda _url: None,
+        "research_tool.infrastructure.stages.collector.assert_safe_url_async",
+        AsyncMock(return_value=None),
     )
 
     async def fake_fetch(topic: str, hits: list[SearchHit], raw_dir: Path) -> CollectResult:
@@ -39,7 +40,9 @@ async def test_official_source_is_fetched_before_bibliographic_search(tmp_path, 
         path = raw_dir / f"{len(order):02d}.md"
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text("body", encoding="utf-8")
-        return CollectResult(files=[path], sources=[], raw_dir=raw_dir, warnings=[])
+        sources = [Source(url=hit.url, source_engine=hit.source_engine) for hit in hits]
+        collector._append_sources(raw_dir, sources)
+        return CollectResult(files=[path], sources=sources, raw_dir=raw_dir, warnings=[])
 
     async def fake_search(topic: str) -> SearchResult:
         order.append("search")

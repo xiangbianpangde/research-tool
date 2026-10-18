@@ -222,3 +222,14 @@ def test_partial_research_commands_and_quick_collect_are_not_public():
     assert "quick_collect" not in research_tool.__all__
     assert not hasattr(research_tool, "Reporter")
     assert "Reporter" not in research_tool.__all__
+
+
+def test_cli_help_and_dispatch_exclude_removed_web_interface():
+    runner = CliRunner()
+    help_result = runner.invoke(app, ["--help"])
+    assert help_result.exit_code == 0, help_result.output
+    command_names = {command.name or command.callback.__name__ for command in app.registered_commands}
+    assert "run" in command_names and "ui" not in command_names
+    removed = runner.invoke(app, ["ui"])
+    assert removed.exit_code == 2
+    assert "No such command" in removed.output

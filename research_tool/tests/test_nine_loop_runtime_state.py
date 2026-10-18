@@ -185,6 +185,10 @@ def test_start_new_forces_a_new_run_and_preserves_old_artifact(tmp_path: Path) -
     )
     runtime.commit_stage("collect:0", artifact, digest, None)
 
+    assert runtime.read_current()["completed_stages"]["collect:0"]["artifact_path"] == (
+        f"artifacts/{old['run_id']}/collect-0.json"
+    )
+
     fresh = runtime.start_new("fingerprint-a")
 
     assert fresh["run_id"] != old["run_id"]

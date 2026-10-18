@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
 import pytest
 
@@ -25,6 +26,7 @@ from research_tool.domain.models import (
     CollectorConfig,
     ExtractorConfig,
     FileQuality,
+    Source,
 )
 from research_tool.infrastructure.experts.registry import ExpertRegistry
 from research_tool.infrastructure.llm import MockLLMClient
@@ -200,15 +202,16 @@ async def test_deep_search_and_explicit_x_search_cover_combinations(monkeypatch)
 @pytest.mark.asyncio
 async def test_official_url_block_and_partial_success_abort(tmp_path, monkeypatch):
     blocked = Collector(CollectorConfig(official_urls=["https://official.example/paper"]))
-    monkeypatch.setattr(
-        collector_module,
-        "assert_safe_url",
-        lambda url: (_ for _ in ()).throw(UrlBlockedError("private")),
-    )
+    async def blocked_guard(url, *, timeout_sec):
+        raise UrlBlockedError("private")
+
+    monkeypatch.setattr(collector_module, "assert_safe_url_async", blocked_guard)
     with pytest.raises(CollectError, match="安全校验"):
         await blocked.run("topic", tmp_path / "blocked")
 
-    monkeypatch.setattr(collector_module, "assert_safe_url", lambda url: None)
+    monkeypatch.setattr(
+        collector_module, "assert_safe_url_async", AsyncMock(return_value=None)
+    )
     partial = Collector(
         CollectorConfig(
             official_urls=["https://official.example/one", "https://official.example/two"]
@@ -218,10 +221,11 @@ async def test_official_url_block_and_partial_success_abort(tmp_path, monkeypatc
     async def one_success(topic, hits, raw_dir):
         path = raw_dir / "one.md"
         path.write_text("body", encoding="utf-8")
-        return CollectResult(files=[path], raw_dir=raw_dir)
+        source = Source(url=hits[0].url, source_engine=hits[0].source_engine)
+        partial._append_sources(raw_dir, [source])
+        return CollectResult(files=[path], sources=[source], raw_dir=raw_dir)
 
     monkeypatch.setattr(partial, "fetch_and_store", one_success)
-    monkeypatch.setattr(partial, "_load_sources", lambda raw_dir: [])
     with pytest.raises(CollectError, match="未全部"):
         await partial.run("topic", tmp_path / "partial")
 

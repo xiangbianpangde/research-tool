@@ -1,4 +1,4 @@
-"""PDF 摄取测试：用假的 mineru（monkeypatch subprocess）验证编排，不需真实 MinerU。"""
+"""PDF 摄取测试：用假的 mineru（monkeypatch OCR runner）验证编排，不需真实 MinerU。"""
 
 import pytest
 
@@ -15,13 +15,14 @@ def _make_pdf(tmp_path, name="paper.pdf"):
 
 @pytest.fixture
 def fake_mineru(monkeypatch, tmp_path):
-    """伪造 mineru：把 PATH 查找通过，并让 subprocess 写出一个 MD。"""
+    """伪造 mineru：把 PATH 查找通过，并让异步 OCR runner 写出一个 MD。"""
     monkeypatch.setattr(
         "research_tool.infrastructure.ingest.ocr.shutil.which", lambda c: "/usr/bin/mineru"
     )
 
-    def fake_run(cmd, **kwargs):
+    async def fake_run(cmd, timeout_sec):
         # cmd: [mineru, -p, pdf, -o, parse_root, -b, ..., -l, ...]
+        del timeout_sec
         pdf = __import__("pathlib").Path(cmd[2])
         parse_root = __import__("pathlib").Path(cmd[4])
         out = parse_root / pdf.stem / "auto"
@@ -29,14 +30,9 @@ def fake_mineru(monkeypatch, tmp_path):
         (out / f"{pdf.stem}.md").write_text(
             "# Title\n\nThe Transformer uses self-attention.", encoding="utf-8"
         )
+        return 0, "", ""
 
-        class R:
-            returncode = 0
-            stderr = ""
-
-        return R()
-
-    monkeypatch.setattr("research_tool.infrastructure.ingest.ocr.subprocess.run", fake_run)
+    monkeypatch.setattr("research_tool.infrastructure.ingest.ocr._run_command_async", fake_run)
 
 
 @pytest.mark.asyncio
@@ -80,14 +76,10 @@ async def test_missing_mineru_clear_error(tmp_path, monkeypatch):
 async def test_custom_ocr_stdout(tmp_path, monkeypatch):
     _make_pdf(tmp_path)
 
-    class R:
-        returncode = 0
-        stderr = ""
-        stdout = "# Custom\n\nOCR text from custom engine."
+    async def fake_run(*_args, **_kwargs):
+        return 0, "# Custom\n\nOCR text from custom engine.", ""
 
-    monkeypatch.setattr(
-        "research_tool.infrastructure.ingest.ocr.subprocess.run", lambda *a, **k: R()
-    )
+    monkeypatch.setattr("research_tool.infrastructure.ingest.ocr._run_command_async", fake_run)
     cfg = PdfIngestConfig(ocr_engine="custom", ocr_cmd="custom-ocr {pdf} {out}")
     res = await PdfIngestor(cfg).run(tmp_path, tmp_path / "out")
     text = res.files[0].read_text(encoding="utf-8")

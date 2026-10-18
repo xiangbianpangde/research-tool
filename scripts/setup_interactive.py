@@ -715,7 +715,6 @@ def _capability_status(capability: str, env: dict[str, str]) -> tuple[bool, str]
         return key_ok and sdk_ok, f"provider={provider}; key/sdk"
     module_groups = {
         "search": ("ddgs", "tavily"),
-        "ui": ("gradio",),
         "video": ("yt_dlp", "faster_whisper"),
         "pdf": ("mineru",),
         "crawl": ("crawl4ai",),

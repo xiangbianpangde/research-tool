@@ -1,206 +1,42 @@
-# CODE_MAP — research-tool 代码图谱（给人读）
+# research-tool 代码入口索引
 
-> 依据 08-代码理解与图谱规范 §三·纯文档退路。  
-> Understand-Anything Dashboard 尚未部署时的替代：Mermaid 架构图 + 逐模块调用关系 + 数据流。
+本版本面向 macOS，以 CLI 为主要产品接口，供 AI Agent 调用；Python SDK 复用同一九阶段引擎。
 
----
+## 正式入口
 
-## 一、架构全景图
+| 入口 | 位置 | 用途 |
+|---|---|---|
+| research run | research_tool/presentation/cli.py | 主题、已有 Markdown、PDF 和视频输入的完整研究 |
+| research status | research_tool/presentation/cli.py | 根据 runtime 与摘要校验当前阶段及成果 |
+| research config | research_tool/presentation/cli.py | 查看脱敏 JSON 配置 |
+| research wiki-stage | research_tool/infrastructure/export/wiki_stage.py | 校验并打包当前成功运行的 final |
+| research setup | research_tool/presentation/setup_deployment.py、scripts/setup_interactive.py | CLI 依赖安装、凭据配置与环境检查 |
+| Python SDK | research_tool/__init__.py | research()、ResearchPipeline.run/stream() |
 
-```mermaid
-graph TD
-    subgraph 表现层
-        CLI["cli.py<br/>Typer 7 命令"]
-        WebUI["webui.py<br/>Gradio 界面"]
-    end
+WebUI、research ui 命令及 Gradio 安装项已移除。
 
-    subgraph 应用层
-        Pipeline["pipeline.py<br/>ResearchPipeline<br/>编排 6 阶段 + 反向传播"]
-        SDK["__init__.py<br/>research() / quick_collect()"]
-    end
+## 引擎
 
-    subgraph 领域层
-        Models["models.py<br/>30+ Pydantic 模型"]
-        Config["config.py<br/>YAML 加载/合并/环境变量"]
-        Errors["errors.py<br/>6 异常类"]
-        Slug["slug.py<br/>中文→安全文件名"]
-        Translate["translate.py<br/>Markdown 学术翻译"]
-    end
+| 模块（相对 research_tool/） | 职责 |
+|---|---|
+| application/pipeline.py | 唯一九阶段调度、恢复、取消、预算和摘要 |
+| nine_loop/runtime_state.py | macOS/POSIX fcntl 文件锁、原子写和 CAS |
+| nine_loop/evidence.py | 来源正文哈希、偏移及逐字引用核验 |
+| nine_loop/knowledge_min.py | 确定性事实/来源/主题证据图 |
+| nine_loop/merge_min.py | 有摘要前置条件的无损增量合并 |
+| nine_loop/research.py | 检视、缺口解决记录、质量门控、报告支持核验 |
+| infrastructure/stages/collector.py、fetcher.py | 搜索与真实正文抓取 |
+| infrastructure/stages/research_strategies.py | Collect 内部的实体拆分、画像与查询策略 |
+| infrastructure/stages/cleaner.py、extractor.py | 正文清洗、去重、相关性过滤及事实抽取 |
+| infrastructure/ingest/、application/video_pipeline.py | PDF/视频输入适配 |
+| domain/models.py、config.py | 固定九段配置与字段校验 |
 
-    subgraph 基础设施层
-        subgraph Stages
-            Collect["collector.py<br/>多引擎搜索+抓取"]
-            Deepen["deepen.py<br/>反偏差深挖"]
-            Clean["cleaner.py<br/>去噪清洗"]
-            Extract["extractor.py<br/>实体/关系抽取"]
-            Organize["organizer.py<br/>知识树构建"]
-            Report["reporter.py<br/>报告合成"]
-        end
-        subgraph LLM
-            LLMBase["llm/base.py<br/>LLMClient 抽象"]
-            LLMOpenAI["llm/openai_client.py"]
-            LLMAnthropic["llm/anthropic_client.py"]
-            LLMMock["llm/mock.py"]
-        end
-        subgraph Search["search/ — 10 个后端"]
-            DDG["duckduckgo"]
-            OA["openalex"]
-            CR["crossref"]
-            ARX["arxiv"]
-            S2["semantic_scholar"]
-            PM["pubmed"]
-            WIKI["wikipedia"]
-            GH["github"]
-            GN["google_news"]
-            TV["tavily"]
-        end
-        Ingest["ingest/pdf.py<br/>MinerU PDF 解析"]
-    end
+正式阶段：collect、clean、extract、knowledge、inspect、targeted、merge、qgate、report。初次知识构建后先 inspect/qgate；CONTINUE 才 targeted/merge 并重检；STOP_SUCCESS 才生成报告。
 
-    CLI --> Pipeline
-    CLI --> SDK
-    WebUI --> Pipeline
-    SDK --> Pipeline
-    Pipeline --> Collect
-    Pipeline --> Deepen
-    Pipeline --> Clean
-    Pipeline --> Extract
-    Pipeline --> Organize
-    Pipeline --> Report
-    Pipeline --> LLMBase
-    Collect --> Search
-    Deepen --> Collect
-    Deepen --> LLMBase
-    Clean --> LLMBase
-    Extract --> LLMBase
-    Organize --> LLMBase
-    Report --> LLMBase
-    Translate --> LLMBase
-```
+## AI 读取的产物
 
----
+主题目录下，runtime-state.json 记录输入指纹、run_id、阶段提交和摘要；run-summary.json 记录本次 verdict、pipeline_complete、output_dir 及 final 文件哈希。只有成功且校验通过的当前运行可交付。
 
-## 二、逐模块调用关系
+阶段 envelope 位于 artifacts/<run_id>/；首次及补搜资料位于 runs/<run_id>/initial/ 和 targeted-N/；最终 report.md、sources.json、tree/ 位于 runs/<run_id>/final/。目录存在或历史报告存在不能替代当前运行成功。
 
-### 入口点（表现层）
-
-| 模块 | 对外暴露 | 被谁调用 |
-|------|---------|---------|
-| `cli.py` | Typer app（7 命令） | 终端 `research` 命令 |
-| `webui.py` | `main(port, inbrowser)` | `cli.py:ui` 命令 |
-| `__init__.py` | `research()`, `quick_collect()`, 全部公共类 | Python 脚本 / notebook |
-
-### 管道编排（应用层）
-
-| 模块 | 对外暴露 | 被谁调用 | 调用了谁 |
-|------|---------|---------|---------|
-| `pipeline.py` | `ResearchPipeline.run()` / `.stream()` | cli.py, webui.py, __init__.py | 全部 6 个 Stage + LLMClient + slugify |
-
-### 领域模型
-
-| 模块 | 对外暴露 | 被谁调用 | 外部依赖 |
-|------|---------|---------|---------|
-| `models.py` | 30+ Config/Result 模型 | 全项目 | `pydantic` |
-| `config.py` | `load_config(path, overrides)` | cli.py, __init__.py | `pyyaml` |
-| `errors.py` | 6 异常类 | 全项目 | 标准库 |
-| `slug.py` | `slugify(text)` | pipeline.py, cli.py | `pypinyin` |
-| `translate.py` | `translate_markdown(md, llm)` | ingest/pdf.py | `LLMClient` |
-
-### 六个阶段 — 调用关系
-
-| Stage | 核心方法 | 输入 | 输出 | 调用 |
-|-------|---------|------|------|------|
-| `Collector` | `run(topic, dir)` / `search_queries()` / `fetch_and_store()` | 搜索查询 | `raw/*.md` + `sources.json` | 10 个搜索后端 + Crawl4AI/httpx |
-| `DeepenStage` | `run(topic, raw_dir)` | raw/ | 追加 `raw/*.md` + `.deepen_done` | Collector + LLMClient |
-| `Cleaner` | `process(raw_dir)` + `filter_relevance()` | raw/ | `clean/*.md` + `quality.json` | LLMClient（仅相关性过滤） |
-| `Extractor` | `run(clean_dir, llm)` | clean/ | `extracted/*.json` | LLMClient |
-| `Organizer` | `run(input_dir, llm)` + `assess_and_feedback()` | clean/ 或 extracted/ | `tree/*.md` + feedback | LLMClient |
-| `Reporter` | `run(tree_dir, llm, topic)` | tree/ | `report.md` / `report.html` | LLMClient |
-
-### LLM 客户端
-
-| 模块 | 说明 | 被谁调用 |
-|------|------|---------|
-| `llm/base.py` | 抽象基类 + 工厂（`from_config`映射 provider→具体实现） | pipeline.py, cli.py |
-| `llm/openai_client.py` | OpenAI 兼容（含 DeepSeek/Ollama） | 工厂创建 |
-| `llm/anthropic_client.py` | Anthropic Claude | 工厂创建 |
-| `llm/mock.py` | 测试用 Mock | tests/ |
-
-### 搜索后端（全部实现 `SearchBackend`）
-
-| 模块 | 源 | 需 Key | 特点 |
-|------|-----|:---:|------|
-| `duckduckgo.py` | DuckDuckGo | 免 | 通用网页 |
-| `openalex_backend.py` | OpenAlex | 免 | 2.5 亿+ 全学术 |
-| `crossref_backend.py` | Crossref | 免 | 1.5 亿 DOI |
-| `arxiv_backend.py` | arXiv | 免 | 预印本 |
-| `semantic_scholar.py` | Semantic Scholar | 可选 | 引用数 |
-| `pubmed_backend.py` | PubMed | 免 | 生物医学 |
-| `wikipedia_backend.py` | Wikipedia | 免 | 中英双站点 |
-| `github_backend.py` | GitHub | 可选 | 开源代码 |
-| `google_news.py` | Google News | 免 | 最新新闻 |
-| `tavily.py` | Tavily | 需 | LLM 优化搜索 |
-
----
-
-## 三、数据流（六阶段管道）
-
-```mermaid
-flowchart LR
-    Topic["主题"] -->|CLI/SDK| Collect
-    Collect -->|"raw/*.md<br/>sources.json"| Deepen
-    Deepen -->|"追加 raw/*.md<br/>.deepen_done"| Clean
-    Clean -->|"clean/*.md<br/>quality.json"| Extract
-    Extract -->|"extracted/*.json"| Organize
-    Organize -->|"tree/00-主表.md<br/>tree/N*.md"| Report
-    Report -->|"report.md"| Output["最终报告"]
-
-    Deepen -.->|"(可选)<br/>--skip deepen"| Clean
-    Extract -.->|"(可选)<br/>--skip extract"| Organize
-
-    Backward["反向传播<br/>max_backward_rounds>0"] -.->|"修正查询"| Collect
-    Organize -.->|"评估 → 稀疏节点"| Backward
-```
-
-每个 Stage 仅通过文件系统通信。上一阶段的**输出目录**即下一阶段的**输入目录**。  
-已产出目录的阶段在 `--resume` 模式（默认）下自动跳过。
-
----
-
-## 四、关键设计决策速查
-
-| 决策 | ADR | 要点 |
-|------|-----|------|
-| 文件系统通信 | 0001 | Stage 间零内存依赖，可中断/恢复/独立调试 |
-| LLM 抽象 | — | `LLMClient` 接口 → 工厂创建；不绑定任何 SDK |
-| Extractor 可选 | — | 关闭时 Organizer 直接吃 clean/ 文本 |
-| 幂等恢复 | — | `has_output()` 检查 → 已产出自动跳过 |
-| 单文件 ≤500 行 | — | 当前最大 433 行（deepen.py），其余均 < 400 |
-
----
-
-## 五、文件规模速览
-
-| 文件 | 行数 | 超 500? |
-|------|------|:---:|
-| `cli.py` | ~555 | ✅ (Typer 参数声明固有) |
-| `deepen.py` | 445 | ❌ |
-| `collector.py` | 385 | ❌ |
-| `cleaner.py` | 378 | ❌ |
-| `webui.py` | ~375 | ❌ |
-| `models.py` | 335 | ❌ |
-| `organizer.py` | 326 | ❌ |
-| `pipeline.py` | 259 | ❌ |
-| `extractor.py` | 212 | ❌ |
-| `config.py` | 180 | ❌ |
-| `reporter.py` | 170 | ❌ |
-| `fetcher.py` | 163 | ❌ |
-| 其余 | < 150 | ❌ |
-
----
-
-## 更新记录
-
-| 日期 | 版本 | 变更说明 |
-|------|------|---------|
-| 2026-05 | v1.0 | 收束节点 v0.1.1 产出：Mermaid 架构图 + 逐模块调用表 + 数据流图 |
+历史来源和边界见 docs/plan/NINE-STAGE-BASELINE.json；当前进度及可复现实验从 STATUS.md 进入。

@@ -135,3 +135,13 @@ def test_formal_pipeline_rejects_search_snippets_as_source_bodies():
 
     with pytest.raises(ValidationError, match="depth"):
         PipelineConfig(collector={"depth": 1})
+
+
+def test_formal_pipeline_rejects_silently_ignored_html_output():
+    with pytest.raises(ValueError, match="markdown"):
+        PipelineConfig(reporter={"format": "html"})
+
+
+def test_formal_pipeline_rejects_ambiguous_input_selection():
+    with pytest.raises(ValueError, match="input_dir.*pdf_dir"):
+        PipelineConfig(input_dir=Path("raw"), pdf_dir="papers")
