@@ -6,7 +6,7 @@
 
 - 本版本面向 macOS，Python >= 3.11；运行状态锁使用标准库 fcntl，维护 macOS 的安装、路径和实际运行验证。
 - 产品主要供 AI Agent 调用，正式接口为 CLI 和 Python SDK。WebUI、research ui 命令及 Gradio 依赖已移除；不要重新引入交互式前端。
-- 基线 `4ab1412`；九段实现 `47f5888` 已提升到 main。唯一开发目录为 `/Users/xbpd/Projects/research-tool`，当前从 CLI-only `96c18be` 继续修复；先读 STATUS 并用 Git 核对实际分支与 PR 状态。
+- 基线 `4ab1412`；九段实现 `47f5888` 已提升到 main。唯一开发目录为 `/Users/xbpd/Projects/research-tool`，当前默认分支为 `main`，PR #1 已以 merge commit `cebbb1f` 合入；先读 STATUS 并用 Git 核对实际分支状态。
 - 旧版本和未提交工作已归档到 `/Users/xbpd/Projects/archives/research_tool_archive/versions/2026-10-17T1840+0800/`。不得 reset、clean、stash、覆盖或将旧实现整体合回；不再复制 research-tool* 平行项目目录。归档索引、历史路径映射及恢复规则见 [版本制度](docs/plan/PROJECT-VERSION-POLICY.md)。
 - 用户取消了子 Agent 指定模型限制。默认单 Agent，独立任务才委派，明确所有权并复核。
 - 本次代码迁移可编辑必要源码；执行正式调研时不得为运行方便改源码/生产配置，用 CLI、临时配置与环境变量。

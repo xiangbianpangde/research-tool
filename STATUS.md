@@ -2,7 +2,7 @@
 
 ## 本轮实施：唯一项目入口、Provider 可替换与联网可靠性（2026-10-17～18）
 
-唯一日常开发目录为 `/Users/xbpd/Projects/research-tool`，分支 `fix/runtime-input-reliability`。本轮修改已提交并推送到 `fix/runtime-input-reliability`（核心实现 commit `e419672`）；旧仓库和历史未提交工作保存于 `/Users/xbpd/Projects/archives/research_tool_archive/versions/2026-10-17T1840+0800/`；[版本制度与历史路径映射](docs/plan/PROJECT-VERSION-POLICY.md) 为入口。旧临时入口 `/Users/xbpd/Projects/research-tool-old` 已移入可恢复垃圾箱；Projects 下不再保留第二个日常 `research-tool*` 目录。
+唯一日常开发目录为 `/Users/xbpd/Projects/research-tool`，当前分支 `main`。本轮修改已通过 PR #1 以 merge commit `cebbb1f` 合入；核心实现 commit `e419672`，历史修复分支已由归档标签 `archive/runtime-input-reliability-20261018` 保留；旧仓库和历史未提交工作保存于 `/Users/xbpd/Projects/archives/research_tool_archive/versions/2026-10-17T1840+0800/`；[版本制度与历史路径映射](docs/plan/PROJECT-VERSION-POLICY.md) 为入口。旧临时入口 `/Users/xbpd/Projects/research-tool-old` 已移入可恢复垃圾箱；Projects 下不再保留第二个日常 `research-tool*` 目录。
 
 用户已确认 [实施计划](docs/plan/2026-10-17-runtime-portability-reliability.md)。Task 1/2/3/4 已通过专项与独立复审；Task 3 还覆盖了公平预算、专家 scoped deadline、exact-primary official gate、primary/secondary sibling 清理和 Collector 异步 DNS guard。最终全量回归为 **1136 passed / 3 skipped**；测试回执位于 `research-output/portability-reliability-20261017/final-validation-20261018/pytest-final3.xml`。targeted/证据/报告专项回归 **58 passed**。Ruff、`git diff --check`、`bash -n scripts/setup.sh`、`uv lock --check --offline` 通过。最终离线九阶段复验通过 `STOP_SUCCESS`、targeted/merge 和零模型 resume，回执位于 `research-output/portability-reliability-20261017/final-validation-20261018/offline-smoke-final/smoke-receipt.json`。本轮新增 OpenAI-compatible 原生 `LLM_SESSION_ID -> x-opencode-session`、流式 `choices=[]` 尾块兼容、仅对生产 OpenAI-compatible 客户端启用的抽取 chunk 级瞬态 JSON/空结果重试、空缓存保护、报告失败后一次受限证据 repair，以及 targeted 无正文补搜的空增量闭环。只用 `deepseek-v4.1-flash` 的 OpenCode Go 真实验收已完成：原生 session header、文本/结构化/流式探针通过；collect/clean/extract/knowledge/inspect/qgate/targeted/merge 完成，但 targeted 命中仅有 PubMed 页面、没有可核验正文，缺口保持开放，最终 `STOP_BUDGET`、`pipeline_complete=false`、CLI 退出码 1，拒绝生成不完整报告。完整回执位于 `research-output/portability-reliability-20261017/live-deepseek-v41-fixed/live-acceptance-receipt.json`；运行摘要位于其主题目录。没有把摘要/导航页写入证据账本，没有写入凭据。
 
@@ -10,7 +10,7 @@
 
 ## 上一轮交付：macOS CLI/SDK，供 AI Agent 使用
 
-以下为 `96c18be` 历史交付记录。原工作区 `.codex/worktrees/nine-stage-only/research-tool` 已归档；当前使用上方唯一目录。分支 fix/runtime-input-reliability，PR #1 在最近回读时为草稿、未合并。按用户要求删除 WebUI 源码、research ui 命令、Gradio extra、部署档位和预检中的 UI 能力，以及旧 Windows 启动脚本。CLI/SDK 共用完整九段引擎，PDF、视频及浏览器搜索仍是输入/采集适配。
+以下为 `96c18be` 历史交付记录。原工作区 `.codex/worktrees/nine-stage-only/research-tool` 已归档；当前使用上方唯一目录。历史修复分支和 PR #1 的旧状态仅作审计记录。按用户要求删除 WebUI 源码、research ui 命令、Gradio extra、部署档位和预检中的 UI 能力，以及旧 Windows 启动脚本。CLI/SDK 共用完整九段引擎，PDF、视频及浏览器搜索仍是输入/采集适配。
 
 依赖锁文件从165项缩减为150项，移除Gradio相关15项，其他包版本没有变化。安装和打包不再包含WebUI。运行锁使用macOS/POSIX fcntl；原先新增的Windows锁模拟测试与实现已撤回。
 
