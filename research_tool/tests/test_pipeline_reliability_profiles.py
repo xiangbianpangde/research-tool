@@ -242,6 +242,37 @@ async def test_extractor_retries_transient_structured_json_failure(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_openai_compatible_extractor_invalidates_empty_cache(tmp_path):
+    clean = tmp_path / "clean"
+    clean.mkdir()
+    source = clean / "01.md"
+    source.write_text(
+        "<!-- source: file:///approved/evidence.md -->\n\n" + QUOTE,
+        encoding="utf-8",
+    )
+    config = ExtractorConfig(fail_on_chunk_error=True)
+    llm = MockLLMClient(
+        structured_response=model_reply,
+        config=LLMConfig(
+            provider="openai_compatible",
+            model="fixture-model",
+            base_url="https://fixture.invalid/v1",
+            api_key="fixture-key",
+        ),
+    )
+    await Extractor(config).run(clean, llm)
+    cache = clean.parent / "extracted" / ".chunk-cache.json"
+    payload = json.loads(cache.read_text(encoding="utf-8"))
+    payload["entries"][0]["result"] = {
+        "entities": [], "relations": [], "triples": [], "claims": []
+    }
+    cache.write_text(json.dumps(payload), encoding="utf-8")
+    llm.calls.clear()
+    await Extractor(config).run(clean, llm)
+    assert any(call["kind"] == "structured" for call in llm.calls)
+
+
+@pytest.mark.asyncio
 async def test_extractor_retries_empty_structured_result(tmp_path):
     clean = tmp_path / "clean"
     clean.mkdir()

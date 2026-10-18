@@ -260,6 +260,10 @@ class Extractor:
                 if cached is not None:
                     try:
                         res = _ChunkResult.model_validate(cached["result"])
+                        if transient_retry and not (
+                            res.claims or res.entities or res.relations or res.triples
+                        ):
+                            raise ValueError("empty extraction cache")
                         _verified_claims(source, ch, res.claims, chunk_offset=offset)
                     except (ValueError, TypeError, StageError):
                         cache.pop(key, None)
