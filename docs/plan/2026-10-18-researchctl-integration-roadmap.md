@@ -16,7 +16,8 @@
 - [x] ResearchCTL 投影索引与 Fail-Closed 查询路由
 - [x] 运行后可选刷新派生索引并记录 stale 状态
 - [x] ResearchCTL Pi typed tool 支持 `research-tool` layout
-- [ ] DSH / MCode Agent 原生工具接入
+- [x] DSH research tool 支持 `research-tool` layout 与 canonical 写入保护
+- [x] MCode 可通过 `research retrieval` CLI/SDK 使用统一 Query Envelope
 
 ## 路线图
 
@@ -135,7 +136,7 @@ researchctl/tests/test_research_tool_layout.py
 
 ### M5：Agent 工具与技能接入
 
-**状态**：Pi typed tool 已支持 `research-tool` layout；DSH/MCode 原生工具尚未在当前隔离 worktree 验收。
+**状态**：Pi typed tool、DSH research tool 和 `research-tool retrieval` CLI/SDK 均已支持 `research-tool` layout；DSH wiki/真实 fixture 相关测试在隔离 worktree 因主工作树未提交依赖缺失而 skip。
 
 **目标**：Pi、DSH、MCode Agent 通过同一检索入口使用跨运行状态。
 

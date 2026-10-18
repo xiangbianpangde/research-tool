@@ -37,7 +37,7 @@ CLI实际执行run、status、resume、鉴权失败和wiki-stage，日志与可�
 - 可选 `retrieval.refresh_on_run` 在九段结束后刷新派生索引，刷新失败写入 `.index/retrieval-refresh/<topic>.json` 为 `stale`，不改变研究 verdict；刷新设置不进入研究 run identity；
 - 搜索审计使用调用级 journal，记录 planned/actual/success/failure/cancelled，不用 raw 文件数量冒充请求次数。
 
-检查证据：research-tool 全量 `1157 passed / 3 skipped`；Ruff 和 `git diff --check` 通过；ResearchCTL strict layout `7 passed`；DSH/Pi Node 测试 `8 passed / 7 skipped`。真实临时 fixture 已完成跨仓库 `index/query/sources/trace/generate-index/reconcile`，篡改后返回 `INDEX_STALE` 与 `HASH_MISMATCH`。DSH 的 wiki/fixture 相关测试在隔离 worktree 因主工作树未提交依赖缺失而 skip；未进行真实联网科研质量验收。
+检查证据：research-tool 全量 `1157 passed / 3 skipped`；Ruff 和 `git diff --check` 通过；严格 ResearchCTL layout `7 passed`；DSH/Pi Node 测试 `8 passed / 7 skipped`。随后严格契约增强后 research-tool 全量为 `1160 passed / 3 skipped`，严格 layout 仍 `7 passed`，DSH/Pi 仍 `8 passed / 7 skipped`。真实临时 fixture 已完成跨仓库 `refresh/query/sources/trace/history/reconcile`，篡改后返回 `INDEX_STALE`；重建后 reconcile 返回 `HASH_MISMATCH`。DSH 的 wiki/真实 fixture 相关测试在隔离 worktree 因主工作树未提交依赖缺失而 skip；未进行真实联网科研质量验收。
 
 ## 已实现
 
