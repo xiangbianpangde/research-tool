@@ -19,6 +19,34 @@ def _pipeline(tmp_path: Path) -> ResearchPipeline:
     return pipeline
 
 
+def test_retrieval_refresh_settings_do_not_change_research_identity(tmp_path):
+    first = ResearchPipeline(
+        PipelineConfig(topic="battery", work_dir=tmp_path, retrieval=RetrievalConfig())
+    )
+    second = ResearchPipeline(
+        PipelineConfig(
+            topic="battery",
+            work_dir=tmp_path,
+            retrieval=RetrievalConfig(
+                refresh_on_run=True,
+                researchctl_root=tmp_path / "researchctl",
+                timeout_sec=120,
+            ),
+        )
+    )
+    for pipeline in (first, second):
+        pipeline.topic = "battery"
+        pipeline.root = tmp_path / "battery"
+    # The production initializer computes the fingerprint from a config dump;
+    # retrieval-only settings are deliberately absent from that dump.
+    def fingerprint(pipeline):
+        config = pipeline.config.model_dump(mode="json", exclude={"resume", "work_dir"})
+        config.pop("retrieval", None)
+        return config
+
+    assert fingerprint(first) == fingerprint(second)
+
+
 def test_refresh_success_records_derived_state(monkeypatch, tmp_path):
     calls = []
 

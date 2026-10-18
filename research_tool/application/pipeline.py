@@ -142,6 +142,9 @@ class ResearchPipeline:
         config["llm"].pop("session_id", None)
         for key in ("tavily_api_key", "semantic_scholar_api_key", "github_token", "proxy"):
             config["collector"].pop(key, None)
+        # Retrieval refresh is a derived post-run side effect; changing its
+        # transport/location must not create a different research identity.
+        config.pop("retrieval", None)
         inputs = {}
         if self.config.input_dir:
             path = Path(self.config.input_dir).resolve()
