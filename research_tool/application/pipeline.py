@@ -16,6 +16,7 @@ from collections.abc import AsyncIterator, Callable
 from pathlib import Path
 from typing import Any
 
+from ..common.logging_config import get_logger
 from ..common.slug import slugify
 from ..domain.errors import LLMAuthenticationError, LLMError, StageError
 from ..domain.models import (
@@ -35,6 +36,8 @@ from ..nine_loop.research import (
 )
 from ..nine_loop.runtime_state import RuntimeState, RuntimeStateError
 from .talk_linker import TalkLinker
+
+logger = get_logger(__name__)
 
 
 def _bytes(value: Any) -> bytes:
@@ -480,6 +483,7 @@ class ResearchPipeline:
                 if path.is_file():
                     files[path.relative_to(self.root).as_posix()] = _hash(path.read_bytes())
         summary = {"version": 1, "run_id": self._state.get("run_id"),
+                   "topic": self.topic, "topic_slug": self.root.name,
                    "verdict": result.verdict, "rounds": result.rounds,
                    "output_contract": "nine-stage", "stages": list(NINE_STAGES),
                    "stages_completed": result.stages_completed,
@@ -497,6 +501,18 @@ class ResearchPipeline:
                    "elapsed_sec": round(result.elapsed_sec, 3)}
         result.run_summary_path = self.root / "run-summary.json"
         _atomic(result.run_summary_path, _bytes(summary))
+        try:
+            from ..infrastructure.retrieval import write_retrieval_manifest
+
+            write_retrieval_manifest(self.root, summary)
+        except (OSError, ValueError, TypeError) as exc:
+            # The manifest is a derived retrieval projection.  Its failure must
+            # remain observable without changing the canonical nine-stage verdict.
+            logger.warning(
+                "写入 ResearchCTL retrieval manifest 失败 run_id=%s error_type=%s",
+                summary.get("run_id"),
+                type(exc).__name__,
+            )
 
 def create_pipeline(config: PipelineConfig, *, llm: LLMClient | None = None) -> ResearchPipeline:
     return ResearchPipeline(config, llm=llm)

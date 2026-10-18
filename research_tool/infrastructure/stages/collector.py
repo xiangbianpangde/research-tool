@@ -195,6 +195,43 @@ class Collector:
         self.config = config or CollectorConfig()
         self.llm = llm
         self._proxy_preflight_done = False
+        self._search_audit = {
+            "version": 1,
+            "planned_query_count": 0,
+            "planned_request_count": 0,
+            "actual_attempt_count": 0,
+            "successful_hit_count": 0,
+            "failed_request_count": 0,
+            "calls": [],
+        }
+
+    def _record_search_audit(
+        self,
+        *,
+        queries: list[str],
+        planned_request_count: int,
+        actual_attempt_count: int,
+        successful_hit_count: int,
+        failed_request_count: int,
+    ) -> None:
+        """Accumulate search-space and request-funnel counters for this collector."""
+        call = {
+            "queries": list(dict.fromkeys(query for query in queries if query)),
+            "planned_request_count": planned_request_count,
+            "actual_attempt_count": actual_attempt_count,
+            "successful_hit_count": successful_hit_count,
+            "failed_request_count": failed_request_count,
+        }
+        self._search_audit["planned_query_count"] += len(call["queries"])
+        self._search_audit["planned_request_count"] += planned_request_count
+        self._search_audit["actual_attempt_count"] += actual_attempt_count
+        self._search_audit["successful_hit_count"] += successful_hit_count
+        self._search_audit["failed_request_count"] += failed_request_count
+        self._search_audit["calls"].append(call)
+
+    def _persist_search_audit(self, raw_dir: Path) -> None:
+        """Persist the current collector audit before fetch side effects begin."""
+        write_json(raw_dir / "search-audit.json", self._search_audit)
 
     async def _assert_safe_url_bounded(self, url: str) -> None:
         timeout = max(float(self.config.timeout_sec), 0.001)
@@ -356,12 +393,17 @@ class Collector:
         )
         hits: list[SearchHit] = []
         seen: set[str] = set()
+        planned_queries = [q for engine, q in scoped if engine == "github"]
+        actual_attempts = 0
+        successful_hits = 0
+        failed_requests = 0
         for engine, q in scoped:
             if engine != "github":
                 continue
             timeout = float(self.config.timeout_sec)
             deadline = asyncio.get_running_loop().time() + timeout
             token = set_request_deadline(deadline)
+            actual_attempts += 1
             try:
                 # Keep the historical two-positional-argument seam: the
                 # backend's optional deep-search kwargs are not needed here.
@@ -369,16 +411,19 @@ class Collector:
                     gh.search(q, self.config.max_results_per_engine), timeout=timeout
                 )
             except asyncio.TimeoutError:
+                failed_requests += 1
                 warnings.append(
                     f"expert scoped github 搜索截止时间超时（>{self.config.timeout_sec:g}s）"
                     f" query={q!r}"
                 )
                 continue
             except Exception as e:  # noqa: BLE001
+                failed_requests += 1
                 warnings.append(f"expert scoped github 失败 query={q!r}: {e}")
                 continue
             finally:
                 reset_request_deadline(token)
+            successful_hits += len(batch)
             for h in batch:
                 if not h.url or h.url in seen:
                     continue
@@ -392,6 +437,13 @@ class Collector:
                         expert=True,
                     )
                 )
+        self._record_search_audit(
+            queries=planned_queries,
+            planned_request_count=len(planned_queries),
+            actual_attempt_count=actual_attempts,
+            successful_hit_count=successful_hits,
+            failed_request_count=failed_requests,
+        )
         if hits:
             logger.info("专家弱档 github 命中 %d 条（topic=%r）", len(hits), topic[:60])
         return hits, warnings
@@ -540,6 +592,9 @@ class Collector:
 
         hits: list[SearchHit] = []
         seen: set[str] = set()
+        actual_attempt_count = 0
+        successful_hit_count = 0
+        failed_request_count = 0
         width = self.config.max_concurrent_searches
         for start in range(0, len(selected), width):
             # Build at most one concurrency wave; do not queue the remaining
@@ -561,6 +616,7 @@ class Collector:
                     )
                 )
                 audits[engine] = self._increment(audits[engine], attempted=1)
+                actual_attempt_count += 1
             try:
                 results = await asyncio.gather(*tasks, return_exceptions=True)
             except BaseException:
@@ -581,8 +637,10 @@ class Collector:
                         detail = str(res) or type(res).__name__
                     warnings.append(f"{engine} 搜索失败 query={query!r}: {detail}")
                     audits[name] = self._increment(audits[name], failed=1)
+                    failed_request_count += 1
                     continue
                 audits[name] = self._increment(audits[name], hits=len(res))
+                successful_hit_count += len(res)
                 for hit in res:
                     threshold = self.config.search_relevance_min_overlap
                     if threshold > 0 and _hit_relevance(query, hit) < threshold:
@@ -608,6 +666,13 @@ class Collector:
                 warnings.append("搜索结果已达保留上限且基线覆盖完成；未启动剩余请求组合")
                 break
         source_audits = [audits[name] for name in sorted(audits)]
+        self._record_search_audit(
+            queries=queries,
+            planned_request_count=len(planned),
+            actual_attempt_count=actual_attempt_count,
+            successful_hit_count=successful_hit_count,
+            failed_request_count=failed_request_count,
+        )
         self._pending_source_audits = source_audits
         return SearchResult(
             hits=hits,
@@ -766,6 +831,7 @@ class Collector:
         # fetch begins.  Subsequent calls persist only deltas, avoiding double
         # counting while keeping source-audit.json valid during cancellation.
         self._append_sources(raw_dir, [])
+        self._persist_search_audit(raw_dir)
         merged_audits = self._persist_audits(raw_dir, list(audits.values()))
 
         def _persist_one(hit: SearchHit, fr: FetchResult, slot: int) -> None:
