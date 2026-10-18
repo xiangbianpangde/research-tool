@@ -117,7 +117,7 @@ researchctl/tests/test_research_tool_layout.py
 
 ### M4：运行后派生索引刷新
 
-**状态**：已实现；真实外部 ResearchCTL 子进程刷新仍需在用户配置的 ResearchCTL 根目录上验收。
+**状态**：已实现；已用隔离 ResearchCTL worktree 和真实临时 v1 fixture 验收 `refresh/index/generate-index`。未进行真实联网科研质量验收。
 
 **目标**：成功运行后维护最新派生索引，但不把索引失败混入研究成功状态。
 
@@ -136,7 +136,7 @@ researchctl/tests/test_research_tool_layout.py
 
 ### M5：Agent 工具与技能接入
 
-**状态**：Pi typed tool、DSH research tool 和 `research-tool retrieval` CLI/SDK 均已支持 `research-tool` layout；DSH wiki/真实 fixture 相关测试在隔离 worktree 因主工作树未提交依赖缺失而 skip。
+**状态**：Pi typed tool、DSH research tool 和 `research-tool retrieval` CLI/SDK 均已支持 `research-tool` layout；Fail-Closed 的 `process_ok/ok` 语义已统一。DSH wiki/真实 fixture 相关测试在隔离 worktree 因主工作树未提交依赖缺失而 skip。
 
 **目标**：Pi、DSH、MCode Agent 通过同一检索入口使用跨运行状态。
 
