@@ -11,6 +11,7 @@ import asyncio
 import hashlib
 import math
 import re
+import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -195,43 +196,111 @@ class Collector:
         self.config = config or CollectorConfig()
         self.llm = llm
         self._proxy_preflight_done = False
-        self._search_audit = {
-            "version": 1,
+        self._audit_dir: Path | None = None
+        self._search_audit = self._empty_search_audit()
+
+    @staticmethod
+    def _empty_search_audit() -> dict:
+        return {
+            "version": 2,
             "planned_query_count": 0,
             "planned_request_count": 0,
             "actual_attempt_count": 0,
             "successful_hit_count": 0,
             "failed_request_count": 0,
+            "cancelled_request_count": 0,
             "calls": [],
         }
 
-    def _record_search_audit(
-        self,
-        *,
-        queries: list[str],
-        planned_request_count: int,
-        actual_attempt_count: int,
-        successful_hit_count: int,
-        failed_request_count: int,
-    ) -> None:
-        """Accumulate search-space and request-funnel counters for this collector."""
-        call = {
-            "queries": list(dict.fromkeys(query for query in queries if query)),
-            "planned_request_count": planned_request_count,
-            "actual_attempt_count": actual_attempt_count,
-            "successful_hit_count": successful_hit_count,
-            "failed_request_count": failed_request_count,
-        }
-        self._search_audit["planned_query_count"] += len(call["queries"])
-        self._search_audit["planned_request_count"] += planned_request_count
-        self._search_audit["actual_attempt_count"] += actual_attempt_count
-        self._search_audit["successful_hit_count"] += successful_hit_count
-        self._search_audit["failed_request_count"] += failed_request_count
-        self._search_audit["calls"].append(call)
+    def _set_audit_dir(self, raw_dir: Path) -> None:
+        """Attach this collector to one raw directory and resume its journal."""
+        raw_dir = Path(raw_dir)
+        if self._audit_dir == raw_dir:
+            return
+        current_calls = list(self._search_audit.get("calls", []))
+        self._audit_dir = raw_dir
+        path = raw_dir / "search-audit.json"
+        loaded_calls: list[dict] = []
+        if path.is_file():
+            try:
+                payload = read_json(path)
+            except (OSError, ValueError):
+                payload = None
+            if isinstance(payload, dict) and isinstance(payload.get("calls"), list):
+                loaded_calls = [call for call in payload["calls"] if isinstance(call, dict)]
+        audit = self._empty_search_audit()
+        audit["calls"] = loaded_calls + current_calls
+        self._search_audit = audit
+        self._recompute_search_totals()
+        if current_calls:
+            self._persist_search_audit()
 
-    def _persist_search_audit(self, raw_dir: Path) -> None:
-        """Persist the current collector audit before fetch side effects begin."""
-        write_json(raw_dir / "search-audit.json", self._search_audit)
+    def _recompute_search_totals(self) -> None:
+        calls = self._search_audit.get("calls", [])
+        self._search_audit.update({
+            "planned_query_count": sum(
+                int(call.get("planned_query_count", 0) or 0) for call in calls
+            ),
+            "planned_request_count": sum(
+                int(call.get("planned_request_count", 0) or 0) for call in calls
+            ),
+            "actual_attempt_count": sum(
+                int(call.get("actual_attempt_count", 0) or 0) for call in calls
+            ),
+            "successful_hit_count": sum(
+                int(call.get("successful_hit_count", 0) or 0) for call in calls
+            ),
+            "failed_request_count": sum(
+                int(call.get("failed_request_count", 0) or 0) for call in calls
+            ),
+            "cancelled_request_count": sum(
+                int(call.get("cancelled_request_count", 0) or 0) for call in calls
+            ),
+        })
+
+    def _persist_search_audit(self, raw_dir: Path | None = None) -> None:
+        """Persist the observed search journal; never infer counts from files."""
+        target = Path(raw_dir) if raw_dir is not None else self._audit_dir
+        if target is None:
+            return
+        target.mkdir(parents=True, exist_ok=True)
+        write_json(target / "search-audit.json", self._search_audit)
+
+    def _begin_search_call(self, queries: list[str], planned_request_count: int) -> str:
+        call_id = uuid.uuid4().hex
+        call = {
+            "call_id": call_id,
+            "status": "running",
+            "started_at": _now_iso(),
+            "queries": list(dict.fromkeys(query for query in queries if query)),
+            "planned_query_count": len(dict.fromkeys(query for query in queries if query)),
+            "planned_request_count": planned_request_count,
+            "actual_attempt_count": 0,
+            "successful_hit_count": 0,
+            "failed_request_count": 0,
+            "cancelled_request_count": 0,
+        }
+        self._search_audit["calls"].append(call)
+        self._recompute_search_totals()
+        self._persist_search_audit()
+        return call_id
+
+    def _finish_search_call(self, call_id: str, *, status: str, actual_attempt_count: int,
+                            successful_hit_count: int, failed_request_count: int,
+                            cancelled_request_count: int = 0) -> None:
+        for call in reversed(self._search_audit.get("calls", [])):
+            if call.get("call_id") == call_id:
+                call.update({
+                    "status": status,
+                    "finished_at": _now_iso(),
+                    "actual_attempt_count": actual_attempt_count,
+                    "successful_hit_count": successful_hit_count,
+                    "failed_request_count": failed_request_count,
+                    "cancelled_request_count": cancelled_request_count,
+                })
+                break
+        self._recompute_search_totals()
+        self._persist_search_audit()
 
     async def _assert_safe_url_bounded(self, url: str) -> None:
         timeout = max(float(self.config.timeout_sec), 0.001)
@@ -361,7 +430,7 @@ class Collector:
                 )
         return hits
 
-    async def _expert_scoped_github_hits(
+    async def _expert_scoped_github_hits(  # noqa: PLR0915
         self, topic: str
     ) -> tuple[list[SearchHit], list[str]]:
         """专家弱档：对匹配专家的 github handle 跑 ``org:X <topic>``（仅 GitHub 引擎）。
@@ -394,56 +463,69 @@ class Collector:
         hits: list[SearchHit] = []
         seen: set[str] = set()
         planned_queries = [q for engine, q in scoped if engine == "github"]
+        call_id = self._begin_search_call(planned_queries, len(planned_queries))
         actual_attempts = 0
         successful_hits = 0
         failed_requests = 0
-        for engine, q in scoped:
-            if engine != "github":
-                continue
-            timeout = float(self.config.timeout_sec)
-            deadline = asyncio.get_running_loop().time() + timeout
-            token = set_request_deadline(deadline)
-            actual_attempts += 1
-            try:
-                # Keep the historical two-positional-argument seam: the
-                # backend's optional deep-search kwargs are not needed here.
-                batch = await asyncio.wait_for(
-                    gh.search(q, self.config.max_results_per_engine), timeout=timeout
-                )
-            except asyncio.TimeoutError:
-                failed_requests += 1
-                warnings.append(
-                    f"expert scoped github 搜索截止时间超时（>{self.config.timeout_sec:g}s）"
-                    f" query={q!r}"
-                )
-                continue
-            except Exception as e:  # noqa: BLE001
-                failed_requests += 1
-                warnings.append(f"expert scoped github 失败 query={q!r}: {e}")
-                continue
-            finally:
-                reset_request_deadline(token)
-            successful_hits += len(batch)
-            for h in batch:
-                if not h.url or h.url in seen:
+        try:
+            for engine, q in scoped:
+                if engine != "github":
                     continue
-                seen.add(h.url)
-                hits.append(
-                    SearchHit(
-                        url=h.url,
-                        title=h.title,
-                        snippet=(h.snippet or "") + "\n[expert/scoped]",
-                        source_engine=h.source_engine or "github",
-                        expert=True,
+                timeout = float(self.config.timeout_sec)
+                deadline = asyncio.get_running_loop().time() + timeout
+                token = set_request_deadline(deadline)
+                actual_attempts += 1
+                try:
+                    # Keep the historical two-positional-argument seam: the
+                    # backend's optional deep-search kwargs are not needed here.
+                    batch = await asyncio.wait_for(
+                        gh.search(q, self.config.max_results_per_engine), timeout=timeout
                     )
-                )
-        self._record_search_audit(
-            queries=planned_queries,
-            planned_request_count=len(planned_queries),
-            actual_attempt_count=actual_attempts,
-            successful_hit_count=successful_hits,
-            failed_request_count=failed_requests,
-        )
+                except asyncio.TimeoutError:
+                    failed_requests += 1
+                    warnings.append(
+                        f"expert scoped github 搜索截止时间超时（>{self.config.timeout_sec:g}s）"
+                        f" query={q!r}"
+                    )
+                    continue
+                except Exception as e:  # noqa: BLE001
+                    failed_requests += 1
+                    warnings.append(f"expert scoped github 失败 query={q!r}: {e}")
+                    continue
+                finally:
+                    reset_request_deadline(token)
+                successful_hits += len(batch)
+                for h in batch:
+                    if not h.url or h.url in seen:
+                        continue
+                    seen.add(h.url)
+                    hits.append(
+                        SearchHit(
+                            url=h.url,
+                            title=h.title,
+                            snippet=(h.snippet or "") + "\n[expert/scoped]",
+                            source_engine=h.source_engine or "github",
+                            expert=True,
+                        )
+                    )
+        except asyncio.CancelledError:
+            self._finish_search_call(
+                call_id,
+                status="cancelled",
+                actual_attempt_count=actual_attempts,
+                successful_hit_count=successful_hits,
+                failed_request_count=failed_requests,
+                cancelled_request_count=1,
+            )
+            raise
+        else:
+            self._finish_search_call(
+                call_id,
+                status="completed",
+                actual_attempt_count=actual_attempts,
+                successful_hit_count=successful_hits,
+                failed_request_count=failed_requests,
+            )
         if hits:
             logger.info("专家弱档 github 命中 %d 条（topic=%r）", len(hits), topic[:60])
         return hits, warnings
@@ -590,6 +672,7 @@ class Collector:
                 "max_concurrent_searches-1)"
             )
 
+        call_id = self._begin_search_call(queries, len(planned))
         hits: list[SearchHit] = []
         seen: set[str] = set()
         actual_attempt_count = 0
@@ -624,6 +707,15 @@ class Collector:
                     if not task.done():
                         task.cancel()
                 await asyncio.gather(*tasks, return_exceptions=True)
+                cancelled_requests = sum(1 for task in tasks if task.cancelled())
+                self._finish_search_call(
+                    call_id,
+                    status="cancelled",
+                    actual_attempt_count=actual_attempt_count,
+                    successful_hit_count=successful_hit_count,
+                    failed_request_count=failed_request_count,
+                    cancelled_request_count=cancelled_requests,
+                )
                 raise
 
             for (engine, query, _backend, _sort, _offset), res in zip(wave, results):
@@ -666,9 +758,9 @@ class Collector:
                 warnings.append("搜索结果已达保留上限且基线覆盖完成；未启动剩余请求组合")
                 break
         source_audits = [audits[name] for name in sorted(audits)]
-        self._record_search_audit(
-            queries=queries,
-            planned_request_count=len(planned),
+        self._finish_search_call(
+            call_id,
+            status="completed",
             actual_attempt_count=actual_attempt_count,
             successful_hit_count=successful_hit_count,
             failed_request_count=failed_request_count,
@@ -682,6 +774,7 @@ class Collector:
 
     async def run(self, topic: str, work_dir: Path, *, dry_run: bool = False) -> CollectResult:
         raw_dir = ensure_dir(Path(work_dir) / "raw")
+        self._set_audit_dir(raw_dir)
         if dry_run and self.config.official_urls:
             return CollectResult(
                 files=[],
@@ -769,6 +862,7 @@ class Collector:
           不把持久化部分成果当作 dispatcher 的阶段成功提交
         """
         ensure_dir(raw_dir)
+        self._set_audit_dir(Path(raw_dir))
         existing_urls = {
             url
             for source in self._load_sources(raw_dir)
