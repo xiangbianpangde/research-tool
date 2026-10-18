@@ -179,6 +179,7 @@ _MAPPING_SECTIONS = (
     "organizer",
     "reporter",
     "talk",
+    "retrieval",
     "pipeline",
 )
 

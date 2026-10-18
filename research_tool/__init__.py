@@ -62,6 +62,7 @@ from .domain.models import (
     PipelineResult,
     ReporterConfig,
     ReportResult,
+    RetrievalConfig,
     StageEvent,
 )
 from .infrastructure.ingest import PdfIngestor, ingest_pdfs
@@ -90,6 +91,7 @@ __all__ = [
     "ExtractorConfig",
     "OrganizerConfig",
     "ReporterConfig",
+    "RetrievalConfig",
     "CollectResult",
     "CleanResult",
     "ExtractResult",
