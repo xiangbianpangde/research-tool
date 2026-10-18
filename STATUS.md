@@ -26,6 +26,19 @@ CLI实际执行run、status、resume、鉴权失败和wiki-stage，日志与可�
 
 更新：2026-10-17。历史基线为 4ab1412，审计提交为 60881ca，九段实现提交为 47f5888。已从 codex/nine-stage-only 建立 main、推送并设为 GitHub 默认分支。本轮优化工作区 /Users/xbpd/.codex/worktrees/nine-stage-only/research-tool 位于 fix/runtime-input-reliability，基于 main / 488ccea；原目录仍在 master / ab2b0d6，29 tracked 与 10 untracked 文件哈希保持相同。
 
+## 本轮 ResearchCTL 接入（2026-10-18）
+
+已在分支 `task/researchctl-integration` 完成 ResearchCTL 接入主链：
+
+- 每个已初始化九段 run 生成 canonical `runs/<run_id>/run-record.json`，失败/预算/取消运行也保留快照；
+- 生成严格 `retrieval-manifest.json`，区分 body/artifact hash、stage envelope、citation source、搜索计划/实际请求/保留正文；
+- ResearchCTL 在隔离分支 `task/research-tool-layout` 提供严格 `research-tool` layout reader、current/history、sources/trace、reconcile、原子派生索引与路径/symlink/只读 DB 门禁；
+- `research-tool retrieval` SDK/CLI、ResearchCTL Pi typed tool、DSH 插件支持 `--layout research-tool`；canonical 写入/事务动作在该 layout 下拒绝；
+- 可选 `retrieval.refresh_on_run` 在九段结束后刷新派生索引，刷新失败写入 `.index/retrieval-refresh/<topic>.json` 为 `stale`，不改变研究 verdict；刷新设置不进入研究 run identity；
+- 搜索审计使用调用级 journal，记录 planned/actual/success/failure/cancelled，不用 raw 文件数量冒充请求次数。
+
+检查证据：research-tool 全量 `1157 passed / 3 skipped`；Ruff 和 `git diff --check` 通过；ResearchCTL strict layout `7 passed`；DSH/Pi Node 测试 `8 passed / 7 skipped`。真实临时 fixture 已完成跨仓库 `index/query/sources/trace/generate-index/reconcile`，篡改后返回 `INDEX_STALE` 与 `HASH_MISMATCH`。DSH 的 wiki/fixture 相关测试在隔离 worktree 因主工作树未提交依赖缺失而 skip；未进行真实联网科研质量验收。
+
 ## 已实现
 
 ResearchPipeline 是唯一正式九段调度：collect、clean、extract、knowledge、inspect、targeted、merge、qgate、report。inspect/qgate 先判断质量，CONTINUE 才触发 targeted/merge 并重检，STOP_SUCCESS 才报告。补搜正文再次清洗和抽取。旧分派、brief/fast、旧独立阶段 CLI、quick_collect、shadow/flags 及旧 deepen 配置均已移除或拒绝。
