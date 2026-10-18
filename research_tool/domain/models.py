@@ -363,6 +363,16 @@ class NineLoopConfig(BaseModel):
     wall_s_max: float = Field(default=1800, gt=0)
 
 
+class RetrievalConfig(BaseModel):
+    """Optional post-run refresh of the ResearchCTL derived index."""
+
+    refresh_on_run: bool = False
+    researchctl_root: Path | None = None
+    python_executable: str | None = None
+    db_path: Path | None = None
+    timeout_sec: float = Field(default=60.0, gt=0)
+
+
 class PipelineConfig(BaseModel):
     """管道总配置。依据 01 §7.3 + 03 §2。"""
 
@@ -383,6 +393,7 @@ class PipelineConfig(BaseModel):
     talk: TalkConfig = Field(default_factory=TalkConfig)
     llm: LLMConfig = Field(default_factory=LLMConfig)
     nine_loop: NineLoopConfig = Field(default_factory=NineLoopConfig)
+    retrieval: RetrievalConfig = Field(default_factory=RetrievalConfig)
     resume: bool = True  # 幂等跳过已完成 Stage（05 §5）
     # LLM 阶段级恢复：SDK 层默认不重试，统一由 pipeline 做有界重试，避免 SDK
     # 默认 600s 超时叠加隐式重试。鉴权错误永不重试。

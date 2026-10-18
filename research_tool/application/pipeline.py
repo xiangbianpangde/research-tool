@@ -11,6 +11,7 @@ import shutil
 import tempfile
 import time
 import threading
+from datetime import datetime, timezone
 from contextlib import aclosing
 from collections.abc import AsyncIterator, Callable
 from pathlib import Path
@@ -471,6 +472,63 @@ class ResearchPipeline:
         _atomic(report_file, report["markdown"].encode("utf-8"))
         return {**report, "output_files": [str(path) for path in files] + [str(report_file)]}
 
+    def _refresh_retrieval_index(self, summary: dict[str, Any]) -> None:
+        """Optionally refresh the derived ResearchCTL index after run close."""
+        if not self.config.retrieval.refresh_on_run:
+            return
+        started = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+        state = {
+            "version": 1,
+            "status": "refreshing",
+            "started_at": started,
+            "run_id": summary.get("run_id"),
+            "verdict": summary.get("verdict"),
+        }
+        state_dir = self.root / ".index" / "retrieval-refresh"
+        state_path = state_dir / f"{self.root.name}.json"
+        try:
+            _atomic(state_path, _bytes(state))
+        except OSError as exc:
+            logger.warning(
+                "写入 ResearchCTL 刷新状态失败 run_id=%s error_type=%s",
+                summary.get("run_id"),
+                type(exc).__name__,
+            )
+            return
+        try:
+            from ..infrastructure.retrieval import ResearchCtlClient
+
+            client = ResearchCtlClient(
+                self.config.work_dir,
+                researchctl_root=self.config.retrieval.researchctl_root,
+                python_executable=self.config.retrieval.python_executable,
+                db_path=self.config.retrieval.db_path,
+                timeout_sec=self.config.retrieval.timeout_sec,
+            )
+            indexed = client.index()
+            generated = client.generate_index()
+            final_state = {
+                **state,
+                "status": "success",
+                "finished_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+                "index": indexed,
+                "navigation": generated,
+            }
+        except Exception as exc:  # noqa: BLE001 - derived refresh is non-fatal
+            final_state = {
+                **state,
+                "status": "stale",
+                "finished_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+                "error_type": type(exc).__name__,
+                "error": str(exc)[:500],
+            }
+            logger.warning(
+                "ResearchCTL 派生索引刷新失败 run_id=%s error_type=%s",
+                summary.get("run_id"),
+                type(exc).__name__,
+            )
+        _atomic(state_path, _bytes(final_state))
+
     def _summary(self) -> None:
         result = self._result
         assert result is not None
@@ -513,6 +571,8 @@ class ResearchPipeline:
                 summary.get("run_id"),
                 type(exc).__name__,
             )
+        self._refresh_retrieval_index(summary)
+
 
 def create_pipeline(config: PipelineConfig, *, llm: LLMClient | None = None) -> ResearchPipeline:
     return ResearchPipeline(config, llm=llm)

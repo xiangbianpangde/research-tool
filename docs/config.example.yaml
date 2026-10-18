@@ -180,6 +180,14 @@ pipeline:
   llm_stage_attempts: 3           # 瞬时 LLM 失败的阶段级尝试次数（鉴权错误不重试）
   llm_retry_backoff_sec: 2        # 线性退避基数：2s、4s……
 
+# ResearchCTL 派生索引刷新（默认关闭；开启不改变九段成功/失败语义）
+retrieval:
+  refresh_on_run: false
+  researchctl_root: null       # ResearchCTL 仓库根目录；可用环境/CLI 适配器传入
+  python_executable: null       # 默认使用当前 Python
+  db_path: null                 # 默认 <research-output>/.index/research.sqlite
+  timeout_sec: 60
+
 # 九段闭环边界：qgate 判定 CONTINUE 时执行 targeted → merge → inspect
 nine_loop:
   max_rounds: 2                  # 最多补搜轮数；0=仅评估初次采集，不绕过质量门控

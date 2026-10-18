@@ -12,9 +12,9 @@
 - [x] 已创建接入方案和路线图
 - [x] 生成 `retrieval-manifest.json`
 - [x] `research-tool` Retrieval SDK/CLI 薄适配器已接入
-- [ ] ResearchCTL 读取 `research-tool` layout
-- [ ] ResearchCTL 投影索引与 Fail-Closed 查询路由
-- [ ] 自动刷新派生索引
+- [x] ResearchCTL 读取 `research-tool` layout
+- [x] ResearchCTL 投影索引与 Fail-Closed 查询路由
+- [x] 运行后可选刷新派生索引并记录 stale 状态
 - [ ] Pi / DSH / MCode Agent 工具接入
 
 ## 路线图
@@ -115,6 +115,8 @@ researchctl/tests/test_research_tool_layout.py
 
 ### M4：运行后派生索引刷新
 
+**状态**：已实现；真实外部 ResearchCTL 子进程刷新仍需在用户配置的 ResearchCTL 根目录上验收。
+
 **目标**：成功运行后维护最新派生索引，但不把索引失败混入研究成功状态。
 
 交付：
@@ -167,7 +169,11 @@ researchctl/tests/test_research_tool_layout.py
 2. 实现 M1 manifest 纯函数和写入器。
 3. 在 pipeline 的最终收束处生成 manifest。
 4. 增加专项测试并运行受影响回归。
-5. 复核 Git 差异后，再进入 M2 外部仓库 layout reader。
+5. 建立隔离的 ResearchCTL worktree。
+6. 完成 M2 layout reader、索引投影和 Fail-Closed 查询。
+7. 使用 `research-tool` 真实输出 fixture 验收 SDK/CLI 和跨仓库查询。
+8. 实现可选 post-run refresh，并将刷新失败记录为 stale。
+9. 再进入 Pi / DSH / MCode Agent 工具接入。
 
 ## 保护边界
 
