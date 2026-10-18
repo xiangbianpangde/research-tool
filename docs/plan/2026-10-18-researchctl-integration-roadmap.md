@@ -15,7 +15,8 @@
 - [x] ResearchCTL 读取 `research-tool` layout
 - [x] ResearchCTL 投影索引与 Fail-Closed 查询路由
 - [x] 运行后可选刷新派生索引并记录 stale 状态
-- [ ] Pi / DSH / MCode Agent 工具接入
+- [x] ResearchCTL Pi typed tool 支持 `research-tool` layout
+- [ ] DSH / MCode Agent 原生工具接入
 
 ## 路线图
 
@@ -134,6 +135,8 @@ researchctl/tests/test_research_tool_layout.py
 
 ### M5：Agent 工具与技能接入
 
+**状态**：Pi typed tool 已支持 `research-tool` layout；DSH/MCode 原生工具尚未在当前隔离 worktree 验收。
+
 **目标**：Pi、DSH、MCode Agent 通过同一检索入口使用跨运行状态。
 
 交付：
@@ -177,7 +180,8 @@ researchctl/tests/test_research_tool_layout.py
 
 ## 保护边界
 
-- 当前任务只在 `/Users/xbpd/Projects/research-tool` 的任务分支推进。
-- `/Users/xbpd/Projects/文字Agent检索系统` 当前工作树有大量未提交修改，除非另行确认，不在其上写入或清理。
+- `research-tool` 当前开发分支：`task/researchctl-integration`。
+- ResearchCTL 当前独立开发 worktree：`/Users/xbpd/Projects/researchctl-layout`，分支：`task/research-tool-layout`。
+- `/Users/xbpd/Projects/文字Agent检索系统` 主工作树有大量未提交修改，不在其上写入或清理。
 - 不修改用户已有未提交文件。
 - 不提交或记录任何 API key、Cookie、Token、私钥或环境变量值。
