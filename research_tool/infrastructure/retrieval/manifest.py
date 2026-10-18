@@ -213,6 +213,7 @@ def build_retrieval_manifest(topic_root: Path, summary: Mapping[str, Any]) -> di
     sources = _collect_source_records(root, run_root)
     search_stats = _search_stats(root, run_root, sources)
     artifacts: dict[str, str] = {}
+    artifact_hashes: dict[str, str] = {}
     final = run_root / "final"
     for name, path in (
         ("report", final / "report.md"),
@@ -221,6 +222,7 @@ def build_retrieval_manifest(topic_root: Path, summary: Mapping[str, Any]) -> di
     ):
         if path.is_file():
             artifacts[name] = _relative_path(root, path)
+            artifact_hashes[name] = _hash_file(path)
 
     pipeline_complete = bool(summary.get("pipeline_complete") is True)
     verdict = summary.get("verdict")
@@ -241,6 +243,7 @@ def build_retrieval_manifest(topic_root: Path, summary: Mapping[str, Any]) -> di
         "stages": _stage_status(summary),
         "search": search_stats,
         "artifacts": artifacts,
+        "artifact_hashes": artifact_hashes,
         "sources": sources,
     }
 

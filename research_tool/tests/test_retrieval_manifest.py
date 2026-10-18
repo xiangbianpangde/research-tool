@@ -144,6 +144,7 @@ def test_manifest_separates_body_and_artifact_hashes(tmp_path):
     assert source["body_sha256"].startswith("sha256:")
     assert source["artifact_sha256"].startswith("sha256:")
     assert source["body_sha256"] != source["artifact_sha256"]
+    assert manifest["artifact_hashes"]["report"].startswith("sha256:")
     assert not Path(source["raw_path"]).is_absolute()
 
 
