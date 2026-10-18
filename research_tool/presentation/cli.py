@@ -911,6 +911,69 @@ def publish_wiki(
     _print_warnings(list(result.warnings))
 
 
+@app.command(name="retrieval")
+def retrieval(
+    action: str = typer.Argument(
+        ...,
+        help="ResearchCTL 动作：index/query/sources/trace/history/reconcile/generate-index",
+    ),
+    root: Path = typer.Option(
+        Path("./research-output"), "--root", help="research-output 根目录或主题目录"
+    ),
+    researchctl_root: Optional[Path] = typer.Option(
+        None, "--researchctl-root", help="ResearchCTL 仓库根目录"
+    ),
+    db: Optional[Path] = typer.Option(None, "--db", help="ResearchCTL 派生索引路径"),
+    entity: Optional[str] = typer.Option(None, "--entity"),
+    text: Optional[str] = typer.Option(None, "--text"),
+    owner: Optional[str] = typer.Option(None, "--owner"),
+    as_of: Optional[str] = typer.Option(None, "--as-of"),
+    limit: Optional[int] = typer.Option(None, "--limit"),
+    semantic: bool = typer.Option(False, "--semantic"),
+) -> None:
+    """通过 ResearchCTL 公开 CLI 查询 research-tool 运行状态。"""
+    from ..infrastructure.retrieval import ResearchCtlClient, RetrievalClientError
+
+    client = ResearchCtlClient(
+        root,
+        researchctl_root=researchctl_root,
+        db_path=db,
+    )
+    try:
+        if action == "index":
+            payload = client.index(semantic=semantic)
+        elif action == "query":
+            payload = client.query(
+                entity=entity,
+                text=text,
+                semantic=semantic,
+                limit=limit,
+            )
+        elif action == "sources":
+            if owner is None:
+                _fail("retrieval sources 需要 --owner")
+                return
+            payload = client.sources(owner)
+        elif action == "trace":
+            if entity is None:
+                _fail("retrieval trace 需要 --entity")
+                return
+            payload = client.trace(entity)
+        elif action == "history":
+            payload = client.history(as_of=as_of)
+        elif action == "reconcile":
+            payload = client.reconcile()
+        elif action == "generate-index":
+            payload = client.generate_index()
+        else:
+            _fail(f"未知 retrieval action: {action}")
+            return
+    except (RetrievalClientError, ValueError) as exc:
+        _fail(str(exc))
+        return
+    _out.print_json(json.dumps(payload, ensure_ascii=False))
+
+
 @app.command()
 def status(path: Path = typer.Argument(..., help="主题目录")) -> None:
     """根据九段运行摘要和 runtime-state 查看调研进度。"""

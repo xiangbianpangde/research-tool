@@ -11,8 +11,9 @@
 - [x] 已在 `research-tool` 创建任务分支 `task/researchctl-integration`
 - [x] 已创建接入方案和路线图
 - [x] 生成 `retrieval-manifest.json`
+- [x] `research-tool` Retrieval SDK/CLI 薄适配器已接入
 - [ ] ResearchCTL 读取 `research-tool` layout
-- [ ] 统一 retrieval SDK / CLI
+- [ ] ResearchCTL 投影索引与 Fail-Closed 查询路由
 - [ ] 自动刷新派生索引
 - [ ] Pi / DSH / MCode Agent 工具接入
 
@@ -45,8 +46,11 @@
 ```text
 research_tool/infrastructure/retrieval/__init__.py
 research_tool/infrastructure/retrieval/manifest.py
+research_tool/infrastructure/retrieval/client.py
 research_tool/application/pipeline.py
+research_tool/presentation/cli.py
 research_tool/tests/test_retrieval_manifest.py
+research_tool/tests/test_retrieval_client.py
 ```
 
 交付：
@@ -57,11 +61,13 @@ research_tool/tests/test_retrieval_manifest.py
 - 来源 body/artifact 哈希
 - 搜索空间 / 实际请求 / 保留正文统计
 - 原子写入和路径 containment 校验
+- `research retrieval` 公开 CLI/SDK 薄适配器
 
 验收：
 
 - fixture 测试覆盖成功、失败和 source 变更。
 - 现有九段 pipeline 测试无回归。
+- Retrieval SDK/CLI 不读取 ResearchCTL SQLite。
 - `ruff` 和 `git diff --check` 通过。
 
 ### M2：ResearchCTL layout reader
