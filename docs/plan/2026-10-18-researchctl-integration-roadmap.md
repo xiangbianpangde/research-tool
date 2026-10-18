@@ -117,7 +117,7 @@ researchctl/tests/test_research_tool_layout.py
 
 ### M4：运行后派生索引刷新
 
-**状态**：已实现；已用隔离 ResearchCTL worktree 和真实临时 v1 fixture 验收 `refresh/index/generate-index`。未进行真实联网科研质量验收。
+**状态**：已实现；已用隔离 ResearchCTL worktree 和真实临时 v1 fixture 验收 `refresh/index/generate-index`，包括 stale/hash fail-closed。未进行真实联网科研质量验收。
 
 **目标**：成功运行后维护最新派生索引，但不把索引失败混入研究成功状态。
 
