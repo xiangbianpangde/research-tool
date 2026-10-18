@@ -22,8 +22,17 @@ from typing import Literal
 import httpx
 
 from ...common.logging_config import get_logger, hash_url
-from ...common.url_guard import assert_safe_url
+from ...common.url_guard import (
+    UrlGuardBusyError,
+    UrlGuardTimeoutError,
+    assert_safe_url,
+    assert_safe_url_async,
+)
 from ...domain.errors import UrlBlockedError
+
+# Kept as a module symbol for existing synchronous test/caller seams. Async
+# fetch paths deliberately use assert_safe_url_async instead.
+_SYNC_URL_GUARD = assert_safe_url
 
 logger = get_logger(__name__)
 
@@ -75,8 +84,8 @@ _GH_NON_REPO_NAMES = frozenset(
 
 
 async def _guard_request(request: httpx.Request) -> None:
-    """httpx event hook: re-validate every request URL (covers redirect targets)."""
-    assert_safe_url(str(request.url))
+    """httpx event hook: re-validate every request URL (covers redirects)."""
+    await assert_safe_url_async(str(request.url))
 
 
 @dataclass
@@ -207,26 +216,27 @@ class Fetcher:
         return float(self.timeout_sec) + float(self.hard_timeout_grace_sec)
 
     async def fetch(self, url: str) -> FetchResult:
-        # SSRF entry guard (covers pdf/crawl4ai/httpx). Never log the raw URL.
-        try:
-            assert_safe_url(url)
-        except UrlBlockedError as e:
-            logger.warning("SSRF guard blocked fetch: %s", hash_url(url))
-            return FetchResult(url, "", ok=False, error=f"SSRF guard: {e}")
-
+        # Entry guard is inside the same wall-clock boundary as the fetch.
+        # Never log the raw URL.
         hard = self.hard_timeout_sec()
+
+        async def guarded_dispatch() -> FetchResult:
+            await assert_safe_url_async(url, timeout_sec=hard)
+            return await self._fetch_dispatch(url)
+
         try:
-            return await asyncio.wait_for(self._fetch_dispatch(url), timeout=hard)
-        except asyncio.TimeoutError:
-            logger.warning(
-                "fetch hard timeout after %.0fs url_hash=%s", hard, hash_url(url)
-            )
+            return await asyncio.wait_for(guarded_dispatch(), timeout=hard)
+        except (UrlGuardTimeoutError, UrlGuardBusyError, asyncio.TimeoutError) as e:
+            logger.warning("fetch hard timeout/guard capacity for url_hash=%s", hash_url(url))
             return FetchResult(
                 url,
                 "",
                 ok=False,
-                error=f"fetch hard timeout after {hard:.0f}s",
+                error=f"fetch hard timeout after {hard:.0f}s: {e}",
             )
+        except UrlBlockedError as e:
+            logger.warning("SSRF guard blocked fetch: %s", hash_url(url))
+            return FetchResult(url, "", ok=False, error=f"SSRF guard: {e}")
 
     async def _fetch_dispatch(self, url: str) -> FetchResult:
         if url.lower().split("?")[0].endswith(".pdf"):
@@ -297,6 +307,8 @@ class Fetcher:
                     if resp.status_code != 200:
                         continue
                     raw_html = resp.text
+            except (UrlGuardTimeoutError, UrlGuardBusyError, UrlBlockedError):
+                raise
             except Exception as e:  # noqa: BLE001
                 logger.debug("arxiv html 抓取失败 %s: %s", hash_url(candidate), e)
                 continue
@@ -328,6 +340,8 @@ class Fetcher:
                     root.mkdir(parents=True, exist_ok=True)
                     digest = hashlib.sha256(source_url.encode()).hexdigest()[:16]
                     (root / f"{digest}.pdf").write_bytes(data)
+        except (UrlGuardTimeoutError, UrlGuardBusyError, UrlBlockedError):
+            raise
         except Exception as e:  # noqa: BLE001 - 预下载失败不中断
             logger.debug("arxiv pdf 预下载失败 %s: %s", hash_url(pdf_url), e)
 
@@ -406,6 +420,8 @@ class Fetcher:
                 api = await client.get(f"https://api.github.com/repos/{owner}/{repo}")
                 if api.status_code == 200:
                     meta_block = _github_meta_markdown(owner, repo, url, api.json())
+        except (UrlGuardTimeoutError, UrlGuardBusyError, UrlBlockedError):
+            raise
         except Exception as e:  # noqa: BLE001
             logger.debug("github repo API meta skip: %s", e)
 
@@ -431,6 +447,8 @@ class Fetcher:
                         readme_text = resp2.text
                         used_branch = branch
                         break
+        except (UrlGuardTimeoutError, UrlGuardBusyError, UrlBlockedError):
+            raise
         except Exception as e:  # noqa: BLE001
             logger.debug("github raw README fail: %s", e)
             return None
@@ -477,6 +495,8 @@ class Fetcher:
         except UrlBlockedError as e:
             logger.warning("SSRF guard blocked PDF redirect: %s", hash_url(url))
             return FetchResult(url, "", ok=False, error=f"SSRF guard: {e}")
+        except (UrlGuardTimeoutError, UrlGuardBusyError):
+            raise
         except Exception as e:  # noqa: BLE001
             return FetchResult(url, "", ok=False, error=f"PDF 下载失败: {e}")
         if not data[:5].startswith(b"%PDF"):
@@ -499,7 +519,12 @@ class Fetcher:
 
         if not self.parse_pdf:
             return FetchResult(url, "", ok=False, error="PDF 已跳过(parse_pdf=False)")
-        from ..ingest.pdf import find_mineru, mineru_to_markdown
+        from ..ingest.pdf import (
+            _ORIGINAL_MINERU_TO_MARKDOWN,
+            find_mineru,
+            mineru_to_markdown,
+            mineru_to_markdown_async,
+        )
 
         mineru = find_mineru(self.mineru_cmd)
         if not mineru:
@@ -514,8 +539,14 @@ class Fetcher:
             root.mkdir(parents=True, exist_ok=True)
             pdf_path = root / f"{hashlib.sha256(url.encode()).hexdigest()[:16]}.pdf"
             pdf_path.write_bytes(data)
-            md = await asyncio.to_thread(mineru_to_markdown, pdf_path, mineru, root, lang="ch")
+            if mineru_to_markdown is not _ORIGINAL_MINERU_TO_MARKDOWN:
+                # Existing tests/custom callers may patch the legacy sync seam.
+                md = mineru_to_markdown(pdf_path, mineru, root, lang="ch")
+            else:
+                md = await mineru_to_markdown_async(pdf_path, mineru, root, lang="ch")
             return FetchResult(url, md)
+        except (UrlGuardTimeoutError, UrlGuardBusyError):
+            raise
         except Exception as e:  # noqa: BLE001 - 单篇失败不中断整批
             return FetchResult(url, "", ok=False, error=f"PDF 解析失败: {e}")
 
@@ -559,6 +590,8 @@ class Fetcher:
                     if href:
                         links.append(href)
             return FetchResult(url, md_text, links=links)
+        except (UrlGuardTimeoutError, UrlGuardBusyError):
+            raise
         except Exception as e:  # noqa: BLE001 - 抓取失败不应中断整批
             return FetchResult(url, "", ok=False, error=str(e))
 
@@ -580,5 +613,7 @@ class Fetcher:
         except UrlBlockedError as e:
             logger.warning("SSRF guard blocked redirect: %s", hash_url(url))
             return FetchResult(url, "", ok=False, error=f"SSRF guard: {e}")
+        except (UrlGuardTimeoutError, UrlGuardBusyError):
+            raise
         except Exception as e:  # noqa: BLE001
             return FetchResult(url, "", ok=False, error=str(e))

@@ -6,6 +6,7 @@ DeepSeek、Ollama 均提供 OpenAI 兼容端点，通过 base_url 区分。
 
 from __future__ import annotations
 
+import copy
 import json
 from collections.abc import AsyncIterator
 from typing import TYPE_CHECKING, TypeVar
@@ -43,11 +44,17 @@ class OpenAILLMClient(LLMClient):
             ),
             transport=httpx.AsyncHTTPTransport(proxy=None),
         )
+        default_headers = (
+            {"x-opencode-session": config.session_id}
+            if config.session_id
+            else None
+        )
         self._client = AsyncOpenAI(
             api_key=config.api_key or "ollama",
             base_url=config.base_url,
             http_client=no_proxy_client,
             max_retries=config.sdk_max_retries,
+            default_headers=default_headers,
         )
 
     def _messages(self, prompt: str, system: str | None) -> list[ChatCompletionMessageParam]:
@@ -56,6 +63,21 @@ class OpenAILLMClient(LLMClient):
             msgs.append({"role": "system", "content": system})
         msgs.append({"role": "user", "content": prompt})
         return msgs
+
+    def _request_options(self) -> dict:
+        """Return only explicitly validated provider request options."""
+        return copy.deepcopy(self.config.request_options)
+
+    async def _create_with_deadline(self, kwargs: dict, deadline: float):
+        import asyncio
+
+        remaining = deadline - asyncio.get_running_loop().time()
+        if remaining <= 0:
+            raise asyncio.TimeoutError
+        return await asyncio.wait_for(
+            self._client.chat.completions.create(**kwargs),
+            timeout=remaining,
+        )
 
     async def chat(
         self,
@@ -75,6 +97,7 @@ class OpenAILLMClient(LLMClient):
                         self.config.temperature if temperature is None else temperature
                     ),
                     max_tokens=self.config.max_tokens,
+                    **self._request_options(),
                 ),
                 timeout=self.config.request_timeout_sec,
             )
@@ -103,17 +126,27 @@ class OpenAILLMClient(LLMClient):
             "你必须只输出一个合法 JSON 对象，不要任何解释或 markdown 代码块。"
             f"JSON 必须符合以下 schema：\n{schema_json}"
         )
+        request = {
+            "model": self.config.model,
+            "messages": self._messages(prompt, sys),
+            "temperature": self.config.temperature,
+            "max_tokens": self.config.max_tokens,
+            "response_format": {"type": "json_object"},
+            **self._request_options(),
+        }
+        deadline = asyncio.get_running_loop().time() + self.config.request_timeout_sec
         try:
-            resp = await asyncio.wait_for(
-                self._client.chat.completions.create(
-                    model=self.config.model,
-                    messages=self._messages(prompt, sys),
-                    temperature=self.config.temperature,
-                    max_tokens=self.config.max_tokens,
-                    response_format={"type": "json_object"},
-                ),
-                timeout=self.config.request_timeout_sec,
-            )
+            try:
+                resp = await self._create_with_deadline(request, deadline)
+            except Exception as first_error:  # noqa: BLE001
+                if not _is_response_format_unsupported(first_error):
+                    raise
+                fallback_request = {
+                    key: value
+                    for key, value in request.items()
+                    if key != "response_format"
+                }
+                resp = await self._create_with_deadline(fallback_request, deadline)
         except asyncio.TimeoutError as e:
             raise LLMError(
                 "chat_structured 调用硬超时"
@@ -140,8 +173,14 @@ class OpenAILLMClient(LLMClient):
                     temperature=self.config.temperature,
                     max_tokens=self.config.max_tokens,
                     stream=True,
+                    **self._request_options(),
                 )
                 async for chunk in stream:
+                    # OpenAI-compatible providers may emit a final usage-only
+                    # chunk with choices=[] before the SSE [DONE] marker.
+                    # It carries no visible delta and must not abort streaming.
+                    if not chunk.choices:
+                        continue
                     delta = chunk.choices[0].delta.content
                     if delta:
                         for visible in think_filter.feed(delta):
@@ -157,6 +196,107 @@ class OpenAILLMClient(LLMClient):
             if isinstance(error, LLMAuthenticationError):
                 self._mark_authentication_failed()
             raise error
+
+
+def _structured_response_format_decision(chain: list[BaseException]) -> bool | None:
+    """Return a decision when a provider payload identifies the rejected parameter."""
+    unsupported_codes = {
+        "unsupported_parameter", "unsupported_value", "parameter_not_supported",
+        "not_supported", "unknown_parameter",
+    }
+    terminal_codes = {
+        "invalid_api_key", "authentication_error", "unauthorized", "forbidden",
+        "insufficient_quota", "quota_exceeded", "rate_limit_exceeded", "request_timeout",
+    }
+    capability_phrases = (
+        "not supported", "unsupported parameter", "unknown parameter",
+        "unknown argument", "does not support",
+    )
+    for item in chain:
+        bodies = [getattr(item, "body", None)]
+        response = getattr(item, "response", None)
+        bodies.append(getattr(response, "body", None))
+        for body in bodies:
+            if not isinstance(body, dict):
+                continue
+            payload = body.get("error", body)
+            if not isinstance(payload, dict):
+                continue
+            code = str(payload.get("code") or "").strip().lower()
+            parameter = str(
+                payload.get("param") or payload.get("parameter") or payload.get("field") or ""
+            ).strip().lower()
+            message = str(payload.get("message") or payload.get("detail") or "").lower()
+            if code in terminal_codes or any(
+                marker in message
+                for marker in ("invalid api key", "authentication", "quota", "rate limit")
+            ):
+                return False
+            if parameter and parameter != "response_format":
+                return False
+            if parameter == "response_format":
+                if code in unsupported_codes or any(
+                    phrase in message for phrase in capability_phrases
+                ):
+                    return True
+                return False
+    return None
+
+
+def _is_response_format_unsupported(exc: BaseException) -> bool:
+    """Allow fallback only for a 400/422 capability rejection, never auth/quota/timeouts."""
+    import asyncio
+
+    chain: list[BaseException] = []
+    current: BaseException | None = exc
+    seen: set[int] = set()
+    while current is not None and id(current) not in seen:
+        seen.add(id(current))
+        chain.append(current)
+        current = current.__cause__ or current.__context__
+
+    if any(isinstance(item, (asyncio.TimeoutError, httpx.TimeoutException)) for item in chain):
+        return False
+
+    statuses = {
+        status
+        for item in chain
+        for status in (
+            getattr(item, "status_code", None),
+            getattr(getattr(item, "response", None), "status_code", None),
+        )
+        if isinstance(status, int)
+    }
+    if not statuses & {400, 422} or statuses - {400, 422}:
+        return False
+
+    structured = _structured_response_format_decision(chain)
+    if structured is not None:
+        return structured
+
+    text_parts = [str(item) for item in chain]
+    text_parts.extend(
+        str(getattr(item, "body", ""))
+        for item in chain
+        if getattr(item, "body", None) is not None
+    )
+    text = " ".join(text_parts).lower()
+    terminal_errors = (
+        "invalid_api_key", "invalid api key", "authentication", "unauthorized",
+        "forbidden", "insufficient_quota", "quota", "rate limit", "rate_limit",
+        "timeout", "timed out",
+    )
+    if any(marker in text for marker in terminal_errors):
+        return False
+    if "response_format" not in text:
+        return False
+    return (
+        "response_format is not supported" in text
+        or "does not support response_format" in text
+        or ("unsupported parameter" in text and "response_format" in text)
+        or ("unknown argument" in text and "response_format" in text)
+        or ("unsupported_parameter" in text and "response_format" in text)
+    )
 
 
 def _partial_tag_suffix(text: str, tag: str) -> int:

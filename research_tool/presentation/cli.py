@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import re
 from pathlib import Path
 from typing import Optional
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
@@ -104,6 +105,20 @@ def _redact_nested_urls(value: object) -> object:
     return value
 
 
+def _redact_nested_secrets(value: object) -> object:
+    if isinstance(value, dict):
+        return {
+            key: "***" if re.search(
+                r"api[_\W]*key|token|auth|password|secret|cookie|credential|private[_\W]*key",
+                str(key), re.IGNORECASE,
+            ) else _redact_nested_secrets(item)
+            for key, item in value.items()
+        }
+    if isinstance(value, list):
+        return [_redact_nested_secrets(item) for item in value]
+    return value
+
+
 def _redact_config_data(data: dict) -> dict:
     """Return a redacted copy safe for terminal and CI logs."""
     sanitized = _redact_nested_urls(data)
@@ -112,6 +127,8 @@ def _redact_config_data(data: dict) -> dict:
     llm = dict(sanitized.get("llm") or {})
     if llm.get("api_key"):
         llm["api_key"] = "***"
+    if "request_options" in llm:
+        llm["request_options"] = _redact_nested_secrets(llm["request_options"])
     collector = dict(sanitized.get("collector") or {})
     for secret_field in (
         "github_token",

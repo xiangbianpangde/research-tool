@@ -12,8 +12,8 @@ MinerU 是可选重依赖（约 7GB，含模型）。本模块只通过 `mineru`
 
 from __future__ import annotations
 
-import asyncio
 import hashlib
+import inspect
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -70,6 +70,35 @@ def mineru_to_markdown(
     return create_ocr_engine(cfg).parse(pdf, parse_root)
 
 
+_ORIGINAL_MINERU_TO_MARKDOWN = mineru_to_markdown
+
+
+async def mineru_to_markdown_async(
+    pdf: Path,
+    mineru: str,
+    parse_root: Path,
+    *,
+    backend: str = "pipeline",
+    lang: str = "ch",
+    start: int | None = None,
+    end: int | None = None,
+) -> str:
+    """Async MinerU boundary with cancellation-aware subprocess execution."""
+    cfg = PdfIngestConfig(
+        ocr_engine="mineru",
+        mineru_cmd=mineru,
+        mineru_backend=backend,
+        ocr_lang=lang,
+        start_page=start,
+        end_page=end,
+    )
+    engine = create_ocr_engine(cfg)
+    parse_async = getattr(engine, "parse_async", None)
+    if parse_async is not None and inspect.iscoroutinefunction(parse_async):
+        return await parse_async(pdf, parse_root)
+    return engine.parse(pdf, parse_root)
+
+
 def _collect_pdfs(path: Path) -> list[Path]:
     path = Path(path)
     if path.is_file() and path.suffix.lower() == ".pdf":
@@ -113,8 +142,30 @@ class PdfIngestor:
         files: list[Path] = []
         sources: list[Source] = []
         for idx, pdf in enumerate(pdfs, 1):
-            # MinerU 是 CPU/GPU 密集子进程，逐个跑（避免显存竞争）
-            content = await asyncio.to_thread(ocr_engine.parse, pdf, parse_root)
+            # MinerU/OCR 是 CPU/GPU 密集子进程，逐个跑（避免显存竞争）。
+            # Built-in engines expose cancellation-aware parse_async; retain
+            # direct parse compatibility for existing lightweight test doubles.
+            legacy_mineru_patched = (
+                mineru_to_markdown is not _ORIGINAL_MINERU_TO_MARKDOWN
+            )
+            if ocr_engine.name == "mineru" and legacy_mineru_patched:
+                # Preserve the established sync seam when callers patch it;
+                # production's unpatched path remains cancellation-aware.
+                content = mineru_to_markdown(
+                    pdf,
+                    self.config.mineru_cmd or "mineru",
+                    parse_root,
+                    backend=self.config.mineru_backend,
+                    lang=self.config.ocr_lang,
+                    start=self.config.start_page,
+                    end=self.config.end_page,
+                )
+            else:
+                parse_async = getattr(ocr_engine, "parse_async", None)
+                if parse_async is not None and inspect.iscoroutinefunction(parse_async):
+                    content = await parse_async(pdf, parse_root)
+                else:
+                    content = ocr_engine.parse(pdf, parse_root)
             translated = False
             if self.config.translate and self.llm is not None:
                 content = await translate_markdown(

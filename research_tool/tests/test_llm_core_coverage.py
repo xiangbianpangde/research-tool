@@ -275,6 +275,26 @@ def test_anthropic_constructor_validates_key_and_wires_sdk(monkeypatch):
     assert captured["max_retries"] == 0
 
 
+def test_openai_compatible_constructor_wires_optional_session_header(monkeypatch):
+    import openai
+
+    captured = {}
+    monkeypatch.setattr(openai, "AsyncOpenAI", lambda **kwargs: captured.update(kwargs) or "sdk")
+
+    client = OpenAILLMClient(
+        LLMConfig(
+            provider="openai_compatible",
+            model="deepseek-v4.1-flash",
+            api_key="key",
+            base_url="https://gateway.example/v1",
+            session_id="research-session-1",
+        )
+    )
+
+    assert client._client == "sdk"
+    assert captured["default_headers"] == {"x-opencode-session": "research-session-1"}
+
+
 @pytest.mark.asyncio
 async def test_openai_chat_success_timeout_and_safe_provider_error():
     client, completions = openai_client(
@@ -319,7 +339,7 @@ async def test_openai_structured_success_timeout_and_non_auth_error():
 
 @pytest.mark.asyncio
 async def test_openai_stream_yields_text_skips_empty_and_handles_failures():
-    stream = AsyncChunks([chunk("a"), chunk(None), chunk("b")])
+    stream = AsyncChunks([chunk("a"), chunk(None), SimpleNamespace(choices=[]), chunk("b")])
     client, _ = openai_client([stream, asyncio.TimeoutError(), StatusError(401)])
 
     assert [part async for part in client.stream("prompt", "system")] == ["a", "b"]

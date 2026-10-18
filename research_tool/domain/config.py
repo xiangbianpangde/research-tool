@@ -35,6 +35,7 @@ _ENV_OVERRIDES = {
     "LLM_PROVIDER": ("llm", "provider"),
     "LLM_MODEL": ("llm", "model"),
     "LLM_BASE_URL": ("llm", "base_url"),
+    "LLM_SESSION_ID": ("llm", "session_id"),
 }
 
 
@@ -164,6 +165,7 @@ _PROVIDER_KEY_ENV = {
     "ollama": "OPENAI_API_KEY",
     "anthropic": "ANTHROPIC_API_KEY",
     "minimax": "MINIMAX_API_KEY",
+    "openai_compatible": "LLM_API_KEY",
 }
 
 _MAPPING_SECTIONS = (
@@ -215,7 +217,10 @@ def _apply_secret_env(data: dict) -> dict:
     llm = data.setdefault("llm", {})
     provider = llm.get("provider", "deepseek")
     base_url = str(llm.get("base_url") or "")
-    if not llm.get("api_key"):
+    if provider == "openai_compatible":
+        if os.environ.get("LLM_API_KEY"):
+            llm["api_key"] = os.environ["LLM_API_KEY"]
+    elif not llm.get("api_key"):
         if provider == "minimax" or "minimax" in base_url.lower():
             # 协议兼容不代表凭据兼容，绝不能把真实 Anthropic 厂商密钥
             # 静默发送给 MiniMax 端点。
@@ -314,6 +319,9 @@ def load_config(
     # 密钥必须根据最终 provider/base_url 选择；CLI overrides 可能刚切换
     # provider，若提前注入会把旧 provider 的 key 带到新端点并触发 401。
     data = _apply_secret_env(data)
+    override_llm = overrides.get("llm") if overrides else None
+    if isinstance(override_llm, dict) and override_llm.get("api_key") is not None:
+        data["llm"]["api_key"] = override_llm["api_key"]
 
     try:
         return PipelineConfig.model_validate(data)

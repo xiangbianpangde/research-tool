@@ -132,8 +132,10 @@ class ResearchPipeline:
 
     def _initialize(self) -> None:
         config = self.config.model_dump(mode="json", exclude={"resume", "work_dir"})
-        # Secrets affect neither source identity nor cached report semantics.
+        # Credentials and transport-only session routing affect neither source
+        # identity nor cached report semantics.
         config["llm"].pop("api_key", None)
+        config["llm"].pop("session_id", None)
         for key in ("tavily_api_key", "semantic_scholar_api_key", "github_token", "proxy"):
             config["collector"].pop(key, None)
         inputs = {}
@@ -147,7 +149,7 @@ class ResearchPipeline:
             from ..infrastructure.ingest.pdf import _collect_pdfs
             path = Path(self.config.pdf_dir).resolve()
             inputs[str(path)] = {p.name: _hash(p.read_bytes()) for p in _collect_pdfs(path)}
-        fingerprint = _hash(_bytes({"runtime_contract": 3, "topic": self.topic,
+        fingerprint = _hash(_bytes({"runtime_contract": 4, "topic": self.topic,
                                    "config": config, "inputs": inputs}))
         self._state = (self.runtime.load_or_init(fingerprint) if self.config.resume
                        else self.runtime.start_new(fingerprint))
@@ -321,7 +323,9 @@ class ResearchPipeline:
             if _hash(path.read_bytes()) != digest:
                 raise RuntimeStateError("阶段产物内容变化；拒绝使用旧缓存")
 
-    def _documents(self, directory: Path) -> list[dict[str, Any]]:
+    def _documents(
+        self, directory: Path, *, allow_empty: bool = False
+    ) -> list[dict[str, Any]]:
         documents = []
         for path in sorted(directory.glob("*.md")):
             source = parse_source(path.read_text(encoding="utf-8"))
@@ -331,7 +335,7 @@ class ResearchPipeline:
                 raise StageError(self._active, "来源缺少实际正文或定位信息")
             source["path"] = str(path)
             documents.append(source)
-        if not documents:
+        if not documents and not allow_empty:
             raise StageError(self._active, "没有可用的正文资料")
         return documents
 
@@ -372,11 +376,7 @@ class ResearchPipeline:
 
     async def _clean_work(self, work: Path) -> dict[str, Any]:
         cleaner = Cleaner(self.config.cleaner)
-        cleaned = cleaner.process(work / "raw", work)
-        for path in list(cleaned.files):
-            if parse_source(path.read_text()).get("evidence_kind", "body") != "body":
-                path.unlink()
-                cleaned.files.remove(path)
+        cleaned = cleaner.process(work / "raw", work, evidence_kinds={"body"})
         if self.config.cleaner.relevance_filter:
             cleaned = await cleaner.filter_relevance(cleaned, self._get_llm(), self.topic)
         for path in list(cleaned.files):
@@ -427,21 +427,28 @@ class ResearchPipeline:
         collector = Collector(self.config.collector)
         hits = await collector.search_queries(queries)
         await collector.fetch_and_store(self.topic, hits.hits, work / "raw")
-        self._documents(work / "raw")
+        raw_files = [
+            str(path) for path in sorted((work / "raw").glob("*"))
+            if path.is_file()
+        ]
+        documents = self._documents(work / "raw", allow_empty=True)
+        if not documents:
+            # Search/fetch attempts without usable body evidence are retained as
+            # an empty delta. They must not satisfy or close an evidence gap.
+            return {
+                "queries": queries,
+                "sources": [],
+                "facts": [],
+                "warnings": ["补搜未获得可核验正文；摘要/导航页未进入证据账本"],
+                "output_files": raw_files,
+            }
         cleaned = await self._clean_work(work)
         extracted = await self._extract_work(work)
         return {
             "queries": queries,
             "sources": cleaned["documents"],
             "facts": extracted["facts"],
-            "output_files": [
-                *cleaned["output_files"],
-                *extracted["output_files"],
-                *[
-                    str(path) for path in sorted((work / "raw").glob("*"))
-                    if path.is_file()
-                ],
-            ],
+            "output_files": [*cleaned["output_files"], *extracted["output_files"], *raw_files],
         }
 
     def _merge(self, graph: dict[str, Any], delta: dict[str, Any]) -> dict[str, Any]:

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+from unittest.mock import AsyncMock
 
 import pytest
 
@@ -49,7 +50,8 @@ async def test_official_source_is_fetched_before_search_and_expansion(
     monkeypatch.setattr("research_tool.infrastructure.stages.collector.get_backend", lambda *a: Backend())
     monkeypatch.setattr(Fetcher, "fetch", fetch)
     monkeypatch.setattr(
-        "research_tool.infrastructure.stages.collector.assert_safe_url", lambda url: None
+        "research_tool.infrastructure.stages.collector.assert_safe_url_async",
+        AsyncMock(return_value=None),
     )
 
     pipeline_config = config(tmp_path)

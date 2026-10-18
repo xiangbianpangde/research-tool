@@ -17,6 +17,7 @@ from pydantic import BaseModel, Field
 from ..llm.base import LLMClient
 from ...domain.errors import LLMAuthenticationError, StageError
 from ...domain.models import CleanerConfig, CleanResult, FileQuality
+from ...nine_loop.evidence import parse_source
 from .base import ensure_dir, write_json, write_text
 
 # 元数据头：连续的 <!-- ... --> 行
@@ -253,10 +254,18 @@ class Cleaner:
             cleaned = header + "\n\n" + cleaned
         return cleaned
 
-    def process(self, input_dir: Path, work_dir: Path | None = None) -> CleanResult:
+    def process(
+        self,
+        input_dir: Path,
+        work_dir: Path | None = None,
+        *,
+        evidence_kinds: set[str] | None = None,
+    ) -> CleanResult:
         """读 raw/*.md，写 clean/*.md + quality.json。
 
-        默认输出目录：把路径中的 raw 替换为 clean（02 §3）。
+        ``evidence_kinds`` 是正式证据管线的可选过滤器；过滤发生在清洗和
+        MinHash 去重之前，避免 discovery/snippet 文档参与正文去重竞争。
+        默认 ``None`` 保留旧的独立调用行为。
         """
         input_dir = Path(input_dir)
         if work_dir is not None:
@@ -274,6 +283,16 @@ class Cleaner:
 
         for src in sorted(input_dir.glob("*.md")):
             original = src.read_text(encoding="utf-8")
+            if evidence_kinds is not None:
+                try:
+                    evidence_kind = parse_source(original).get("evidence_kind", "body")
+                except (TypeError, ValueError) as exc:
+                    raise StageError("clean", f"来源元数据无法解析: {src.name}") from exc
+                if evidence_kind not in evidence_kinds:
+                    stale = clean_dir / src.name
+                    if stale.is_file():
+                        stale.unlink()
+                    continue
             cleaned = self.clean_text(original)
             out = clean_dir / src.name
             write_text(out, cleaned)

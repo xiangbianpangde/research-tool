@@ -123,6 +123,29 @@ async def test_resume_reuses_verified_outputs_without_model_or_search_calls(tmp_
 
 
 @pytest.mark.asyncio
+async def test_targeted_without_body_evidence_keeps_gap_and_stops_budget(tmp_path, external_io, monkeypatch):
+    original_fetch = Fetcher.fetch
+
+    async def empty_targeted_fetch(self, url):
+        if url.endswith("/b"):
+            return FetchResult(url, "", ok=False, error="abstract-only")
+        return await original_fetch(self, url)
+
+    monkeypatch.setattr(Fetcher, "fetch", empty_targeted_fetch)
+    cfg = config(tmp_path, minimum=2)
+    cfg.nine_loop.max_rounds = 1
+    result = await ResearchPipeline(
+        cfg, llm=MockLLMClient(structured_response=model_reply)
+    ).run()
+
+    assert result.verdict == "STOP_BUDGET"
+    assert result.report_result is None
+    assert "targeted" in result.stages_completed
+    assert "merge" in result.stages_completed
+    assert json.loads(result.run_summary_path.read_text())["pipeline_complete"] is False
+
+
+@pytest.mark.asyncio
 async def test_ungrounded_model_fact_stops_before_report(tmp_path, external_io):
     def hallucination(prompt, schema):
         if schema.__name__ == "_ChunkResult":
@@ -237,6 +260,51 @@ async def test_report_support_rejection_blocks_publishing(tmp_path, external_io)
     ).run()
     assert result.failed_stage == "report" and result.verdict == "STOP_ERROR"
     assert result.report_result is None and not (result.topic_dir / "report.md").exists()
+
+
+@pytest.mark.asyncio
+async def test_report_support_failure_gets_one_grounded_repair(tmp_path, external_io):
+    verification_calls = 0
+    repair_calls = 0
+    draft_calls = 0
+
+    def reply(prompt, schema):
+        nonlocal verification_calls, repair_calls, draft_calls
+        if schema.__name__ == "ReportSectionDraft":
+            draft_calls += 1
+            facts = json.loads(prompt.split("DATA:\n", 1)[1])
+            paragraphs = [{"text": fact["text"], "claim_ids": [fact["claim_id"]]}
+                          for fact in facts]
+            if draft_calls == 1:
+                paragraphs[0]["text"] += " This proves the population is high risk."
+            return schema(paragraphs=paragraphs)
+        if schema.__name__ == "ReportVerification":
+            verification_calls += 1
+            payload = json.loads(prompt.split("DATA:\n", 1)[1])
+            return schema(checks=[{
+                "paragraph_index": index,
+                "supported": verification_calls > 1,
+                "reason": "grounded" if verification_calls > 1 else "unsupported extrapolation",
+            } for index, _item in enumerate(payload["paragraphs"])])
+        if schema.__name__ == "ReportSectionRepair":
+            repair_calls += 1
+            payload = json.loads(prompt.split("DATA:\n", 1)[1])
+            facts = payload["facts"]
+            return schema(
+                heading="Cycle life",
+                paragraphs=[{"text": fact["text"], "claim_ids": [fact["claim_id"]]}
+                            for fact in facts],
+            )
+        return model_reply(prompt, schema)
+
+    result = await ResearchPipeline(
+        config(tmp_path), llm=MockLLMClient(structured_response=reply)
+    ).run()
+
+    assert result.verdict == "STOP_SUCCESS"
+    assert result.report_result is not None
+    assert repair_calls == 1
+    assert verification_calls == 2
 
 
 @pytest.mark.asyncio

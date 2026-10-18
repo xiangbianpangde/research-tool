@@ -17,12 +17,23 @@ Residual risks (see SSRF round report):
 
 from __future__ import annotations
 
+import asyncio
+import concurrent.futures
 import ipaddress
 import re
 import socket
+import threading
 from urllib.parse import parse_qsl, urlparse
 
 from ..domain.errors import UrlBlockedError
+
+
+class UrlGuardTimeoutError(TimeoutError):
+    """DNS guard exceeded its own bounded wait; this is not an SSRF verdict."""
+
+
+class UrlGuardBusyError(RuntimeError):
+    """The bounded DNS guard admission capacity is currently exhausted."""
 
 _ALLOWED_SCHEMES = {"http", "https"}
 _SENSITIVE_QUERY_KEYS = frozenset(
@@ -84,18 +95,18 @@ def _is_blocked_ip(ip: ipaddress.IPv4Address | ipaddress.IPv6Address) -> bool:
     return any(ip in net for net in _BLOCKED_NETWORKS)
 
 
-def assert_safe_url(url: str) -> None:
-    """Raise ``UrlBlockedError`` if ``url`` targets a blocked destination.
+DNS_MAX_IN_FLIGHT = 4
+_DNS_MAX_WORKERS = DNS_MAX_IN_FLIGHT
+_DNS_EXECUTOR = concurrent.futures.ThreadPoolExecutor(
+    max_workers=_DNS_MAX_WORKERS,
+    thread_name_prefix="research-tool-dns",
+)
+_DNS_ADMISSION = threading.BoundedSemaphore(DNS_MAX_IN_FLIGHT)
+_DNS_DEFAULT_TIMEOUT_SEC = 5.0
 
-    Literal private IPs are rejected without DNS. Hostnames are resolved via
-    ``socket.getaddrinfo``; if ANY resolved address is in a blocked network,
-    the URL is rejected. DNS failure (``gaierror``) is treated as unsafe
-    (raise, not pass) — resolution failure is not a safe pass.
 
-    Raises:
-        UrlBlockedError: if the scheme is not http/https, the host is missing,
-            or the host (literal or resolved) is in a blocked network.
-    """
+def _validate_url_and_get_hostname(url: str) -> str | None:
+    """Validate URL syntax/literal IP and return hostname when DNS is needed."""
     parsed = urlparse(url)
     if parsed.scheme not in _ALLOWED_SCHEMES:
         raise UrlBlockedError(f"scheme {parsed.scheme!r} not allowed (only http/https)")
@@ -110,20 +121,17 @@ def assert_safe_url(url: str) -> None:
     host = parsed.hostname
     if not host:
         raise UrlBlockedError("URL has no hostname")
-    # Literal IP?
     try:
         ip = ipaddress.ip_address(host)
     except ValueError:
-        pass  # not a literal IP — resolve as hostname below
-    else:
-        if _is_blocked_ip(ip):
-            raise UrlBlockedError(f"literal IP {host} is in a blocked network")
-        return  # literal public IP — safe
-    # Resolve hostname; reject if any resolved address is blocked
-    try:
-        infos = socket.getaddrinfo(host, None)
-    except socket.gaierror as e:
-        raise UrlBlockedError(f"DNS resolution failed for {host!r}: {e}") from e
+        return host
+    if _is_blocked_ip(ip):
+        raise UrlBlockedError(f"literal IP {host} is in a blocked network")
+    return None
+
+
+def _check_resolved_addresses(host: str, infos: list[tuple]) -> None:
+    """Reject a hostname if any DNS answer targets a blocked network."""
     for info in infos:
         addr = info[4][0]
         try:
@@ -134,4 +142,62 @@ def assert_safe_url(url: str) -> None:
             raise UrlBlockedError(f"host {host!r} resolves to blocked address {ip}")
 
 
-__all__ = ["assert_safe_url", "is_sensitive_url_key"]
+def _resolve_and_check(host: str) -> None:
+    try:
+        infos = socket.getaddrinfo(host, None)
+    except socket.gaierror as e:
+        raise UrlBlockedError(f"DNS resolution failed for {host!r}: {e}") from e
+    _check_resolved_addresses(host, infos)
+
+
+def assert_safe_url(url: str) -> None:
+    """Raise ``UrlBlockedError`` if ``url`` targets a blocked destination.
+
+    This synchronous boundary is kept for existing synchronous callers. Async
+    fetch paths should use :func:`assert_safe_url_async` so DNS does not run on
+    the event-loop thread.
+    """
+    host = _validate_url_and_get_hostname(url)
+    if host is not None:
+        _resolve_and_check(host)
+
+
+async def assert_safe_url_async(
+    url: str, *, timeout_sec: float = _DNS_DEFAULT_TIMEOUT_SEC
+) -> None:
+    """Async SSRF guard with bounded DNS waiting.
+
+    DNS is dispatched to a small process-wide pool. Cancelling the await cannot
+    cancel an OS resolver already running in that worker; the bounded pool keeps
+    active resolver work finite, and failures/timeouts never pass the guard.
+    """
+    host = _validate_url_and_get_hostname(url)
+    if host is None:
+        return
+    timeout = max(float(timeout_sec), 0.001)
+    if not _DNS_ADMISSION.acquire(blocking=False):
+        raise UrlGuardBusyError(
+            f"DNS guard capacity exhausted ({DNS_MAX_IN_FLIGHT} in-flight); retry later"
+        )
+    loop = asyncio.get_running_loop()
+    try:
+        future = loop.run_in_executor(_DNS_EXECUTOR, _resolve_and_check, host)
+    except BaseException:
+        _DNS_ADMISSION.release()
+        raise
+    future.add_done_callback(lambda _future: _DNS_ADMISSION.release())
+    try:
+        await asyncio.wait_for(asyncio.shield(future), timeout=timeout)
+    except asyncio.TimeoutError as e:
+        raise UrlGuardTimeoutError(
+            f"DNS resolution timeout for {host!r} after {timeout:g}s"
+        ) from e
+
+
+__all__ = [
+    "UrlGuardBusyError",
+    "UrlGuardTimeoutError",
+    "assert_safe_url",
+    "assert_safe_url_async",
+    "is_sensitive_url_key",
+]

@@ -115,6 +115,11 @@ class LLMClient(abc.ABC):
         **kwargs,
     ) -> "LLMClient":
         """显式创建客户端（03 §4 方式2）。api_key 缺省时按 provider 从环境变量兜底。"""
+        if provider == "openai_compatible":
+            if not model or not model.strip():
+                raise ValueError("openai_compatible 必须显式配置非空 model")
+            if not base_url or not base_url.strip():
+                raise ValueError("openai_compatible 必须显式配置非空 base_url")
         model = model or _default_model(provider)
         if base_url is None:
             base_url = _DEFAULT_BASE_URL.get(provider)
@@ -122,6 +127,8 @@ class LLMClient(abc.ABC):
             import os
 
             env_name = _PROVIDER_KEY_ENV_FOR_CREATE.get(provider)
+            if provider == "openai_compatible":
+                env_name = "LLM_API_KEY"
             if env_name:
                 api_key = os.environ.get(env_name)
         config = LLMConfig(
@@ -133,9 +140,14 @@ class LLMClient(abc.ABC):
     def from_config(cls, config: LLMConfig) -> "LLMClient":
         """根据 LLMConfig.provider 选择具体实现。"""
         provider = config.provider
+        if provider == "openai_compatible":
+            for name in ("model", "base_url"):
+                value = getattr(config, name)
+                if not isinstance(value, str) or not value.strip():
+                    raise ValueError(f"openai_compatible 必须显式配置非空 {name}")
         if config.base_url is None and provider in _DEFAULT_BASE_URL:
             config = config.model_copy(update={"base_url": _DEFAULT_BASE_URL[provider]})
-        if provider in ("openai", "deepseek", "ollama", "minimax"):
+        if provider in ("openai", "deepseek", "ollama", "minimax", "openai_compatible"):
             from .openai_client import OpenAILLMClient
 
             return OpenAILLMClient(config)
@@ -165,6 +177,7 @@ _PROVIDER_KEY_ENV_FOR_CREATE = {
     "openai": "OPENAI_API_KEY",
     "anthropic": "ANTHROPIC_API_KEY",
     "minimax": "MINIMAX_API_KEY",
+    "openai_compatible": "LLM_API_KEY",
 }
 
 

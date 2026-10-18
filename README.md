@@ -4,6 +4,8 @@
 
 历史恢复基线为 `4ab1412`，开发来自 `codex/nine-stage-only`。当前验证与分支见 [STATUS.md](STATUS.md)；来源与裁剪边界见 [九段裁剪记录](docs/plan/NINE-STAGE-ONLY-TRIM-PLAN.md)。历史 52.77 分尚未在本实现上复现。
 
+本机唯一开发入口为 `/Users/xbpd/Projects/research-tool`。其它旧版已归档，不再作为候选项目打开；路径映射、归档索引与恢复流程见 [版本与归档制度](docs/plan/PROJECT-VERSION-POLICY.md)。
+
 ## 九阶段
 
 | 阶段 | 职责 |
@@ -44,6 +46,19 @@ research run "你的研究主题" --dry-run
 需要配置密钥和可选工具时，在同一环境运行 `bash scripts/setup.sh`。PDF 路径使用 `/Users/<用户名>/Documents/papers` 或具体的 .pdf 文件；MinerU 命令路径如 `.venv/bin/mineru`。
 
 CLI overrides > 环境变量 > YAML > 默认值。完整模板见 [docs/config.example.yaml](docs/config.example.yaml)。密钥放本地 .env 或环境变量，不提交 Git；`research config` 显示脱敏配置。
+
+OpenAI 兼容网关使用 `LLM_PROVIDER=openai_compatible`，同时明确指定 `LLM_MODEL`、`LLM_BASE_URL` 和 `LLM_API_KEY`。模型名和端点可以随时更换，无需修改源码；该 provider 不回退使用 OpenAI/MiniMax 等厂商密钥。已有 provider（openai/deepseek/minimax/anthropic/ollama）仍可用。切换 provider 或端点时，旧 YAML 密钥会被丢弃，只有新配置的凭据会生效。
+
+```bash
+# 密钥应已通过用户管理的环境注入，不要放入命令历史或报告
+export LLM_PROVIDER=openai_compatible
+export LLM_MODEL=your-model-id
+export LLM_BASE_URL=https://your-gateway.example/v1
+research config
+research run "你的研究主题" --output ./research-output
+```
+
+需要额外 provider 参数时，可在 YAML 的 `llm.request_options.extra_body` 中明确配置，例如 `thinking: {type: disabled}`；仅适用于该端点实际支持的选项。该映射不能覆盖 model/messages/stream/response_format 等客户端字段，不用于存放凭据。`research config` 会递归脱敏嵌套敏感键。结构化请求仅在端点明确拒绝 response_format 功能时尝试一次提示词 JSON 兼容路径，仍校验 JSON/schema，并共享原请求超时预算；鉴权、额度、限流和超时不会触发这条兼容重试。
 
 同一个 ResearchPipeline 实例同时只允许一个运行。健康检查、阶段执行和重试等待共同遵守总墙钟预算。正式输出固定 Markdown，reporter.format=html 会报配置错误。
 

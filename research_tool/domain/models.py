@@ -7,15 +7,17 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Literal
+from typing import Any, Literal
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 # --------------------------------------------------------------------------- #
 # 配置模型
 # --------------------------------------------------------------------------- #
 
-Provider = Literal["openai", "deepseek", "ollama", "anthropic", "minimax"]
+Provider = Literal[
+    "openai", "deepseek", "ollama", "anthropic", "minimax", "openai_compatible"
+]
 SearchEngine = Literal[
     "web",
     "opencli",
@@ -54,12 +56,41 @@ class LLMConfig(BaseModel):
     model: str = "deepseek-chat"
     api_key: str | None = None
     base_url: str | None = None
+    session_id: str | None = None
     temperature: float = Field(default=0.3, ge=0.0, le=2.0)
     max_tokens: int = Field(default=4096, gt=0)
     connect_timeout_sec: float = Field(default=10.0, gt=0)
     read_timeout_sec: float = Field(default=120.0, gt=0)
     request_timeout_sec: float = Field(default=180.0, gt=0)
     sdk_max_retries: int = Field(default=0, ge=0, le=5)
+    request_options: dict[str, Any] = Field(default_factory=dict)
+
+    @model_validator(mode="after")
+    def _require_generic_connection(self) -> "LLMConfig":
+        if self.provider == "openai_compatible":
+            for name in ("base_url", "model"):
+                value = getattr(self, name)
+                if name not in self.model_fields_set or not value or not value.strip():
+                    raise ValueError(f"openai_compatible 必须显式配置非空 {name}")
+        return self
+
+    @field_validator("request_options", mode="before")
+    @classmethod
+    def _validate_request_options(cls, options: Any):
+        if not isinstance(options, dict):
+            raise ValueError("request_options 必须是映射")
+        if options.keys() - {"extra_body"}:
+            raise ValueError("request_options 仅支持 extra_body")
+        extra_body = options.get("extra_body")
+        if "extra_body" in options and not isinstance(extra_body, dict):
+            raise ValueError("request_options.extra_body 必须是映射")
+        reserved = {
+            "model", "messages", "api_key", "base_url", "temperature", "max_tokens",
+            "max_completion_tokens", "stream", "response_format", "timeout", "headers",
+        }
+        if extra_body and extra_body.keys() & reserved:
+            raise ValueError("extra_body 不能覆盖客户端控制的请求字段")
+        return options
 
 
 class ExpertEntry(BaseModel):

@@ -8,7 +8,7 @@ import pytest
 from research_tool.application.pipeline import ResearchPipeline
 from research_tool.domain.config import load_config
 from research_tool.domain.errors import ConfigValidationError, LLMAuthenticationError, LLMError, StageError
-from research_tool.domain.models import ExtractorConfig, NINE_STAGES, PipelineConfig
+from research_tool.domain.models import ExtractorConfig, LLMConfig, NINE_STAGES, PipelineConfig
 from research_tool.infrastructure.llm import MockLLMClient
 from research_tool.infrastructure.stages.extractor import Extractor
 from research_tool.tests.test_nine_loop_runner import QUOTE, config as runner_config, model_reply
@@ -183,6 +183,94 @@ async def test_report_uses_cleaned_source_evidence_and_versioned_final_path(tmp_
         result.topic_dir / "runs" / summary["run_id"] / "final" / "report.md"
     )
     assert summary["pipeline_complete"] is True
+
+
+@pytest.mark.asyncio
+async def test_pipeline_retries_transient_structured_extraction_failure(tmp_path):
+    config = _pipeline_config(tmp_path)
+    config.llm_stage_attempts = 2
+    calls = 0
+
+    class FlakyExtractLLM(MockLLMClient):
+        async def chat_structured(self, prompt, schema, system=None):
+            nonlocal calls
+            if schema.__name__ == "_ChunkResult":
+                calls += 1
+                if calls == 1:
+                    raise LLMError("malformed structured response") from ValueError("invalid JSON")
+            return model_reply(prompt, schema)
+
+    result = await ResearchPipeline(config, llm=FlakyExtractLLM()).run()
+
+    assert result.verdict == "STOP_SUCCESS"
+    assert result.report_result is not None
+    assert calls == 2
+
+
+@pytest.mark.asyncio
+async def test_extractor_retries_transient_structured_json_failure(tmp_path):
+    clean = tmp_path / "clean"
+    clean.mkdir()
+    (clean / "01.md").write_text(
+        "<!-- source: file:///approved/evidence.md -->\n\n"
+        + QUOTE,
+        encoding="utf-8",
+    )
+
+    class FlakyLLM(MockLLMClient):
+        chunk_calls = 0
+
+        async def chat_structured(self, prompt, schema, system=None):
+            if schema.__name__ == "_ChunkResult":
+                self.chunk_calls += 1
+                if self.chunk_calls == 1:
+                    raise LLMError("malformed structured response") from json.JSONDecodeError(
+                        "invalid JSON", "", 0
+                    )
+            return model_reply(prompt, schema)
+
+    llm = FlakyLLM(config=LLMConfig(
+        provider="openai_compatible",
+        model="fixture-model",
+        base_url="https://fixture.invalid/v1",
+        api_key="fixture-key",
+    ))
+    result = await Extractor(ExtractorConfig(fail_on_chunk_error=True)).run(clean, llm)
+
+    assert result.claims
+    assert llm.chunk_calls == 2
+
+
+@pytest.mark.asyncio
+async def test_extractor_retries_empty_structured_result(tmp_path):
+    clean = tmp_path / "clean"
+    clean.mkdir()
+    (clean / "01.md").write_text(
+        "<!-- source: file:///approved/evidence.md -->\n\n"
+        + QUOTE,
+        encoding="utf-8",
+    )
+
+    class EmptyOnceLLM(MockLLMClient):
+        chunk_calls = 0
+
+        async def chat_structured(self, prompt, schema, system=None):
+            if schema.__name__ == "_ChunkResult":
+                self.chunk_calls += 1
+                if self.chunk_calls == 1:
+                    return schema()
+            return model_reply(prompt, schema)
+
+    llm = EmptyOnceLLM(config=LLMConfig(
+        provider="openai_compatible",
+        model="fixture-model",
+        base_url="https://fixture.invalid/v1",
+        api_key="fixture-key",
+    ))
+    result = await Extractor(ExtractorConfig(fail_on_chunk_error=True)).run(clean, llm)
+
+    assert result.claims
+    assert llm.chunk_calls == 2
 
 
 @pytest.mark.asyncio

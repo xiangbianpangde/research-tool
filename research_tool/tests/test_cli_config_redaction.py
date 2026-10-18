@@ -1,6 +1,9 @@
 """Security regressions for rendered configuration output."""
 
+import copy
+
 import pytest
+from typer.testing import CliRunner
 
 from research_tool.presentation.cli import _redact_config_data
 
@@ -58,3 +61,54 @@ def test_redaction_uses_shared_sensitive_url_key_policy(key):
 
     assert marker not in redacted["llm"]["base_url"]
     assert "mode=fast" in redacted["llm"]["base_url"]
+
+
+def test_redaction_recursively_masks_nested_extra_body_secrets_without_mutation():
+    data = {
+        "llm": {
+            "request_options": {
+                "extra_body": {
+                    "safe": {"value": "visible"},
+                    "API_KEY": "api-secret",
+                    "items": [
+                        {"authorization": "auth-secret", "nested": {"token": "token-secret"}},
+                        {"PASSWORD": "password-secret", "cookieJar": ["cookie-secret"]},
+                    ],
+                }
+            }
+        }
+    }
+
+    original = copy.deepcopy(data)
+    redacted = _redact_config_data(data)
+    rendered = repr(redacted)
+
+    assert data == original
+    assert "api-secret" not in rendered
+    assert "auth-secret" not in rendered
+    assert "token-secret" not in rendered
+    assert "password-secret" not in rendered
+    assert "cookie-secret" not in rendered
+    assert redacted["llm"]["request_options"]["extra_body"]["safe"] == {"value": "visible"}
+    assert data["llm"]["request_options"]["extra_body"]["API_KEY"] == "api-secret"
+
+
+def test_config_command_output_does_not_leak_nested_extra_body_secret(monkeypatch):
+    from research_tool.presentation import cli
+
+    class Config:
+        def model_dump(self, mode="json"):
+            return {
+                "llm": {
+                    "api_key": "top-secret",
+                    "request_options": {"extra_body": {"providerToken": "nested-secret"}},
+                },
+                "collector": {},
+            }
+
+    monkeypatch.setattr(cli, "load_config", lambda _path: Config())
+    result = CliRunner().invoke(cli.app, ["config"])
+
+    assert result.exit_code == 0
+    assert "nested-secret" not in result.stdout
+    assert "top-secret" not in result.stdout
