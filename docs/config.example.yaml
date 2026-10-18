@@ -183,7 +183,8 @@ pipeline:
 # ResearchCTL 派生索引刷新（默认关闭；开启不改变九段成功/失败语义）
 retrieval:
   refresh_on_run: false
-  researchctl_root: null       # ResearchCTL 仓库根目录；可用环境/CLI 适配器传入
+  module_root: null             # ResearchCTL Python 模块根目录；不从 research-tool root 推断
+  researchctl_root: null        # 兼容旧配置；与 module_root 不能同时指向不同目录
   python_executable: null       # 默认使用当前 Python
   db_path: null                 # 默认 <research-output>/.index/research.sqlite
   timeout_sec: 60

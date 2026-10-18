@@ -50,6 +50,10 @@ def _hash(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
 
 
+def _utc_now() -> str:
+    return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+
+
 def _atomic(path: Path, data: bytes) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     fd, name = tempfile.mkstemp(prefix=".writing-", dir=path.parent)
@@ -74,6 +78,7 @@ class ResearchPipeline:
         self._state: dict[str, Any] = {}
         self._active = "collect"
         self._started = 0.0
+        self._started_at = ""
         self._execution_lock = threading.Lock()
 
     def _get_llm(self) -> LLMClient:
@@ -108,6 +113,7 @@ class ResearchPipeline:
         self.runtime = RuntimeState(self.root)
         self._result = PipelineResult(topic_dir=self.root)
         self._started = time.monotonic()
+        self._started_at = _utc_now()
         # A concurrent caller must not overwrite the first caller's summary.
         with self.runtime.run_lock():
             try:
@@ -479,7 +485,7 @@ class ResearchPipeline:
         """Optionally refresh the derived ResearchCTL index after run close."""
         if not self.config.retrieval.refresh_on_run:
             return
-        started = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+        started = _utc_now()
         state = {
             "version": 1,
             "status": "refreshing",
@@ -498,32 +504,55 @@ class ResearchPipeline:
                 type(exc).__name__,
             )
             return
+        client = None
         try:
             from ..infrastructure.retrieval import ResearchCtlClient
 
             client = ResearchCtlClient(
                 self.config.work_dir,
-                researchctl_root=self.config.retrieval.researchctl_root,
+                researchctl_root=(
+                    self.config.retrieval.module_root
+                    or self.config.retrieval.researchctl_root
+                ),
                 python_executable=self.config.retrieval.python_executable,
                 db_path=self.config.retrieval.db_path,
                 timeout_sec=self.config.retrieval.timeout_sec,
             )
-            indexed = client.index()
-            generated = client.generate_index()
+            if hasattr(client, "refresh"):
+                refreshed = client.refresh()
+                indexed = refreshed["index"]
+                generated = refreshed["navigation"]
+            else:
+                indexed = client.index()
+                generated = client.generate_index()
+            if str(indexed.get("status", "")).lower() not in {"success", "ok"}:
+                raise RuntimeError("ResearchCTL index returned a non-success envelope")
+            if str(generated.get("status", "")).lower() not in {"success", "ok"}:
+                raise RuntimeError("ResearchCTL generate-index returned a non-success envelope")
             final_state = {
                 **state,
                 "status": "success",
-                "finished_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+                "finished_at": _utc_now(),
                 "index": indexed,
                 "navigation": generated,
             }
         except Exception as exc:  # noqa: BLE001 - derived refresh is non-fatal
+            safe_error = (
+                getattr(exc, "envelope", None)
+                if isinstance(getattr(exc, "envelope", None), dict)
+                else str(exc)[:500]
+            )
+            last_envelope = getattr(client, "last_envelope", None) if client is not None else None
             final_state = {
                 **state,
                 "status": "stale",
-                "finished_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+                "finished_at": _utc_now(),
                 "error_type": type(exc).__name__,
-                "error": str(exc)[:500],
+                "error": safe_error,
+                **(
+                    {"envelope": last_envelope}
+                    if isinstance(last_envelope, dict) else {}
+                ),
             }
             logger.warning(
                 "ResearchCTL 派生索引刷新失败 run_id=%s error_type=%s",
@@ -532,49 +561,132 @@ class ResearchPipeline:
             )
         _atomic(state_path, _bytes(final_state))
 
+    def _canonical_final_files(self, *, successful: bool) -> dict[str, str]:
+        if not successful or not self._state.get("run_id"):
+            return {}
+        final = self.run_root / "final"
+        paths = {
+            "report": final / "report.md",
+            "sources": final / "sources.json",
+            "main_table": final / "tree" / "00-主表.md",
+            "knowledge": final / "tree" / "knowledge.json",
+        }
+        if not all(path.is_file() for path in paths.values()):
+            return {}
+        return {
+            path.relative_to(self.root).as_posix(): _hash(path.read_bytes())
+            for path in paths.values()
+        }
+
+    def _runtime_snapshot(self) -> dict[str, Any]:
+        """Read the complete current runtime JSON without inventing fields."""
+        state_path = self.root / "runtime-state.json"
+        try:
+            payload = json.loads(state_path.read_text(encoding="utf-8"))
+        except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+            payload = self._state
+        return dict(payload) if isinstance(payload, dict) else dict(self._state)
+
+    def _write_run_record(
+        self,
+        *,
+        verdict: str,
+        pipeline_complete: bool,
+        finished_at: str,
+        files: dict[str, str],
+    ) -> Path | None:
+        run_id = self._state.get("run_id")
+        input_fingerprint = self._state.get("input_fingerprint")
+        if not isinstance(run_id, str) or not run_id:
+            return None
+        if not isinstance(input_fingerprint, str) or not input_fingerprint:
+            return None
+        record = {
+            "version": 1,
+            "run_id": run_id,
+            "topic": self.topic,
+            "topic_slug": self.root.name,
+            "verdict": verdict,
+            "pipeline_complete": pipeline_complete,
+            "started_at": self._started_at,
+            "finished_at": finished_at,
+            "input_fingerprint": input_fingerprint,
+            "output_contract": "nine-stage",
+            "stages": list(NINE_STAGES),
+            "stages_completed": list(self._result.stages_completed),
+            "stages_skipped": list(self._result.stages_skipped),
+            "failed_stage": self._result.failed_stage,
+            "files": files,
+            "runtime": self._runtime_snapshot(),
+        }
+        path = self.run_root / "run-record.json"
+        _atomic(path, _bytes(record))
+        return path
+
     def _summary(self) -> None:
         result = self._result
         assert result is not None
         result.elapsed_sec = max(0.0, time.monotonic() - self._started)
-        files = {}
-        if result.verdict == "STOP_SUCCESS":
+        finished_at = _utc_now()
+        verdict = result.verdict if result.verdict in {
+            "STOP_SUCCESS", "STOP_ERROR", "STOP_BUDGET", "STOP_CANCELLED"
+        } else "STOP_ERROR"
+        canonical_files = self._canonical_final_files(
+            successful=verdict == "STOP_SUCCESS" and result.report_result is not None
+        )
+        pipeline_complete = bool(
+            verdict == "STOP_SUCCESS" and result.report_result is not None
+            and len(canonical_files) == 4
+        )
+        record_path = self._write_run_record(
+            verdict=verdict,
+            pipeline_complete=pipeline_complete,
+            finished_at=finished_at,
+            files=canonical_files,
+        )
+        summary_files = {}
+        if verdict == "STOP_SUCCESS":
             final = self.run_root / "final"
             for path in [final / "report.md", final / "sources.json",
                          *sorted((final / "tree").glob("*"))]:
                 if path.is_file():
-                    files[path.relative_to(self.root).as_posix()] = _hash(path.read_bytes())
+                    summary_files[path.relative_to(self.root).as_posix()] = _hash(path.read_bytes())
         summary = {"version": 1, "run_id": self._state.get("run_id"),
                    "topic": self.topic, "topic_slug": self.root.name,
-                   "verdict": result.verdict, "rounds": result.rounds,
+                   "verdict": verdict, "rounds": result.rounds,
                    "output_contract": "nine-stage", "stages": list(NINE_STAGES),
                    "stages_completed": result.stages_completed,
                    "stages_skipped": result.stages_skipped,
                    "failed_stage": result.failed_stage,
-                   "pipeline_complete": (
-                       result.verdict == "STOP_SUCCESS" and result.report_result is not None
-                   ),
+                   "pipeline_complete": pipeline_complete,
+                   "started_at": self._started_at, "finished_at": finished_at,
+                   "input_fingerprint": self._state.get("input_fingerprint"),
                    "stage_metrics": [metric.model_dump() for metric in result.stage_metrics],
-                   "files": files,
+                   "files": summary_files,
                    "output_dir": (
                        (self.run_root / "final").relative_to(self.root).as_posix()
-                       if result.verdict == "STOP_SUCCESS" else None
+                       if pipeline_complete else None
+                   ),
+                   "record_path": (
+                       record_path.relative_to(self.root).as_posix() if record_path else None
                    ),
                    "elapsed_sec": round(result.elapsed_sec, 3)}
         result.run_summary_path = self.root / "run-summary.json"
         _atomic(result.run_summary_path, _bytes(summary))
-        try:
-            from ..infrastructure.retrieval import write_retrieval_manifest
+        if record_path is not None:
+            try:
+                from ..infrastructure.retrieval import write_retrieval_manifest
 
-            write_retrieval_manifest(self.root, summary)
-        except (OSError, ValueError, TypeError) as exc:
-            # The manifest is a derived retrieval projection.  Its failure must
-            # remain observable without changing the canonical nine-stage verdict.
-            logger.warning(
-                "写入 ResearchCTL retrieval manifest 失败 run_id=%s error_type=%s",
-                summary.get("run_id"),
-                type(exc).__name__,
-            )
-        self._refresh_retrieval_index(summary)
+                write_retrieval_manifest(self.root, summary)
+            except (OSError, ValueError, TypeError) as exc:
+                # The manifest is a derived retrieval projection.  Its failure must
+                # remain observable without changing the canonical nine-stage verdict.
+                logger.warning(
+                    "写入 ResearchCTL retrieval manifest 失败 run_id=%s error_type=%s",
+                    summary.get("run_id"),
+                    type(exc).__name__,
+                )
+            self._refresh_retrieval_index(summary)
 
 
 def create_pipeline(config: PipelineConfig, *, llm: LLMClient | None = None) -> ResearchPipeline:

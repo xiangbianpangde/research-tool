@@ -972,6 +972,11 @@ def retrieval(
         _fail(str(exc))
         return
     _out.print_json(json.dumps(payload, ensure_ascii=False))
+    if (
+        isinstance(payload, dict)
+        and str(payload.get("status", "")).lower() in {"error", "fail_closed"}
+    ):
+        raise typer.Exit(code=1)
 
 
 @app.command()

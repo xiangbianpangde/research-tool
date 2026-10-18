@@ -364,13 +364,28 @@ class NineLoopConfig(BaseModel):
 
 
 class RetrievalConfig(BaseModel):
-    """Optional post-run refresh of the ResearchCTL derived index."""
+    """Optional post-run refresh of the ResearchCTL derived index.
+
+    ``module_root`` is the explicit ResearchCTL import/cwd root.  The older
+    ``researchctl_root`` name remains accepted for config compatibility, but
+    neither is inferred from the research-tool topic root.
+    """
 
     refresh_on_run: bool = False
+    module_root: Path | None = None
     researchctl_root: Path | None = None
     python_executable: str | None = None
     db_path: Path | None = None
     timeout_sec: float = Field(default=60.0, gt=0)
+
+    @model_validator(mode="after")
+    def _validate_module_root(self) -> "RetrievalConfig":
+        if self.module_root is not None and self.researchctl_root is not None:
+            if self.module_root.expanduser().resolve() != (
+                self.researchctl_root.expanduser().resolve()
+            ):
+                raise ValueError("retrieval.module_root 与 researchctl_root 不能同时指向不同目录")
+        return self
 
 
 class PipelineConfig(BaseModel):
@@ -431,6 +446,8 @@ class Source(BaseModel):
     fetched_at: str = ""
     source_engine: str = ""
     content_hash: str = ""
+    # Optional provenance tier persisted by retrieval integrations.
+    source_tier: str = ""
     # V1.1：保留搜索后端附带的结构化片段（UP主/时长/简介），
     # 让桥接脚本可以做 author/duration 过滤而不丢信息。默认空，向后兼容。
     snippet: str = ""
