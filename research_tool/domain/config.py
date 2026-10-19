@@ -335,5 +335,5 @@ def load_config(
         raise ConfigValidationError(
             "配置校验失败：\n"
             + "\n".join(details)
-            + "\n\n请检查 config.yaml；参考 docs/config.example.yaml。"
+            + "\n\n请检查 config.yaml；参考 config/example.yaml。"
         ) from None

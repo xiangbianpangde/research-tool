@@ -86,7 +86,7 @@ forbidden_modules = fastapi, sqlalchemy, django
 ### 技术选型（结论写入 ADR）
 
 成熟稳定 > 新奇；社区活跃 > 功能强大；团队熟悉 > 理论最优；够用 > 过度准备。
-选型理由写入 ADR（`worklogs/decisions/`，仅[收束节点](ai-workflow_AI协作开发流程/06-第三步_收束节点.md)产出）。
+选型理由写入 ADR（`docs/records/decisions/`，仅[收束节点](ai-workflow_AI协作开发流程/06-第三步_收束节点.md)产出）。
 
 ---
 

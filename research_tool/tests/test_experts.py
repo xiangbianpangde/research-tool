@@ -91,9 +91,9 @@ def test_bad_schema_returns_empty(tmp_path):
 
 
 def test_shipped_experts_yaml_valid():
-    # 仓库根随附的 experts.yaml 应当能加载通过 schema
+    # config/ 下随附的 experts.yaml 应当能加载通过 schema
     root = Path(__file__).resolve().parents[2]
-    shipped = root / "experts.yaml"
+    shipped = root / "config" / "experts.yaml"
     if not shipped.exists():
         return
     reg = ExpertRegistry.load(shipped)

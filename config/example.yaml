@@ -91,7 +91,7 @@ collector:
   # 新论文专用：先逐个强制抓取官方源；全部成功后才自动补齐并运行
   # OpenAlex + Crossref + arXiv 扩展。任何官方源失败都会立即停止 collect。
   official_urls: []              # 作者/实验室/项目页/论文官方全文 URL
-  experts_file: null             # experts.yaml 路径；缺失/损坏按空库回退，不崩管道
+  experts_file: null             # config/experts.yaml 路径；缺失/损坏按空库回退，不崩管道
   expert_match_min_overlap: 0.15 # topic 与专家 domains 的词重叠阈值（占 topic 词数比例）
   expert_exempt_topn: true
   expert_scoped_github: true      # 专家弱档：org:<handle> topic 定向 github 搜索       # 专家命中豁免 top-N 截断（强档直注已置顶，恒生效）

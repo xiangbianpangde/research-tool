@@ -8,7 +8,7 @@
 
 ## 使用方式
 
-每个功能点开发遵循 AI 协作流程（见 `conventions/ai-workflow_AI协作开发流程/`）：
+每个功能点开发遵循 AI 协作流程（见 `docs/standards/ai-workflow_AI协作开发流程/`）：
 0. 调研 → 1. 计划 → 2. 迭代开发 → 3. 回顾。
 
 以下提示词可直接复制使用，AI 按模板输出结构化结果。
@@ -28,7 +28,7 @@
    - 建议：推荐方案 + 理由（≤ 3 条）
    - 风险：推荐方案的风险与缓解措施
 3. 调研结果写入 `docs/research/{主题}.md`
-4. 如果涉及重大决策，在 worklog 的"关键决策"段记录，收束节点时提升为 ADR 到 `worklogs/decisions/`（见 ADR 0006）
+4. 如果涉及重大决策，在 worklog 的"关键决策"段记录，收束节点时提升为 ADR 到 `docs/records/decisions/`（见 ADR 0006）
 ```
 
 ---
@@ -40,7 +40,7 @@
 
 要求：
 1. 阅读 `docs/plan/背景.md` 和 `docs/plan/开发清单.md`，确认功能点的依赖关系和优先级
-2. 阅读相关规范（`conventions/`）和 BDD 规格（`docs/specs/`）
+2. 阅读相关规范（`docs/standards/`）和 BDD 规格（`docs/specs/`）
 3. 输出：
    - 设计文档（如需复杂设计，按五段式写入 `docs/plan/design/`）
    - BDD 规格草稿（写入 `docs/specs/{编号}-{名称}.md`）
@@ -56,16 +56,16 @@
 你是主力开发者。按计划实现功能点 #{编号} {功能点名称}。
 
 约束：
-1. 严格遵守 `conventions/` 下的规范（01-架构 → 02-代码 → 03-Git → 04-API → 05-测试）
+1. 严格遵守 `docs/standards/` 下的规范（01-架构 → 02-代码 → 03-Git → 04-API → 05-测试）
 2. 每轮开发完成后做 3 分钟回顾：
    - 本轮的产出是否匹配计划？
    - 有没有偏离原始设计意图？
    - 有没有新增技术债？（记录到本轮 worklog）
-3. 产出写入 `worklogs/YYYY-MM-DD_{功能点}.md`，格式见 `docs/templates/worklog模板.md`
+3. 产出写入 `docs/records/worklogs/YYYY-MM-DD_{功能点}.md`，格式见 `docs/templates/worklog模板.md`
 4. 所有代码修改附测试（如适用），测试放置 `src/testing/` 或项目测试目录
 5. 汇报（每个功能点完成后必做）：
-   - 基础文件（必做）：更新 worklog + STATUS.md + docs/plan/开发清单.md + meta/FILE_GRAPH.md（如有文件变动）
-   - 汇报：功能点级默认在对话里内联输出、不落盘；仅收束报告或人要求留档时才写 `docs/reports/` 文档（详见 `07-汇报.md`）
+   - 基础文件（必做）：更新 worklog + STATUS.md + docs/plan/开发清单.md + docs/meta/CODE_MAP.md（如有文件变动）
+   - 汇报：功能点级默认在对话里内联输出、不落盘；仅收束报告或人要求留档时才写 `docs/records/reports/` 文档（详见 `07-汇报.md`）
 ```
 
 ---
@@ -78,7 +78,7 @@
 审查清单：
 1. 对照 BDD 规格（`docs/specs/{编号}-{名称}.md`）逐条验证
 2. 对照 `docs/plan/开发清单.md` 确认所有子任务完成
-3. 检查 worklog（`worklogs/`）是否完整记录
+3. 检查 worklog（`docs/records/`）是否完整记录
 4. 检查 STATUS.md 是否更新
 5. 识别遗留问题或技术债，写入 worklog "遗留/风险" 段
 
@@ -95,10 +95,10 @@
 人已确认触发收束节点。覆盖功能点 #{N-2}、#{N-1}、#{N}。
 
 按四阶段执行（详见 `06-第三步_收束节点.md`）：
-1. 整理：清理代码/文件，更新 CLAUDE.md 和 FILE_GRAPH.md，回顾 worklog 提升关键决策为 ADR
+1. 整理：清理代码/文件，更新 Agent.md 和 FILE_GRAPH.md，回顾 worklog 提升关键决策为 ADR
 2. 测试：运行全量测试 + 手工探索
 3. 审计：AI 审计（模板见 `docs/templates/AI审计报告模板.md`）+ 通知人审计（模板见 `docs/templates/人审计签核模板.md`）
 4. 验证：BDD 回演 + 用户故事回溯
 
-最终产出收束报告（模板见 `docs/templates/收束报告模板.md`），写入 `docs/reports/收束报告-v{版本号}.md`。
+最终产出收束报告（模板见 `docs/templates/收束报告模板.md`），写入 `docs/records/reports/收束报告-v{版本号}.md`。
 ```

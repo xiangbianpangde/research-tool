@@ -604,7 +604,7 @@ research expert repo add https://github.com/facebookresearch/vggt-omega \
 任务：
 
 1. 在 `domain/models.py` 增加会议与专家模型；
-2. 在 `docs/config.example.yaml` 增加 `conference:` 与 `expert_library:` 配置；
+2. 在 `config/example.yaml` 增加 `conference:` 与 `expert_library:` 配置；
 3. 新增本地 HTML fixture：CVF OpenAccess 页面、CVPR Videos 页面、GitHub repo 页片段；
 4. 新增 schema 校验测试。
 
@@ -828,7 +828,7 @@ CVPR 2026 VGGT Omega and feed-forward 3D reconstruction
 - `research_tool/infrastructure/knowledge/repo_ranker.py`
 - `research_tool/application/conference_pipeline.py`
 - `research_tool/presentation/cli.py`
-- `docs/config.example.yaml`
+- `config/example.yaml`
 - 对应 tests
 
 不建议在第一批同时改 Web UI，避免扩大验证面。

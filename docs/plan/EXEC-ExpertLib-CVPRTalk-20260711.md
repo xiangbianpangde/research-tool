@@ -6,7 +6,7 @@
 > - 参考 P0：`~/Downloads/_ref/`（files.zip）
 > - 调研：`research-output/github-low-star-high-quality-repository-discovery`、`cvpr-paper-and-youtube-video-search-backend-implementation`、`talk-linker-deep-research`
 > - 会话：`2026-07-11-172620-research-tool1.txt`、`2026-07-11-185610-reaserch-tool-ai.txt`
-> - 问题登记：`worklogs/2026-07_使用问题登记.md`
+> - 问题登记：`docs/records/worklogs/2026-07_使用问题登记.md`
 
 ---
 
@@ -50,9 +50,9 @@
 |----|------|------|------|
 | A1 | 数据模型：`ExpertEntry` / `ExpertLibrary`；`CollectorConfig` +4 字段；`SearchHit.expert` | `domain/models.py`, `search/base.py` | ✅ |
 | A2 | `ExpertRegistry`（load/match/seed_urls_for/scoped_queries_for） | `infrastructure/experts/` | ✅ |
-| A3 | 仓库根 `experts.yaml` seed（含 vggt-omega） | `experts.yaml` | ✅ |
+| A3 | 仓库根 `config/experts.yaml` seed（含 vggt-omega） | `config/experts.yaml` | ✅ |
 | A4 | collector 强档直注 `_direct_inject_hits` | `stages/collector.py` | ✅ |
-| A5 | 配置示例 + 可选启用 | `config.yaml`, `docs/config.example.yaml` | ✅ |
+| A5 | 配置示例 + 可选启用 | `config.yaml`, `config/example.yaml` | ✅ |
 | A6 | 测试（加载/匹配/注入/空库回退） | `tests/test_experts.py` | ✅ |
 | A7 | 验收：`pytest` + dry collect 含 vggt-omega | — | ✅ live inject 命中 |
 
@@ -99,7 +99,7 @@
 
 | ID | 任务 | 状态 |
 |----|------|------|
-| X1 | 使用问题即时登记 `worklogs/2026-07_使用问题登记.md` | ✅ P12 已登记 |
+| X1 | 使用问题即时登记 `docs/records/worklogs/2026-07_使用问题登记.md` | ✅ P12 已登记 |
 | X2 | 不改 openai 代理补丁等已有修复 | ✅ |
 | X3 | 现有测试零回归 | ✅ 479 passed, 2 skipped |
 
@@ -122,7 +122,7 @@ A (专家库强档) → B (cvpr/DBLP) → C (youtube 源) → D (视频路由) �
 
 | 动作 | 路径 |
 |------|------|
-| 新增 | `experts.yaml` |
+| 新增 | `config/experts.yaml` |
 | 新增 | `research_tool/infrastructure/experts/__init__.py` |
 | 新增 | `research_tool/infrastructure/experts/registry.py` |
 | 新增 | `research_tool/infrastructure/search/cvpr_backend.py` |
@@ -130,7 +130,7 @@ A (专家库强档) → B (cvpr/DBLP) → C (youtube 源) → D (视频路由) �
 | 新增 | `research_tool/application/talk_linker.py`（阶段 F） |
 | 新增 | `research_tool/tests/test_experts.py` |
 | 新增 | `research_tool/tests/test_cvpr_backend.py` |
-| 改动 | `domain/models.py`、`search/base.py`、`search/__init__.py`、`stages/collector.py`、`github_backend.py`、`config.yaml`、`docs/config.example.yaml` |
+| 改动 | `domain/models.py`、`search/base.py`、`search/__init__.py`、`stages/collector.py`、`github_backend.py`、`config.yaml`、`config/example.yaml` |
 
 ---
 

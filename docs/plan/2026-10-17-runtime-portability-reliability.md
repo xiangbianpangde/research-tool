@@ -70,7 +70,7 @@
 
 ### Task 5: Archive policy and current-path documentation
 
-**Files:** Parent owns root AGENTS.md, README.md, STATUS.md, `docs/plan/PROJECT-VERSION-POLICY.md`, archive root README.md and version RESTORE.md/canonical-selection.json.
+**Files:** Parent owns root Agent.md, README.md, STATUS.md, `docs/plan/PROJECT-VERSION-POLICY.md`, archive root README.md and version RESTORE.md/canonical-selection.json.
 
 - [ ] Write one-entry policy: daily development only canonical, versions in Git branches/tags, snapshots under non-prefix archive root, manifest+dirty preservation+hashes required before future migrations, ignored research-output for run artifacts.
 - [ ] Update current (not immutable historical) development paths and add historical original-path → archived-path mapping.
