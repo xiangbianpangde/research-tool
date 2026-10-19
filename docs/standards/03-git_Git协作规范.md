@@ -120,7 +120,7 @@ module.exports = { extends: ['@commitlint/config-conventional'] };
 | 方向 | 链接 |
 |------|------|
 | 细化自 | [ai-workflow 第二步 §2.6 Git 提交](ai-workflow_AI协作开发流程/04-第二步_迭代开发.md) |
-| 验收标准 | [docs/specs/03-git.md](../docs/specs/03-git.md) |
+| 验收标准 | `docs/specs/03-git.md` 是模板约定，当前仓库未建立该文件；按本篇检查清单与任务验收执行 |
 | 验证证据要求 | [ai-workflow §2.2 可观测验证](ai-workflow_AI协作开发流程/04-第二步_迭代开发.md) |
 
 ---

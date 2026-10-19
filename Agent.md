@@ -103,7 +103,7 @@ archive/YYYY-MM-DD-<purpose>/
 ## 5. Git 与远程仓库
 
 - 日常开发使用 feature/fix/chore 分支；`main` 只接收经过审查的合并。
-- 本次目录重组使用独立分支 `chore/reinitialize-project-layout`，完成后推送同名远程分支；不直接改 `origin/main`。
+- 根目录重组已通过 PR #2 合并到 `main`（merge commit `56f370e`）；后续结构或配置修改使用新的 feature/fix/chore 分支和 PR，不直接改 `origin/main`。
 - 提交前必须检查：`git status`、`git diff --check`、路径引用、构建/导入和受影响测试。
 - 不提交 `.env`、密钥、`research-output/`、缓存、虚拟环境或本地临时文件。
 - 远程仓库只同步 Git 跟踪的当前结构；本地 ignored 产物不作为远程目录结构的一部分。
@@ -112,7 +112,7 @@ archive/YYYY-MM-DD-<purpose>/
 
 - 重组前 Git 回滚点：`144f042`。
 - 当前批次：`archive/2026-10-18-root-reorganization/`。
-- 当前批次的 `README.md`、`RESTORE.md` 记录本次所有移动；完成收束后补充 `MANIFEST.sha256` 逐文件校验清单。
+- 批次的 `README.md`、`RESTORE.md` 和 `MANIFEST.sha256` 固定记录重组提交中的路径及 247 个文件哈希。归档原件保持不变；清单中当前活动文件的后续修改以 Git 提交追踪，不重新生成历史清单。
 - 若验证失败，优先回到该分支的上一个提交或按 `RESTORE.md` 做逆向迁移；不得用 reset/clean 隐藏问题。
 
 ## 7. 交付前检查

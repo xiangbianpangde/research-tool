@@ -2,7 +2,7 @@
 
 ## 唯一入口
 
-日常打开、开发、安装和运行只使用 `/Users/xbpd/Projects/research-tool`。当前选择基线为 `96c18be`（`fix/runtime-input-reliability`）：面向 AI Agent 的 macOS CLI/SDK-only，保留完整九阶段，已移除 WebUI/Gradio。
+日常打开、开发、安装和运行只使用 `/Users/xbpd/Projects/research-tool`。默认分支为 `main`；根目录重组已通过 PR #2 以 `56f370e` 合入。当前仍是面向 AI Agent 的 macOS CLI/SDK-only，保留完整九阶段，已移除 WebUI/Gradio。`96c18be` 是 2026-10-17 迁移时选择的历史基线，不是当前分支标识。
 
 版本身份由 Git 的分支和提交确定，不用目录名、修改时间或“old/new/final”猜测。开始工作先执行：
 
@@ -16,7 +16,9 @@ git log -3 --oneline
 
 ## 归档位置和索引
 
-本机历史版本统一保存到：
+仓库内已下线文档进入 `archive/<batch>/original/`；当前有效工作记录仍在 `docs/records/`。已发布批次与清单不覆盖，详细规则以根 `Agent.md` 为准。`archive/2026-10-18-root-reorganization/` 保存 PR #2 迁移原件；其清单中的活动文件哈希是重组提交快照，后续活动文件变化由 Git 追踪，不应重写该清单。
+
+本机历史仓库、worktree 与未提交快照统一保存到：
 
 `/Users/xbpd/Projects/archives/research_tool_archive/versions/<时间标记>/`
 
