@@ -6,7 +6,7 @@
 > - 参考 P0：`~/Downloads/_ref/`（files.zip）
 > - 调研：`research-output/github-low-star-high-quality-repository-discovery`、`cvpr-paper-and-youtube-video-search-backend-implementation`、`talk-linker-deep-research`
 > - 会话：`2026-07-11-172620-research-tool1.txt`、`2026-07-11-185610-reaserch-tool-ai.txt`
-> - 问题登记：`docs/records/worklogs/2026-07_使用问题登记.md`
+> - 问题登记（历史）：`archive/2026-10-18-root-reorganization/original/worklogs/2026-07_使用问题登记.md`
 
 ---
 
@@ -50,7 +50,7 @@
 |----|------|------|------|
 | A1 | 数据模型：`ExpertEntry` / `ExpertLibrary`；`CollectorConfig` +4 字段；`SearchHit.expert` | `domain/models.py`, `search/base.py` | ✅ |
 | A2 | `ExpertRegistry`（load/match/seed_urls_for/scoped_queries_for） | `infrastructure/experts/` | ✅ |
-| A3 | 仓库根 `config/experts.yaml` seed（含 vggt-omega） | `config/experts.yaml` | ✅ |
+| A3 | `config/experts.yaml` seed（含 vggt-omega） | `config/experts.yaml` | ✅ |
 | A4 | collector 强档直注 `_direct_inject_hits` | `stages/collector.py` | ✅ |
 | A5 | 配置示例 + 可选启用 | `config.yaml`, `config/example.yaml` | ✅ |
 | A6 | 测试（加载/匹配/注入/空库回退） | `tests/test_experts.py` | ✅ |
@@ -99,7 +99,7 @@
 
 | ID | 任务 | 状态 |
 |----|------|------|
-| X1 | 使用问题即时登记 `docs/records/worklogs/2026-07_使用问题登记.md` | ✅ P12 已登记 |
+| X1 | 使用问题登记已归档：`archive/2026-10-18-root-reorganization/original/worklogs/2026-07_使用问题登记.md` | ✅ P12 已登记 |
 | X2 | 不改 openai 代理补丁等已有修复 | ✅ |
 | X3 | 现有测试零回归 | ✅ 479 passed, 2 skipped |
 

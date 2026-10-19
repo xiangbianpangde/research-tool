@@ -76,7 +76,7 @@ exclude_also = [
 [tool.ruff]
 line-length = 100
 target-version = "py311"
-extend-exclude = ["docs"]  # historical M-001..M-012 skeletons are design artifacts, not linted code
+extend-exclude = ["docs", "archive"]  # 历史设计骨架已归档，不属于生产代码检查范围
 
 [tool.ruff.lint]
 select = [

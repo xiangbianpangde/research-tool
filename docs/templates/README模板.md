@@ -22,12 +22,14 @@
 
 ```
 project/
-├── docs/standards/  # 开发规范
-├── docs/            # 文档
-├── plan/            # 计划
-├── src/             # 源代码
-├── STATUS.md        # 项目状态
-├── Agent.md        # AI 上下文
+├── docs/            # 当前文档
+│   ├── standards/   # 开发规范
+│   ├── plan/        # 计划
+│   └── records/     # 工作记录与报告
+├── archive/         # 历史归档
+├── {package}/       # 生产源码（遵循项目语言的包布局）
+├── STATUS.md        # 当前项目状态
+├── Agent.md         # AI 工作入口
 └── README.md        # 本文件
 ```
 

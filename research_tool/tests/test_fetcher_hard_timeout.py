@@ -13,9 +13,12 @@ from research_tool.infrastructure.stages.fetcher import HARD_TIMEOUT_GRACE_SEC, 
 @pytest.fixture(autouse=True)
 def _isolate_ssrf_dns(monkeypatch):
     """These tests exercise timeout dispatch, not DNS-based SSRF validation."""
+    async def allow_async(_url: str, *, timeout_sec: float = 5.0) -> None:
+        del timeout_sec
+
     monkeypatch.setattr(
-        "research_tool.infrastructure.stages.fetcher.assert_safe_url",
-        lambda _url: None,
+        "research_tool.infrastructure.stages.fetcher.assert_safe_url_async",
+        allow_async,
     )
 
 

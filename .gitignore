@@ -6,6 +6,8 @@ build/
 dist/
 .pytest_cache/
 .coverage
+.coverage.*
+htmlcov/
 .DS_Store
 .venv/
 .venv-*/
@@ -14,7 +16,11 @@ config.yaml
 config.*.yaml
 research-output/
 work/
+# Local deployment receipts and machine-specific settings
+.research-deployment.json
 .env
+.env.*
+!.env.example
 webui-test/
 out-icl/
 out-*/
@@ -30,7 +36,6 @@ tests/fixtures/*/report.md
 .ruff_cache/
 .deepseek/
 state/
-.research-deployment.json
 
 # 08-图谱工具
 .codegraph/
@@ -63,9 +68,7 @@ _xtasks/
 /run_*.py
 *.flag
 
-# pi agent runtime artifacts (never in repo)
+# Agent runtime artifacts (never in repo)
 .pi-subagents/
-
-# pi agent runtime artifacts
-collect/runtime/
-!collect/architecture/
+/.superpowers/
+/.worktrees/

@@ -4,7 +4,29 @@
 
 历史恢复基线为 `4ab1412`，开发来自 `codex/nine-stage-only`。当前验证与分支见 [STATUS.md](STATUS.md)；来源与裁剪边界见 [九段裁剪记录](docs/plan/NINE-STAGE-ONLY-TRIM-PLAN.md)。历史 52.77 分尚未在本实现上复现。
 
-本机唯一开发入口为 `/Users/xbpd/Projects/research-tool`。其它旧版已归档，不再作为候选项目打开；路径映射、归档索引与恢复流程见 [版本与归档制度](docs/plan/PROJECT-VERSION-POLICY.md)。
+本机唯一开发入口为 `/Users/xbpd/Projects/research-tool`。默认分支 `main` 已通过 PR #2 完成根目录重组；其它旧版已归档，不再作为候选项目打开。路径映射、归档索引与恢复流程见 [版本与归档制度](docs/plan/PROJECT-VERSION-POLICY.md)，当前 AI Agent 入口为 [Agent.md](Agent.md)。
+
+## 根目录结构
+
+根目录只保留运行入口、项目配置和公开说明；当前文档、模板、记录和历史材料分别位于 `docs/` 与 `archive/`。
+
+```text
+config/          # 配置示例与专家库
+docs/            # 架构、计划、规范、模板、记录、元信息、历史
+archive/         # 可恢复的历史批次
+research_tool/   # Python 包与测试
+scripts/         # 可复用脚本
+```
+
+| 根文件 | 保留原因 |
+|---|---|
+| `.gitignore` | Git 从根约束本机配置、缓存和研究输出；不忽略当前文档或归档 |
+| `.env.example` | 无真实凭据的环境变量模板；实际 `.env` 与 `.env.*` 为本地文件 |
+| `.pre-commit-config.yaml` | 本地 Ruff/格式化/密钥检查配置；不会自动替换本机已有 Git hooks |
+| `pyproject.toml`、`uv.lock` | Python 构建、CLI 入口、工具选项和依赖锁；锁文件由 uv 校验/生成 |
+| `Agent.md`、`README.md`、`STATUS.md` | 分别作为 AI 工作入口、使用说明和当前状态，不互相复制正文 |
+
+`.github/` 保留远程 CI；本机 `.venv/`、缓存和 `research-output/` 不进入 GitHub。当前 GitHub 工作流只执行 gitleaks，不能把其成功等同于全量 pytest。当前开发检查命令见下方“SDK 与开发”。
 
 ## 九阶段
 
@@ -115,4 +137,4 @@ python -B scripts/smoke_e2e.py --output /tmp/research-nine-smoke
 
 冒烟仅模拟搜索、抓取和模型外部 I/O，实际执行生产管线，含一轮补搜和无模型调用的恢复。它不验证联网表现、报告质量或历史分数。完整回归与 CLI 验证证据见 STATUS。
 
-使用 [MIT License](LICENSE)。
+[pyproject.toml](pyproject.toml) 中声明使用 MIT 许可；当前仓库尚未提供独立的 `LICENSE` 文件。

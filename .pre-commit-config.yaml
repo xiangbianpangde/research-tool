@@ -1,10 +1,14 @@
+# 归档是不可变证据，不参与当前源码的自动格式化；gitleaks 仍扫描归档。
 repos:
   - repo: https://github.com/astral-sh/ruff-pre-commit
     rev: v0.8.0
     hooks:
       - id: ruff           # lint
+        exclude: ^(archive|docs)/
       - id: ruff-format    # 格式化
+        exclude: ^(archive|docs)/
   - repo: https://github.com/gitleaks/gitleaks
     rev: v8.18.0
     hooks:
       - id: gitleaks       # 阻止密钥入库
+        stages: [pre-commit, pre-push]
