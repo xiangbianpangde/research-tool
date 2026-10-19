@@ -6,7 +6,7 @@
 - 唯一 AI 工作入口为 `Agent.md`。`research_tool/`、`scripts/`、`.github/`、`config/`、`docs/`、`archive/` 保持原职责边界；Git/Python/工具要求的根配置不再移动。
 - 本轮同步 `.gitignore`、`.env.example`、pre-commit/Ruff 配置和当前文档引用；`uv.lock`、已发布归档、CI 工作流及生产执行逻辑不变。README 中不存在的 `LICENSE` 链接已改为如实说明，未擅自新增许可证授权。
 - 旧超时/README 抓取测试仍 mock 已不调用的同步 URL guard，导致真实 DNS 或跨测试 DNS 池状态影响验证。本轮只将两处 fixture 指向实际异步入口，保持原断言及生产 SSRF 检查不变；不再使用外部 shim 作为验收条件。
-- 当前原始全量命令结果为 **1160 passed / 3 skipped**；Ruff、`uv lock --check --offline`、pre-commit schema 校验、shell 语法、当前 Markdown 链接和历史快照哈希检查通过。离线九段冒烟通过补搜闭环及零模型 resume。证据位于 `research-output/root-files-sync-20261019/`（本机忽略目录）。远程交付待 PR 回读。
+- 当前原始全量命令结果为 **1160 passed / 3 skipped**；Ruff、`uv lock --check --offline`、pre-commit schema 校验、shell 语法、当前 Markdown 链接和历史快照哈希检查通过。离线九段冒烟通过补搜闭环及零模型 resume。证据位于 `research-output/root-files-sync-20261019/`（本机忽略目录）。已推送并创建 [PR #3](https://github.com/xiangbianpangde/research-tool/pull/3)，目标为 `main`；首次远程 gitleaks 检查通过。本轮仅交付 PR，尚未合并。
 
 以下保留历史实施与验收记录，不代表当前分支、测试数或产品接口仍停留在对应历史版本。
 
