@@ -191,7 +191,7 @@ nine_loop:
 
 
 def test_example_config_keeps_default_stage_order():
-    example = Path(__file__).resolve().parents[2] / "docs" / "config.example.yaml"
+    example = Path(__file__).resolve().parents[2] / "config" / "example.yaml"
 
     cfg = load_config(example)
 

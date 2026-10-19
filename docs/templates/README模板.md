@@ -22,15 +22,15 @@
 
 ```
 project/
-├── conventions/     # 开发规范
+├── docs/standards/  # 开发规范
 ├── docs/            # 文档
 ├── plan/            # 计划
 ├── src/             # 源代码
 ├── STATUS.md        # 项目状态
-├── CLAUDE.md        # AI 上下文
+├── Agent.md        # AI 上下文
 └── README.md        # 本文件
 ```
 
 ## 贡献指南
 
-参见 `conventions/` 目录下的开发规范。
+参见 `docs/standards/` 目录下的开发规范。

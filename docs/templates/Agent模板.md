@@ -1,8 +1,8 @@
-# {项目名} — AI 项目上下文（CLAUDE.md）
+# {项目名} — AI 项目上下文（Agent.md）
 
 > **⚠️ 仅供 AI Agent 读取**，新会话自动加载。人类请读 `README.md`。
 > 复制本模板到新项目根目录，替换所有 `{占位}`，删掉用不到的行。每个功能点完成后更新「当前状态」。
-> 本项目遵循 `conventions/` 开发规范 + `conventions/ai-workflow_AI协作开发流程/` 协作流程。
+> 本项目遵循 `docs/standards/` 开发规范 + `docs/standards/ai-workflow_AI协作开发流程/` 协作流程。
 
 ---
 
@@ -28,7 +28,7 @@
 
 ## 开发必守红线（违反 = 方案打回 / 审查不通过）
 
-> 完整规则见 `conventions/NN-*.md` 各篇 §一；下面是跨维度的硬约束摘要。
+> 完整规则见 `docs/standards/NN-*.md` 各篇 §一；下面是跨维度的硬约束摘要。
 
 | 维度 | 红线 | 自动检测 |
 |------|------|----------|
@@ -51,15 +51,15 @@
 扫描仓库→更新本文件图谱 → 实现(TDD 自检) → 可观测验证 → 审查 diff → 人确认 → 更新 worklog/STATUS → commit
 ```
 
-- **汇报（AI 必做，不可跳过）**：每个功能点完成后更新 `worklogs/YYYY-MM-DD_描述.md` + `STATUS.md`。功能点级汇报**默认在对话里内联输出、不落盘**；只有收束报告写成 `docs/reports/收束报告-v*.md`（详见 `07-汇报.md`）。
+- **汇报（AI 必做，不可跳过）**：每个功能点完成后更新 `docs/records/worklogs/YYYY-MM-DD_描述.md` + `STATUS.md`。功能点级汇报**默认在对话里内联输出、不落盘**；只有收束报告写成 `docs/records/reports/收束报告-v*.md`（详见 `07-汇报.md`）。
 - **收束节点（人触发）**：计划时预设（默认每 3 个功能点）写入 `docs/plan/开发清单.md` 头部成为硬闸门。**到达预设收束节点而未收束时，AI 拒绝开始下一个功能点**，提醒人触发；AI 不替人做收束。产出收束报告 + ADR。
 
 ## 文件放置 & 同步规则
 
-1. **新增文件前必查 `meta/FILE_GRAPH.md` 决策树**，禁止根目录堆散文件。
+1. **新增文件前必查 `docs/meta/CODE_MAP.md` 决策树**，禁止根目录堆散文件。
 2. 改规范 → 同步对应 `docs/specs/` BDD。
 3. 新增功能点 → `STATUS.md` + `docs/plan/开发清单.md` 各加一行。
-4. ADR 仅收束节点产出（`worklogs/decisions/`）；日常取舍记 worklog「关键决策」段。
+4. ADR 仅收束节点产出（`docs/records/decisions/`）；日常取舍记 worklog「关键决策」段。
 5. 人读 README，AI 读本文件。
 
 ---

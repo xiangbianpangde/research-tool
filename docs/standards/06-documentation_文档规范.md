@@ -80,7 +80,7 @@ def create_order(user_id: str, product_id: str, quantity: int) -> Order:
 | 规则 | 要点 |
 |------|------|
 | 收束节点检查文档一致性 | 逐份对照代码现状（[第三步](ai-workflow_AI协作开发流程/06-第三步_收束节点.md)） |
-| 过时文档移 `archive/`，标废弃日期 | `> ⚠️ 已废弃: YYYY-MM-DD，替代: xxx` |
+| 过时文档移 `docs/records/`，标废弃日期 | `> ⚠️ 已废弃: YYYY-MM-DD，替代: xxx` |
 
 ---
 

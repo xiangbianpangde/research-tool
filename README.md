@@ -45,7 +45,7 @@ research run "你的研究主题" --dry-run
 
 需要配置密钥和可选工具时，在同一环境运行 `bash scripts/setup.sh`。PDF 路径使用 `/Users/<用户名>/Documents/papers` 或具体的 .pdf 文件；MinerU 命令路径如 `.venv/bin/mineru`。
 
-CLI overrides > 环境变量 > YAML > 默认值。完整模板见 [docs/config.example.yaml](docs/config.example.yaml)。密钥放本地 .env 或环境变量，不提交 Git；`research config` 显示脱敏配置。
+CLI overrides > 环境变量 > YAML > 默认值。完整模板见 [config/example.yaml](config/example.yaml)。密钥放本地 .env 或环境变量，不提交 Git；`research config` 显示脱敏配置。
 
 OpenAI 兼容网关使用 `LLM_PROVIDER=openai_compatible`，同时明确指定 `LLM_MODEL`、`LLM_BASE_URL` 和 `LLM_API_KEY`。模型名和端点可以随时更换，无需修改源码；该 provider 不回退使用 OpenAI/MiniMax 等厂商密钥。已有 provider（openai/deepseek/minimax/anthropic/ollama）仍可用。切换 provider 或端点时，旧 YAML 密钥会被丢弃，只有新配置的凭据会生效。
 

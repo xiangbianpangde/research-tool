@@ -1,7 +1,7 @@
 # AI 审计报告模板
 
-> 复制为 `docs/reports/AI审计-v{版本号}.md`，放到 `docs/reports/`。
-> 来源：`conventions/ai-workflow_AI协作开发流程/06-第三步_收束节点.md` §3.3.1
+> 复制为 `docs/records/reports/AI审计-v{版本号}.md`，放到 `docs/records/reports/`。
+> 来源：`docs/standards/ai-workflow_AI协作开发流程/06-第三步_收束节点.md` §3.3.1
 > 更新: 2026-05-27
 
 ---
