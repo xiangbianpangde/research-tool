@@ -338,6 +338,7 @@ class ReporterConfig(BaseModel):
     max_selected_claims: int = Field(default=60, ge=1, le=200)
     known_limitations: list[str] = Field(default_factory=list)
     grounding_policy: Literal["model_support", "source_exact", "source_grounded"] = "model_support"
+    required_source_evidence: list[dict[str, Any]] = Field(default_factory=list)
 
 
 class TalkConfig(BaseModel):

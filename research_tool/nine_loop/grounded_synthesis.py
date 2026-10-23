@@ -126,12 +126,41 @@ def render_observation(observation, graph):
                             r'\b(?:bleed\w*|ha?emorrhag\w*|PPH)\s+'
                             r'(?:(?:was|were)\s+(?:absent|not\s+(?:observed|reported))|'
                             r'(?:did|does)\s+not\s+occur)\b')
-        if not any(not re.search(negative_outcome, unit, re.I) for unit in matches):
-            raise StageError('report', 'negative outcome cannot become positive challenge bleeding')
+        affirmative = (r'(?:bleed\w*|ha?emorrhag\w*|PPH)\s+(?:occurred|was\s+observed)|'
+                       r'bleeding was not severe|bleeding was not associated|'
+                       r'(?:experienced|suffered|complicated by|had|presented with)'
+                       r'[^.;\n]{0,80}(?:bleed\w*|ha?emorrhag\w*|PPH)')
+        excluded = (r'none\s+had|avoided|no\s+signi(?:fi|ﬁ)cant|not\s+observed|'
+                    r'\b(?:would|could|might|may|whether|unclear|uncertain|possibly|hypothetical|if)\b')
+        if not any(re.search(affirmative, unit, re.I)
+                   and not re.search(negative_outcome, unit, re.I)
+                   and not re.search(excluded, unit, re.I) for unit in matches):
+            raise StageError('report', 'positive bleeding event needs an affirmative occurrence')
     if code == 'adjusted_association' and not re.search(r'\badjusted\b|multivaria', evidence, re.I):
         raise StageError('report', 'adjusted type cannot use unadjusted wording')
     return {'kind': 'description', 'text': _TEMPLATES[code],
             'claim_ids': observation.claim_ids, 'code': code}
+
+
+def resolve_required_evidence(graph, specs):
+    """Pin required source literals; the caller's interpretation never becomes truth."""
+    resolved = []
+    for spec in specs:
+        if spec.get('kind') not in {'required', 'source_conflict'} or not spec.get('quotes'):
+            raise StageError('report', 'invalid required source-evidence specification')
+        ids = []
+        for quote in spec['quotes']:
+            hits = [f['claim_id'] for f in graph['facts'] if f['text'] == quote
+                    and any(c['locator'] == spec['locator'] for c in f['citations'])]
+            if len(hits) != 1:
+                raise StageError('report', 'required original evidence missing or ambiguous')
+            ids.append(hits[0])
+        if len(ids) != len(set(ids)):
+            raise StageError('report', 'duplicate required evidence cannot establish a conflict')
+        if spec['kind'] == 'source_conflict' and len(set(ids)) < 2:
+            raise StageError('report', 'source conflict requires multiple distinct originals')
+        resolved.append({'kind': spec['kind'], 'claim_ids': ids, 'locator': spec['locator']})
+    return resolved
 
 
 class ObservationChoice(BaseModel):
@@ -455,6 +484,23 @@ async def synthesize_grounded_report(  # noqa: PLR0915 - bounded draft/review co
     lines = ['# ' + topic, '', '> 中文逐论断附精确原文和完整来源反查记录；'
              '模型语义检查仍可能出错，不代表临床或人类专家验收。', '']
     claims = []
+    required = bundle.get('required_evidence', [])
+    if required:
+        lines.extend(['## 必需原文证据与未解冲突', '',
+                      '以下由任务规格指定原句，身份/跨度经程序回验；'
+                      '它们不是作者或配置提供者的解释自动成为真值。', ''])
+        for item in required:
+            lines.extend(['### ' + ('原文冲突未解' if item['kind'] == 'source_conflict'
+                                   else '必需证据锚点'), ''])
+            if item['kind'] == 'source_conflict':
+                lines.extend(['此为任务方标记、经原文身份核验的冲突候选，并非程序证明矛盾；'
+                              '并列原值供审校，不自行调和或重建绝对风险。', ''])
+            for cid in item['claim_ids']:
+                fact = facts[cid]
+                refs = ' '.join(f'[{indices[c["source_id"]]}]' for c in fact['citations'])
+                lines.extend([fact['text'] + ' ' + refs, ''])
+                claims.append({'text': fact['text'], 'claim_ids': [cid],
+                               'citations': fact['citations']})
     for sid, source in sorted(sources.items()):
         lines.extend(['## 原始研究：' + source.get('title', sid), ''])
         for atom in atoms:

@@ -176,7 +176,7 @@ class ResearchPipeline:
             from ..infrastructure.ingest.pdf import _collect_pdfs
             path = Path(self.config.pdf_dir).resolve()
             inputs[str(path)] = {p.name: _hash(p.read_bytes()) for p in _collect_pdfs(path)}
-        fingerprint = _hash(_bytes({"runtime_contract": 16, "topic": self.topic,
+        fingerprint = _hash(_bytes({"runtime_contract": 17, "topic": self.topic,
                                    "config": config, "inputs": inputs}))
         self._state = (self.runtime.load_or_init(fingerprint) if self.config.resume
                        else self.runtime.start_new(fingerprint))
@@ -541,10 +541,11 @@ class ResearchPipeline:
         _atomic(report_file, report["markdown"].encode("utf-8"))
         return {**report, "output_files": [str(path) for path in files] + [str(report_file)]}
 
-    async def _ground_evidence(self, graph, inspection):
+    async def _ground_evidence(self, graph, inspection):  # noqa: PLR0915 - CAS evidence contract
         from ..infrastructure.retrieval import ResearchCtlClient
         from ..infrastructure.retrieval.snapshot import write_evidence_snapshot
         from ..nine_loop.grounding import build_evidence_bundle, dependency_facts
+        from ..nine_loop.grounded_synthesis import resolve_required_evidence
 
         cfg = self.config.retrieval
         client = ResearchCtlClient(
@@ -614,6 +615,9 @@ class ResearchPipeline:
         if resolved.get("status") != "success" or resolved["results"][0]["graph"] != graph:
             raise StageError("report", "ResearchCTL graph identity check failed closed")
         bundle = build_evidence_bundle(graph, blocks, [])
+        bundle['required_evidence'] = resolve_required_evidence(
+            graph, self.config.reporter.required_source_evidence,
+        )
         if client.reader_identity() != self._grounding_reader_identity:
             raise StageError('report', 'evidence reader changed during retrieval')
         bundle.update(reader_identity=self._grounding_reader_identity,

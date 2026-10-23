@@ -141,6 +141,8 @@ reader必须握手支持`evidence-snapshot/v1`，旧CLI/legacy不回退。全部
 
 `source_grounded`在同一九段report内生成中文原子陈述；verifier读全部本来源facts与完整正文，而非writer选材子集。生成接口只允许选择`code+claim_ids`，禁止模型自由输出医学结论；程序按明确的挑战/治疗/关联/冲突类型生成中文解读，每项旁逐字渲染账本数值/效应/分母原句，避免模型重标单位；全局否定和冲突仍有机械约束与一次有界修复。逐论断结果写入`final/grounding-audit.json`，失败时`runs/<id>/grounding-attempts.json`保留已生成原子项/具体失败索引/安全诊断，过滤立即停止。`source_exact`只输出原文陈述，是独立窄合同，不能冒充中文医学综合已通过。
 
+任务可显式指定`reporter.required_source_evidence`（locator、精确quotes、kind=required/source_conflict），每句必须唯一绑定现有事实；缺失、重复或歧义硬拒绝。必带原句及任务方标记的冲突候选始终直接可见，不交模型裁掉；配置解释不自动成为真值。
+
 原run-record字段不变；summary列全部已提交final，ResearchCTL核验实际目录与运行envelope集合。审校单独append-only绑定run/report/evidence哈希，不改执行verdict。采用查询使用`research retrieval query --entity CURRENT --require-review agent_source_review ...`；未审/拒绝/失败当前run不能回退旧机器success。Agent审校不匹配human_clinical要求。
 
 ## CLI
