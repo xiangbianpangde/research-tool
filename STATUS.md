@@ -12,7 +12,11 @@ P2显式`source_grounded`中文原子论断读取完整来源而非局部选材�
 
 真实失败暴露草稿把多个数值塞进单数量字段、纠正又改成description，且具体失败未持久化。已新增失败审计callback和schema约束：中文观察不重打数字，程序逐项附精确原文数值与范围；不是放宽单位/效应校验。加入每次started/draft/机械索引/语义checks/过滤安全诊断，限定否定终身安全句不会误当正向保证。新增反例先红后绿，完整全量 **1269 passed / 3 skipped**；原文同源诊断一次完整draft+verify成功但只标报告段诊断，不充当新pipeline成功。P3完整新run仍待复验，旧失败/原件保留。
 
-上游验证：layout与新增body查询10项通过，legacy独立脚本50/32/139/85/83/54 checks通过（用隔离只读源clone fixture）；上游bench三处attestation/public-root失败在未修改HEAD归档中同样复现，未改历史证据或断言，不计通过。researchctl子目录旧pyproject为JSON而非TOML，pytest用-c pytest.ini，顶层SystemExit的legacy脚本直接运行。证据`research-output/grounded-report-implementation-20261023/`。
+P3后续v2 `72db76aa881740f3874b2b2b1f3cadb0`在原文依赖重检发生truncated/8192completion，prompt670546tokens，无final。根因是同源literal新增512条再次全量模型inspect；已改确定性exact/coverage重检，保留全部既有finding、不关闭科学问题，逐来源语义核验不省略，runtime13，提交推送`e38334f`，全量1270/3。
+
+v3 `954161a0f7f24f1aaa9873c3d45d7b50`又在模型反复输出全文缺失否定时STOP_ERROR，无final。现将writer进一步收窄为ObservationPlan只选code+claim_ids；固定中文模板+原句数值展示、同证据单位治疗/结局极性核验、完整来源模型验证，不删除坏论断凑通过。runtime14隔离，22项模板极性反例已先红后绿，最新模板源码审查approve/0。P3仍须独立新run与医学回读，不能把局部诊断或代码绿当通过。
+
+上游验证：layout与新增body查询11项通过，legacy独立脚本50/32/139/85/83/54 checks通过（用隔离只读源clone fixture）；上游bench三处attestation/public-root失败在未修改HEAD归档中同样复现，未改历史证据或断言，不计通过。researchctl子目录旧pyproject为JSON而非TOML，pytest用-c pytest.ini，顶层SystemExit的legacy脚本直接运行。证据`research-output/grounded-report-implementation-20261023/`。
 
 ## 历史：自动报告根因、修复方案与版本检查点（2026-10-23）
 

@@ -139,7 +139,7 @@ retrieval:
 
 reader必须握手支持`evidence-snapshot/v1`，旧CLI/legacy不回退。全部来源的raw/clean/hash与knowledge/merge已提交envelope先被固定，未选方法、分母和未抽表格仍可查；缺附件、分页截断与范围单列。初始/最终快照准备使用已有qgate提交与CAS，未提交中断可恢复，已提交文件丢失/变化硬拒绝。
 
-`source_grounded`在同一九段report内生成中文原子陈述；verifier读全部本来源facts与完整正文，而非writer选材子集。中文解读schema禁止重打阿拉伯数字，每项旁由程序逐字渲染其账本数值/效应/分母原句，避免模型重标单位；全局否定和冲突仍有机械约束与一次有界修复。逐论断结果写入`final/grounding-audit.json`，失败时`runs/<id>/grounding-attempts.json`保留已生成原子项/具体失败索引/安全诊断，过滤立即停止。`source_exact`只输出原文陈述，是独立窄合同，不能冒充中文医学综合已通过。
+`source_grounded`在同一九段report内生成中文原子陈述；verifier读全部本来源facts与完整正文，而非writer选材子集。生成接口只允许选择`code+claim_ids`，禁止模型自由输出医学结论；程序按明确的挑战/治疗/关联/冲突类型生成中文解读，每项旁逐字渲染账本数值/效应/分母原句，避免模型重标单位；全局否定和冲突仍有机械约束与一次有界修复。逐论断结果写入`final/grounding-audit.json`，失败时`runs/<id>/grounding-attempts.json`保留已生成原子项/具体失败索引/安全诊断，过滤立即停止。`source_exact`只输出原文陈述，是独立窄合同，不能冒充中文医学综合已通过。
 
 原run-record字段不变；summary列全部已提交final，ResearchCTL核验实际目录与运行envelope集合。审校单独append-only绑定run/report/evidence哈希，不改执行verdict。采用查询使用`research retrieval query --entity CURRENT --require-review agent_source_review ...`；未审/拒绝/失败当前run不能回退旧机器success。Agent审校不匹配human_clinical要求。
 

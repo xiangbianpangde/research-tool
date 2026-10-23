@@ -9,10 +9,10 @@ from research_tool.tests.test_nine_loop_runner import config, model_reply, exter
 
 
 def grounded_reply(prompt, schema):
-    if schema.__name__ == 'AtomDraft':
+    if schema.__name__ == 'ObservationPlan':
         facts = json.loads(prompt.split('\nFACTS:', 1)[1].split('\nFULL_SOURCE:', 1)[0])
-        return schema(atoms=[{'kind': 'description', 'text': '来源报告了电池循环寿命。',
-                               'claim_ids': [facts[0]['claim_id']]}])
+        return schema(observations=[{'code': 'study_observation',
+                                     'claim_ids': [facts[0]['claim_id']]}])
     if schema.__name__ == 'AtomChecks':
         atoms = json.loads(prompt.split('\nATOMS:', 1)[1].split('\nCOMPLETE_SOURCE', 1)[0])
         return schema(checks=[{'index': i, 'status': 'supported',
@@ -29,7 +29,7 @@ async def test_source_grounded_chinese_pipeline_preserves_atomic_audit(tmp_path,
     cfg.retrieval.module_root = module_root()
     result = await ResearchPipeline(cfg, llm=MockLLMClient(structured_response=grounded_reply)).run()
     assert result.verdict == 'STOP_SUCCESS', result
-    assert '来源报告了电池循环寿命。' in result.report_result.report_path.read_text()
+    assert '原文报告下列研究内观察' in result.report_result.report_path.read_text()
     audit = json.loads((result.report_result.report_path.parent / 'grounding-audit.json').read_text())
     assert audit['contract'] == 'atomic-full-source/v1'
     assert all(x['semantic']['status'] == 'supported' for x in audit['atomic_checks'])

@@ -38,6 +38,102 @@ class AtomDraft(BaseModel):
     atoms: list[ChineseObservation] = Field(min_length=1, max_length=6)
 
 
+class Observation(BaseModel):
+    model_config = {'extra': 'forbid'}
+    code: Literal['untreated_negative_challenge', 'treated_negative_challenge',
+                  'challenge_bleeding', 'adjusted_association', 'unadjusted_association',
+                  'null_association', 'source_conflict', 'subtype_limitation', 'study_observation']
+    claim_ids: list[str] = Field(min_length=1, max_length=4)
+
+
+class ObservationPlan(BaseModel):
+    model_config = {'extra': 'forbid'}
+    observations: list[Observation] = Field(min_length=1, max_length=6)
+
+
+_TEMPLATES = {
+    'untreated_negative_challenge': '原文记载未经预防而已挑战未异常出血者；'
+        '这证明阴性挑战存在，但不等于其他挑战或终身安全，原文计数不自动成为下一次挑战概率。',
+    'treated_negative_challenge': '原文记载预防治疗条件下的阴性挑战；'
+        '不能据此确定未治疗时的天然风险，也不能与未经预防的阴性挑战混为一类。',
+    'challenge_bleeding': '原文在下列明确暴露或结局口径中报告出血；'
+        '数值、分母、重复事件与治疗条件按所附原句解释，不外推个人终身风险。',
+    'adjusted_association': '原文报告调整分析中的关联；'
+        '效应类型、调整项及区间见原句，调整关联不等于因果贡献或可部署的个体风险系数。',
+    'unadjusted_association': '原文提供描述性或未调整比较；'
+        '它可提出待研究信号，不能由此单独确定独立效应或治疗因果作用。',
+    'null_association': '原文在本样本与结局口径下报告未达显著或未见关联；'
+        '这不证明风险相等或排除真实作用，精度与适用条件仍受原研究限制。',
+    'source_conflict': '所引原文存在未解的口径或数值冲突；'
+        '保留各处原值，不选择正确版本或据此重建绝对风险。',
+    'subtype_limitation': '原文涉及的亚型或混合人群范围见所附证据；'
+        '不能把混合结果直接当作某一亚型的专属风险。',
+    'study_observation': '原文报告下列研究内观察；'
+        '其人群、结局、治疗与时间口径仅限原研究，不能直接转成个人绝对风险。',
+}
+
+
+def render_observation(observation, graph):
+    observation = Observation.model_validate(observation)
+    facts = {f['claim_id']: f for f in graph['facts']}
+    if not set(observation.claim_ids) <= set(facts):
+        raise StageError('report', 'observation references unknown evidence')
+    # Event predicates must all hold in one cited evidence unit, never across events.
+    primary_units = [facts[cid]['text'] for cid in observation.claim_ids]
+    evidence = '\n'.join(primary_units)
+    code = observation.code
+    patterns = {
+        'untreated_negative_challenge': (
+            r'without\s+(?:preoperative\s+)?(?:prophy\w*|prevent\w*|advanced actions|'
+            r'pro[- ]haemostatic|replacement)|no\s+prophy\w*|\buntreated\b',
+            r'no\s+(?:abnormal\s+)?bleeding|uneventful',
+            r'surger|childbirth|dental|extract|challenge',
+        ),
+        'treated_negative_challenge': (r'preop|prophy|infusion|replacement',
+                                       r'no\s+(?:abnormal\s+|postoperative\s+)?bleeding|'
+                                       r'without\s+(?:abnormal\s+)?bleeding|uneventful'),
+        'challenge_bleeding': (r'bleed|hemorrhag|PPH',),
+        'adjusted_association': (r'\badjusted\b|multivaria',),
+        'unadjusted_association': (r'\bunadjusted\b|\bcrude\b|%|proportion|incidence',),
+        'null_association': (r'not associated|no significant|not signific|P\s*>\s*',),
+        'subtype_limitation': (r'hypodys|dysfibrin|hypofibrin|subtype|classified',),
+    }
+    if code == 'source_conflict' and len(set(observation.claim_ids)) < 2:
+        raise StageError('report', 'source conflict requires competing original evidence')
+    required = patterns.get(code, ())
+    matches = [unit for unit in primary_units
+               if all(re.search(p, unit, re.I) for p in required)]
+    if code in {'treated_negative_challenge', 'untreated_negative_challenge'}:
+        absence = (r'\buneventful\b|\bno\s+(?:abnormal\s+|postoperative\s+)?bleeding'
+                   r'\s*(?:[.;,)]|$|occurred\b|was\s+observed\b|after\b|following\b)|'
+                   r'\bwithout\s+(?:abnormal\s+)?bleeding\s*(?:[.;,)]|$|after\b)')
+        matches = [unit for unit in matches if re.search(absence, unit, re.I)
+                   and not re.search(r'\b(?:not|never|possibly|uncertain)\b[^.;\n]*'
+                                     r'\buneventful\b', unit, re.I)]
+    if required and not matches:
+        raise StageError('report', 'observation predicates do not share a source evidence unit')
+    treatment = r'(?:prophy\w*|replacement|prevent\w*|infusions?|pro[- ]haemostatic)'
+    negative_treatment = r'\b(?:without|no|not|never)\b[^.;\n]{0,50}\b' + treatment
+    if code == 'treated_negative_challenge':
+        positive = r'\b(?:received|receiving|administered|given|treated with)\b[^.;\n]{0,80}'
+        if not any(re.search(positive + treatment, unit, re.I)
+                   and not re.search(negative_treatment, unit, re.I)
+                   for unit in matches):
+            raise StageError('report', 'protected challenge requires affirmative treatment')
+    if code == 'challenge_bleeding':
+        negative_outcome = (r'\b(?:no|without|not|never)\b[^.;\n]{0,50}'
+                            r'\b(?:bleed\w*|ha?emorrhag\w*|PPH)\b|'
+                            r'\b(?:bleed\w*|ha?emorrhag\w*|PPH)\s+'
+                            r'(?:(?:was|were)\s+(?:absent|not\s+(?:observed|reported))|'
+                            r'(?:did|does)\s+not\s+occur)\b')
+        if not any(not re.search(negative_outcome, unit, re.I) for unit in matches):
+            raise StageError('report', 'negative outcome cannot become positive challenge bleeding')
+    if code == 'adjusted_association' and not re.search(r'\badjusted\b|multivaria', evidence, re.I):
+        raise StageError('report', 'adjusted type cannot use unadjusted wording')
+    return {'kind': 'description', 'text': _TEMPLATES[code],
+            'claim_ids': observation.claim_ids, 'code': code}
+
+
 class AtomCheck(BaseModel):
     index: int
     status: Literal["supported", "contradicted", "insufficient", "source_conflict"]
@@ -183,17 +279,16 @@ async def synthesize_grounded_report(  # noqa: PLR0915 - bounded draft/review co
         compact = [{'claim_id': f['claim_id'], 'text': f['text']} for f in candidates]
         complete_source = [b for b in bundle['source_blocks'] if b['source_id'] == sid]
         prompt = (
-            '为本研究写最多6条中文原子解读，每条只陈述一件事，必须带claim_ids。'
-            '紧扣谁在何种挑战条件下出血、阴性挑战、已调整关联和反证；'
-            '不要用常规人口学或实验室描述占掉核心条件性风险证据。'
-            'kind只能description；text禁止任何阿拉伯数字，schema会拒绝。'
-            '不要重打OR/CI/人数/分数：程序将直接在每条解读下附上所引完整原文，保留数值和单位。'
-            '中文只解释本来源与主题有关的现象、调整关联和局限，不用中文数字绕过数值限制。'
-            '无症状、挑战阴性、治疗保护、出血和流产须区别；选择对应原文claim_id。'
-            '遇源文冲突明确写冲突未解、同时引用两处，不用子组猜测或选定正确值。'
-            '禁止全文缺失、治疗、终身安全、因果结论；不猜图文冲突。'
-            '保留调整项、CI、分母、治疗状态；已有局限只是审查线索不是事实。'
-            '所有事实均已精确入账，不能从未选事实推断来源未报告。'
+            '为本研究选择最多6个关键观察，每个只返回code与claim_ids，禁止返回text或新事实。'
+            '程序按固定中文模板解释类型并逐字附上原证据数值/分母/CI。'
+            '紧扣谁在何种挑战条件下出血、未经预防的阴性挑战、保护下阴性、调整关联和反证。'
+            '代码含义：untreated_negative_challenge仅明确未预防且挑战后无出血；'
+            'treated_negative_challenge为预防后无出血；challenge_bleeding为挑战出血；'
+            'adjusted_association为明确调整分析，unadjusted_association为粗比较；'
+            'null_association为阴性关联；source_conflict须同时引用两处冲突；'
+            'subtype_limitation为亚型范围；无法精确定型则study_observation。'
+            '不要用常规人口学占掉核心证据，不混淆流产和出血，不猜子组。'
+            '原句/上下文均已入账；既有限制是待核对线索不是事实真值。'
             '\n主题：' + topic + '\nLIMITATIONS:'
             + json.dumps(audit['known_limitations'], ensure_ascii=False)
             + '\nFACTS:' + json.dumps(compact, ensure_ascii=False)
@@ -206,7 +301,11 @@ async def synthesize_grounded_report(  # noqa: PLR0915 - bounded draft/review co
             if audit_callback:
                 audit_callback(attempts)
             try:
-                draft = await llm.chat_structured(prompt, AtomDraft)
+                plan = await llm.chat_structured(prompt, ObservationPlan)
+                row['plan'] = plan.model_dump()
+                rendered = [render_observation(o, graph) for o in plan.observations]
+                draft = AtomDraft(atoms=[{k: value for k, value in a.items() if k != 'code'}
+                                         for a in rendered])
                 row['atoms'] = [a.model_dump() for a in draft.atoms]
                 scope_ids = {f['claim_id'] for f in candidates}
                 if any(not set(a.claim_ids) <= scope_ids for a in draft.atoms):
@@ -214,14 +313,19 @@ async def synthesize_grounded_report(  # noqa: PLR0915 - bounded draft/review co
                 mechanical, errors = [], []
                 for index, atom in enumerate(draft.atoms):
                     try:
-                        mechanical.append(check_atom(atom.model_dump(), graph))
+                        # Medical prose is an allowlisted template, never model free text.
+                        mechanical.append({'status': 'template_bound',
+                                           'template': rendered[index]['code'],
+                                           'supporting': [c for cid in atom.claim_ids
+                                                          for c in facts[cid]['citations']]})
                     except StageError as exc:
                         errors.append({'index': index, 'reason': str(exc)})
                 if errors:
                     row['mechanical_errors'] = errors
                     raise StageError('report', 'atomic mechanical checks rejected specific items')
                 verification = await llm.chat_structured(
-                    '逐条回查全部原文依赖，判断中文陈述是否准确，特别核对单位/分母/调整项/'
+                    '逐条回查全部原文依赖，判断固定中文类型模板是否适用，模板中的不可推断'
+                    '边界为程序固定规则，不作为额外论文事实。特别核对单位/分母/调整项/'
                     '治疗条件/来源冲突。不能仅相信writer的引用；原文未支持或存在反证则'
                     'contradicted/insufficient。返回每项index、status、supporting_ids、'
                     'counterevidence_ids、reason。source_conflict只有如实并列原值才可接受。'
@@ -285,8 +389,8 @@ async def synthesize_grounded_report(  # noqa: PLR0915 - bounded draft/review co
                            + '\n逐项机械检查：' + json.dumps(
                                row.get('mechanical_errors', []), ensure_ascii=False,
                            )
-                           + '\n只能输出description，无阿拉伯数字；数值由程序原文附证，'
-                           '不要用中文数字改写数值或猜测缺失单位。'
+                           + '\n只能输出observations:[{code,claim_ids}]，不得输出text或数字。'
+                           '类型不能证明时使用study_observation，不改引文、不删除原问题。'
                            + '\n上次待修正原子项：' + json.dumps(
                                row.get('atoms', []), ensure_ascii=False,
                            ))
