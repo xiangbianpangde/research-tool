@@ -40,7 +40,10 @@ def _sleeping_ocr_command() -> str:
     code = (
         "import os, pathlib, sys, time; "
         "root = pathlib.Path(sys.argv[2]); root.mkdir(parents=True, exist_ok=True); "
-        "(root / 'pid').write_text(str(os.getpid()), encoding='ascii'); "
+        # The parent uses existence as readiness: publish only a complete PID.
+        "pending = root / 'pid.pending'; "
+        "pending.write_text(str(os.getpid()), encoding='ascii'); "
+        "pending.replace(root / 'pid'); "
         "time.sleep(5)"
     )
     return f"{shlex.quote(sys.executable)} -c {shlex.quote(code)}"
