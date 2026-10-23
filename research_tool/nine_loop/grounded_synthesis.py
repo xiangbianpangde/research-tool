@@ -52,8 +52,9 @@ class ObservationPlan(BaseModel):
 
 
 _TEMPLATES = {
-    'untreated_negative_challenge': '原文记载未经预防而已挑战未异常出血者；'
-        '这证明阴性挑战存在，但不等于其他挑战或终身安全，原文计数不自动成为下一次挑战概率。',
+    'untreated_negative_challenge': '原文所述未用干预条件下存在阴性挑战；'
+        '所指替代或止血干预仅按原句范围，不能扩大为未用所有预防；'
+        '这证明已挑战阴性存在，但不等于其他挑战或终身安全，也不是下一次挑战概率。',
     'treated_negative_challenge': '原文记载预防治疗条件下的阴性挑战；'
         '不能据此确定未治疗时的天然风险，也不能与未经预防的阴性挑战混为一类。',
     'challenge_bleeding': '原文在下列明确暴露或结局口径中报告出血；'
@@ -96,7 +97,7 @@ def render_observation(observation, graph):
         'adjusted_association': (r'\badjusted\b|multivaria',),
         'unadjusted_association': (r'\bunadjusted\b|\bcrude\b|%|proportion|incidence',),
         'null_association': (r'not associated|no signi(?:fi|ﬁ)cant|not signi(?:fi|ﬁ)c|P\s*>\s*',),
-        'subtype_limitation': (r'hypodys|dysfibrin|hypofibrin|subtype|classified',),
+        'subtype_limitation': (r'hypodys|dysfibrin|hypofibrin|CFD subtype|fibrinogen subtype',),
     }
     if code == 'source_conflict' and len(set(observation.claim_ids)) < 2:
         raise StageError('report', 'source conflict requires competing original evidence')

@@ -12,7 +12,7 @@ def test_writer_selects_typed_evidence_not_unchecked_medical_text():
     graph=graph_for(['32/102 patients had previously undergone surgery or childbirth without preventive treatment and no abnormal bleeding occurred.'])
     plan=ObservationPlan(observations=[{'code':'untreated_negative_challenge','claim_ids':['c0']}])
     rendered=render_observation(plan.observations[0],graph)
-    assert '未经预防' in rendered['text'] and '已挑战' in rendered['text']
+    assert '原文所述未用干预' in rendered['text'] and '已挑战' in rendered['text']
     assert '终身安全' in rendered['text'] and '不' in rendered['text']
     assert '32/102' not in rendered['text']  # numeric statement is rendered from exact evidence separately
 
@@ -97,6 +97,22 @@ def test_original_pdf_ligature_in_nonsignificance_is_recognized_without_changing
     observation=ObservationPlan(observations=[{'code':'null_association','claim_ids':['c0']}]).observations[0]
     assert render_observation(observation,graph)['code']=='null_association'
     assert graph['facts'][0]['text']==text
+
+
+def test_no_replacement_template_does_not_invent_absence_of_all_prophylaxis():
+    graph=graph_for(['Patients underwent surgery without preoperative replacement therapy and no bleeding occurred.'])
+    text=render_observation(ObservationPlan(observations=[{
+        'code':'untreated_negative_challenge','claim_ids':['c0']}]).observations[0],graph)['text']
+    assert '未经预防' not in text
+    assert '所述未用干预' in text
+
+
+def test_bleeding_score_classification_does_not_establish_fibrinogen_subtype():
+    from research_tool.domain.errors import StageError
+    graph=graph_for(['Bleeding sufficient to be classified as score >1 was present in 12/35.'])
+    with pytest.raises(StageError):
+        render_observation(ObservationPlan(observations=[{
+            'code':'subtype_limitation','claim_ids':['c0']}]).observations[0],graph)
 
 
 def test_source_conflict_template_never_guesses_a_subgroup():
