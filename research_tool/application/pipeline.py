@@ -176,7 +176,7 @@ class ResearchPipeline:
             from ..infrastructure.ingest.pdf import _collect_pdfs
             path = Path(self.config.pdf_dir).resolve()
             inputs[str(path)] = {p.name: _hash(p.read_bytes()) for p in _collect_pdfs(path)}
-        fingerprint = _hash(_bytes({"runtime_contract": 12, "topic": self.topic,
+        fingerprint = _hash(_bytes({"runtime_contract": 13, "topic": self.topic,
                                    "config": config, "inputs": inputs}))
         self._state = (self.runtime.load_or_init(fingerprint) if self.config.resume
                        else self.runtime.start_new(fingerprint))
@@ -592,8 +592,9 @@ class ResearchPipeline:
                 pass
         if "merge:100" in self._state["completed_stages"]:
             graph = self._payload("merge:100")["graph"]
-            async for _ in self._step("inspect:100", lambda: self._inspect(
-                graph, inspection, {f["claim_id"] for f in added},
+            from ..nine_loop.research import inspect_context_dependencies
+            async for _ in self._step("inspect:100", lambda: inspect_context_dependencies(
+                graph, inspection, self.config.organizer.min_evidence_per_node,
             )):
                 pass
             inspection.update(self._payload("inspect:100"))

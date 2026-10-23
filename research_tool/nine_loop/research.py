@@ -184,6 +184,30 @@ def _content_families(sources: list[dict[str, Any]]) -> dict[str, str]:
     return families
 
 
+def inspect_context_dependencies(graph, previous, minimum_sources):
+    """Recheck literal additions without closing scientific gaps or re-sending the whole corpus.
+
+    These additions are already present in the same committed source bodies. The
+    atomic report verifier still sees each complete source for semantic review.
+    """
+    validate_graph(graph)
+    findings = {f['finding_id']: f for f in previous['findings']}
+    families = _content_families(graph['sources'])
+    facts = {f['claim_id']: f for f in graph['facts']}
+    for node in graph['nodes']:
+        source_families = {families[c['source_id']] for cid in node['claim_ids']
+                           for c in facts[cid]['citations']}
+        if len(source_families) < minimum_sources:
+            key = 'coverage:' + node['node_id']
+            findings.setdefault(key, {'finding_id': key, 'priority': 'high',
+                                      'description': '上下文主题来源覆盖不足',
+                                      'query': node['title'] + ' independent evidence',
+                                      'claim_ids': node['claim_ids']})
+    return {'findings': [findings[k] for k in sorted(findings)], 'resolutions': [],
+            'context_inspection': 'exact_same_source_dependencies_only',
+            'scientific_gaps_closed': 0}
+
+
 def plan_targeted(inspection: dict[str, Any], max_queries: int = 8) -> list[str]:
     """Spend limited search slots by severity, fairly across semantic/coverage gaps."""
     if max_queries <= 0:
