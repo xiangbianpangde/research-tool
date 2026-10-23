@@ -776,6 +776,11 @@ class ResearchPipeline:
         verdict = result.verdict if result.verdict in {
             "STOP_SUCCESS", "STOP_ERROR", "STOP_BUDGET", "STOP_CANCELLED"
         } else "STOP_ERROR"
+        if verdict == 'STOP_SUCCESS' and result.report_result is not None:
+            committed = {key.split(':')[0] for key in self._state.get('completed_stages', {})}
+            result.stages_completed = [stage for stage in NINE_STAGES if stage in committed]
+            result.stages_skipped = [stage for stage in result.stages_skipped
+                                     if stage not in committed]
         canonical_files = self._canonical_final_files(
             successful=verdict == "STOP_SUCCESS" and result.report_result is not None
         )

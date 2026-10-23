@@ -43,3 +43,8 @@ async def test_pre_report_source_exact_pipeline_records_full_evidence_and_resume
     restored = await ResearchPipeline(cfg, llm=no_calls).run()
     assert restored.verdict == 'STOP_SUCCESS'
     assert restored.report_result.report_path.read_bytes() == result.report_result.report_path.read_bytes()
+    assert c.index()['status'] == 'success'
+    assert c.trace('CURRENT')['status'] == 'success'
+    restored_summary = json.loads(restored.run_summary_path.read_text())
+    assert 'merge' in restored_summary['stages_completed']
+    assert 'merge' not in restored_summary['stages_skipped']
