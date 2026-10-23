@@ -16,7 +16,7 @@ async def test_approving_verifier_cannot_make_a_global_absence_statement_pass():
         if schema.__name__ == 'ObservationChoice':
             return schema.model_validate({'choice_ids':['C1'], 'text':'原文未报告调整变量。'})
         if schema.__name__ == 'AtomChecks':
-            return schema(checks=[{'index': 0, 'status': 'supported', 'supporting_ids': ['c0'],
+            return schema(checks=[{'index': 0, 'status': 'supported', 'supporting_ids': ['E1'],
                                    'counterevidence_ids': [], 'reason': 'wrongly approves'}])
         raise AssertionError(schema.__name__)
     audit = {'selected_claim_ids': ['c0'], 'known_limitations': []}
@@ -44,12 +44,12 @@ async def test_verifier_receives_unselected_and_nonclaim_original_text():
             import json
             choices=json.loads(prompt.split('\nCHOICES:',1)[1].split('\nFULL_SOURCE:',1)[0])
             return schema(choice_ids=[next(c['choice_id'] for c in choices
-                                          if c['code']=='study_observation' and c['claim_ids']==['c0'])])
+                                          if c['code']=='study_observation' and c['claim_ids']==['E1'])])
         if schema.__name__ == 'AtomChecks':
             seen.append(prompt)
             assert 'adjusted for age and parity' in prompt
             assert 'source context remains relevant' in prompt
-            return schema(checks=[{'index': 0, 'status': 'supported', 'supporting_ids': ['c0'],
+            return schema(checks=[{'index': 0, 'status': 'supported', 'supporting_ids': ['E1'],
                                    'counterevidence_ids': [], 'reason': 'Exact effect, no risk ratio claim.'}])
         raise AssertionError(schema.__name__)
     audit = {'selected_claim_ids': ['c0'], 'known_limitations': [], 'coverage': [],

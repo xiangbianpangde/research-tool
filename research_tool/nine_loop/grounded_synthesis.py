@@ -136,6 +136,12 @@ def render_observation(observation, graph):
                    and not re.search(negative_outcome, unit, re.I)
                    and not re.search(excluded, unit, re.I) for unit in matches):
             raise StageError('report', 'positive bleeding event needs an affirmative occurrence')
+    if (code == 'unadjusted_association'
+            and (re.search(r'\b(?:OR|HR|RR)\b', evidence)
+                 or re.search(r'odds ratio|hazard ratio|relative risk|risk ratio',
+                              evidence, re.I))):
+        if not re.search(r'\bunadjusted\b|\bcrude\b|\bunivaria\w*\b', evidence, re.I):
+            raise StageError('report', 'effect cannot be called unadjusted without explicit scope')
     if code == 'adjusted_association' and not re.search(r'\badjusted\b|multivaria', evidence, re.I):
         raise StageError('report', 'adjusted type cannot use unadjusted wording')
     return {'kind': 'description', 'text': _TEMPLATES[code],
@@ -326,7 +332,9 @@ async def synthesize_grounded_report(  # noqa: PLR0915 - bounded draft/review co
         by_source.setdefault(sid, []).append(facts[cid])
     atoms, traces, attempts = [], [], []
     for sid, candidates in sorted(by_source.items()):
-        compact = [{'claim_id': f['claim_id'], 'text': f['text']} for f in candidates]
+        to_short = {f['claim_id']: f'E{i}' for i, f in enumerate(candidates, 1)}
+        to_original = {short: cid for cid, short in to_short.items()}
+        compact = [{'claim_id': to_short[f['claim_id']], 'text': f['text']} for f in candidates]
         choices = build_observation_choices(candidates, graph)
         choice_map = {c['choice_id']: c for c in choices}
         complete_source = [b for b in bundle['source_blocks'] if b['source_id'] == sid]
@@ -346,7 +354,8 @@ async def synthesize_grounded_report(  # noqa: PLR0915 - bounded draft/review co
             + json.dumps(audit['known_limitations'], ensure_ascii=False)
             + '\nFACTS:' + json.dumps(compact, ensure_ascii=False)
             + '\nCHOICES:' + json.dumps(
-                [{k: v for k, v in c.items() if k != 'evidence_text'} for c in choices],
+                [{'choice_id': c['choice_id'], 'code': c['code'],
+                  'claim_ids': [to_short[cid] for cid in c['claim_ids']]} for c in choices],
                 ensure_ascii=False,
             )
             + '\nFULL_SOURCE:' + json.dumps(complete_source, ensure_ascii=False)
@@ -410,12 +419,20 @@ async def synthesize_grounded_report(  # noqa: PLR0915 - bounded draft/review co
                     'contradicted/insufficient。返回每项index、status、supporting_ids、'
                     'counterevidence_ids、reason。source_conflict只有如实并列原值才可接受。'
                     '\nATOMS:' + json.dumps(
-                        [a.model_dump() for a in draft.atoms], ensure_ascii=False,
+                        [{**a.model_dump(), 'claim_ids': [to_short[cid] for cid in a.claim_ids]}
+                         for a in draft.atoms], ensure_ascii=False,
                     )
                     + '\nCOMPLETE_SOURCE_DEPENDENCIES:' + json.dumps(compact, ensure_ascii=False)
                     + '\nFULL_SOURCE:' + json.dumps(complete_source, ensure_ascii=False),
                     AtomChecks,
                 )
+                for check in verification.checks:
+                    ids = check.supporting_ids + check.counterevidence_ids
+                    if not set(ids) <= set(to_original):
+                        raise StageError('report', 'verifier returned an unknown short evidence ID')
+                    check.supporting_ids = [to_original[cid] for cid in check.supporting_ids]
+                    check.counterevidence_ids = [to_original[cid]
+                                                 for cid in check.counterevidence_ids]
                 row['checks'] = verification.model_dump()
                 if (len(verification.checks) != len(draft.atoms)
                         or {c.index for c in verification.checks} != set(range(len(draft.atoms)))):
@@ -472,11 +489,15 @@ async def synthesize_grounded_report(  # noqa: PLR0915 - bounded draft/review co
                            + '\n只能输出choice_ids，从CHOICES选择合法ID，不得另配类型/原句。'
                            '保留上次选中全部claim_ids，仅可调整同一证据的类型，不删换证据。'
                            + '\n语义复核结果：' + json.dumps(
-                               row.get('checks', {}), ensure_ascii=False,
+                               [{**c, 'supporting_ids': [to_short.get(cid, cid)
+                                                        for cid in c.get('supporting_ids', [])],
+                                 'counterevidence_ids': [
+                                     to_short.get(cid, cid)
+                                     for cid in c.get('counterevidence_ids', [])]}
+                                for c in row.get('checks', {}).get('checks', [])],
+                               ensure_ascii=False,
                            )
-                           + '\n上次待修正原子项：' + json.dumps(
-                               row.get('plan', row.get('atoms', [])), ensure_ascii=False,
-                           ))
+                           + '\n上次选择：' + json.dumps(row.get('choice_ids', [])))
         else:
             raise last_error or StageError('report', 'atomic synthesis failed')
     sources = {s['source_id']: s for s in graph['sources']}

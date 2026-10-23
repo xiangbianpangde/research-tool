@@ -19,7 +19,7 @@ async def test_chinese_observation_schema_rejects_numeric_prose_and_report_shows
             seen.append(schema.__name__)
             return schema(choice_ids=[next(c['choice_id'] for c in choices if c['code']=='adjusted_association')])
         if schema.__name__ == 'AtomChecks':
-            return schema(checks=[{'index':0,'status':'supported','supporting_ids':['c0'],
+            return schema(checks=[{'index':0,'status':'supported','supporting_ids':['E1'],
                                    'counterevidence_ids':[],'reason':'Faithful bounded interpretation.'}])
         raise AssertionError(schema.__name__)
     audit={'selected_claim_ids':['c0'],'known_limitations':[],'coverage':[],
