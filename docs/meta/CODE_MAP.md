@@ -47,6 +47,6 @@ WebUI、research ui 命令及 Gradio 安装项已移除。
 
 分层报告 `final/evidence-audit.json`保留selected/unselected原始claim IDs、节点内容家族覆盖、未解决finding、显式known_limitations及“不等于独立研究”的边界；与全部final文件共同受summary哈希校验。核心选材有maxItems和最多一次纠正，模型短编号映回ledger ID；邻近原文与限制仅作反向审核，不把选材遗漏解释成论文未报告。content_filter在抽取/阶段即停不重试。`run-record.json`字段不扩展，summary只附report_contract/strict_evidence_complete/unresolved_finding_count。
 
-默认model_support仍使用section_facts，不把其称为全文语义保证。显式source_grounded已接snapshot/full-source读取、现有merge/inspect/qgate内部提交、中文原子正反证与独立review；source_exact仅窄原文模式。生产者/消费者字段与final集合互操作由真实九段测试验证。P3真实医学终验状态从STATUS读取，不能由代码或离线绿灯推定。
+默认model_support仍使用section_facts，不把其称为全文语义保证。显式source_grounded已接snapshot/full-source读取、现有merge/inspect/qgate内部提交、程序验证的类型/原句闭集choice选择、固定中文边界及数值原文渲染、源内E短引用核验后映回不可变ID，以及独立review；source_exact仅窄原文模式。required_source_evidence锁定必带原句及任务方冲突候选，不允许模型裁掉。生产者/消费者字段与final集合互操作由真实九段测试验证。P3真实医学终验状态从STATUS读取，不能由代码或离线绿灯推定。
 
 历史来源和边界见 docs/plan/NINE-STAGE-BASELINE.json；当前进度及可复现实验从 STATUS.md 进入。

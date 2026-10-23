@@ -2,7 +2,11 @@
 
 > 对应方案：[2026-10-18-researchctl-integration-plan.md](2026-10-18-researchctl-integration-plan.md)
 
-## 2026-10-23真实产物复核补充
+## 2026-10-23成文前证据闭环验收
+
+真实生产者/消费者契约漂移已在reader341d044修复，成文前snapshot/full body、独立review采用、闭集中文类型/原值展示已实施；tool最终runtime19/6dcbd99、恢复投影eb9f232。新独立run d672f7fb457b4d4eaa00ba4f8c60847a在冻结10全文范围通过机器/文件/引用/Agent原文回读及检索采用/零模型恢复验收。107finding/28局限未清零，不包含新检索覆盖或人类临床验收。完整证据见[当前实施与验收结果](2026-10-23-researchctl-grounded-report-repair.md)。
+
+## 2026-10-23真实产物复核补充（实施前历史）
 
 下列M0–M5勾选保留当时限定实现/fixture验收记录，**不表示当前医学真实输出已互操作通过，更不表示医学语义正确**。本次只读复核发现：主文字系统CLI与adapter工作树版本不同，生产citation_sources缺adapter要求的title，summary/record文件集合语义也不同；当前报告生成没有成文前ResearchCTL回查。实际失败证据、P0合同修复与成文前证据闭环见[2026-10-23根因与修复方案](2026-10-23-researchctl-grounded-report-repair.md)。新P0–P3待实施，不追溯修改旧测试结果。
 

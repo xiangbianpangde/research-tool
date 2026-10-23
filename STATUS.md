@@ -1,6 +1,21 @@
 # research-tool 当前状态
 
-## 当前实施：ResearchCTL成文前证据与中文原子报告（2026-10-23）
+## 当前验收：P0–P3成文前证据与自动报告（2026-10-23）
+
+**P0–P2工程实现与回归通过；P3在“冻结10篇公开全文的自动综合＋Agent原文审校”范围通过。** 新文献覆盖、人类临床/统计专家验收及个体风险模型有效性不在此次通过范围。上游benchmark三项既有失败仍独立披露，不用本轮绿灯覆盖。
+
+- 最终独立run `d672f7fb457b4d4eaa00ba4f8c60847a`：STOP_SUCCESS，10source/2070facts/119nodes；60固定中文类型解读、27条17组必需原句，共147报告claim。125final SHA及所有source/span/claim关系精确；报告SHA`1952b47401b0b7113aaddaed9dea83531844097dd7d4c722b0bfc950660ce585`。
+- 107个未解决finding、28条研究局限仍直接展示，strict_evidence_complete=false；Shapiro/Miesbach/Casini人数/算术冲突与PRO-RBDD同库、Fibrinogest转述归属不自动闭合。
+- 独立Agent原文回读60项记录在医学工作区`runs/grounded-report-20261023-final-v3/医学原文复核.md`及medical-source-review.json，review绑定run/report/已提交snapshot SHA；Agent采用从fail_closed变success，human_clinical仍fail_closed。此前机器success `cb3926f...`、`fcaa43b...`均保持review rejected，旧失败不改。
+- 真实零模型resume暴露内部merge100已提交却summary未列的投影缺陷；红绿后`eb9f232`从实际runtime归一成功完成阶段，恢复报告hash不变，index/trace/sources/reconcile/Agent采用重新通过。错误汇总先保存在本run恢复证据目录。
+- 最新代码全量 **1310 passed / 3 skipped**、Ruff/diff/uv lock离线/shell通过；现有Pi审查最终0 findings。reader layout/body11项及legacy443checks通过，上游bench159通过/3既有失败，三失败在未改HEAD归档复现，未改断言/旧attestation。
+- 双仓feature分支分别`feat/researchctl-grounded-report-20261023`与`feat/grounded-evidence-20261023`；实现/修复均逐批提交推送，reader`341d044`、tool至`eb9f232`。主文字系统dirty树、密钥/锁/CI/归档/医学原件未改，未推main、未打release/tag。
+
+成果入口：`/Users/xbpd/Projects/纤维蛋白预测/runs/grounded-report-20261023-final-v3/README.md`；工具执行/红绿/审查证据`research-output/grounded-report-implementation-20261023/`。本轮最终`max_rounds=0`，是冻结10篇语料的报告验收，不称最新系统检索；动态PubMed补搜empty_extraction失败保留。
+
+以下保留同日实施过程快照，涉及“尚待P3”等措辞不覆盖上述最终范围状态。
+
+## 历史过程：ResearchCTL成文前证据与中文原子报告（2026-10-23）
 
 用户已授权实施P0–P3。开发分支research-tool `feat/researchctl-grounded-report-20261023`（基线dbeb57a），ResearchCTL干净adapter工作树`feat/grounded-evidence-20261023`（基线553b3ab）；主文字系统dirty树不写。P0初4项真实producer/consumer红后绿，修复citation title兼容与summary/record/实际final集合；独立review绑定run/report/已提交evidence，采用查询不回退旧success，不宣称临床许可。
 

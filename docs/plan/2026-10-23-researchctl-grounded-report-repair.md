@@ -1,10 +1,20 @@
 # 自动报告医学语义失真：根因与ResearchCTL修复方案
 
-> 日期：2026-10-23。状态：**根因已核验；下述P0–P3为待实施方案，不是已经修复或医学验收通过。**
+> 日期：2026-10-23。当前状态：**P0–P2实现与回归通过；P3在冻结10篇公开全文自动综合＋Agent原文审校范围通过。** 新检索覆盖、人类临床专家验收和临床预测有效性不在本次通过范围。下文根因与P0–P3设计保留为实施前规范，实际实现/验收见本节及STATUS。
 > 范围：research-tool报告证据消费、ResearchCTL接口与验收合同。不新增搜索引擎、不重建向量RAG、不改历史自动成果。
 > 开发入口：[Agent.md](../../Agent.md)；前序[接入方案](2026-10-18-researchctl-integration-plan.md)及[路线图](2026-10-18-researchctl-integration-roadmap.md)。
 
-## 1. 结论与目标
+## 0. 实施与验收结果
+
+- reader `341d044`：真实producer/consumer文件集合和title合同、报告采用review及成文前evidence-snapshot/v1；独立feature分支已推送，未改主文字系统dirty工作。
+- tool首批`054768d`后由真实失败逐项修复：最终runtime19/`6dcbd99`，恢复投影`eb9f232`；writer不自由生成医学结论，只选程序验证的类型/原句闭集choice IDs，verifier用源内短ID后映回不可变账本。
+- 必需原文由required_source_evidence显式绑定locator/唯一quote/fact，缺失/重复/歧义拒绝；27句17组在最终正文直接展示。模型修复不能删除或换掉所选证据，数值由程序逐字原文展示；补上下文走精确入账/CAS及同源确定性重检，科学缺口不因此关闭。
+- 最终独立run`d672f7fb457b4d4eaa00ba4f8c60847a`：STOP_SUCCESS，10源/2070facts/119nodes、60项中文观察+27必需句、147报告claim、125final哈希，报告SHA`1952b47401b0b7113aaddaed9dea83531844097dd7d4c722b0bfc950660ce585`。Agent逐原文60项审校通过并绑定review，采用查询成功；human_clinical拒绝。107finding/28局限保持。
+- 零模型真实resume后report哈希未变，ResearchCTL index/trace/sources/reconcile/采用门禁通过。全量1310 passed/3 skipped；上游11layout/body、443legacy checks通过，159bench/其他通过及3基线失败分别记录；不修改旧benchmark证据让其变绿。
+- P3明确冻结10篇全文、max_rounds0。动态新PubMed正文empty_extraction失败保留，不声称新检索覆盖或最新系统综述。旧STOP_ERROR/STOP_BUDGET、两份机器成功但医学rejected均不追溯改通过。
+- 成果与逐项回读在医学工作区`runs/grounded-report-20261023-final-v3/`；红绿/运行/审查证据`research-output/grounded-report-implementation-20261023/`，仅本机ignored保存，不提交论文或模型凭据。
+
+## 1. 原始根因结论与目标（实施前快照）
 
 **根本原因不是缺少本地论文，也不是引文哈希错误，而是把“当前选材中没有”误当成“原论文没有”，再用相同的局部证据集自证支持。ResearchCTL已接入事后运行审计，却未接入成文前取证；其当前部署、输入合同和查询范围也不足以承担完整原文反查。**
 
@@ -97,7 +107,7 @@ adapter的`test_research_tool_layout.py`明确自造fixture、不消费producer�
 
 ![现状的事后检索断点与拟议的成文前证据闭环](2026-10-23-researchctl-grounded-report-flow.png)
 
-图中“拟议”均待实施。只保留原九阶段：证据准备属于inspect/targeted/merge和report内部，不另建第十个正式阶段或第二调度器。
+图中“拟议”表示实施前目标架构；当前实现/验收见§0。只保留原九阶段：证据准备属于inspect/targeted/merge和report内部，不另建第十个正式阶段或第二调度器。
 
 ### P0：先修互操作与“采用状态”，不动医学结论
 
@@ -176,9 +186,9 @@ C01必须有生产者和消费者真实代码交互，C04用可控错误模型�
 - 回滚用本批次提交的`git revert`并保留证据，需在无冲突前提下执行；不reset/clean/强推。不更改旧final/manifest来适配新reader；兼容旧数据须由显式只读版本reader处理。
 - 推送只到fix/feature分支，main经PR与验收后再合入。每个可验证批次及时commit/push，不再积累跨任务未提交修改。
 
-## 7. 本轮验证与唯一下一步
+## 7. 方案初次交付时的验证（历史，不覆盖§0）
 
-已核验根因、生成方案并完成版本检查点；未实施P0–P3，未重新调用被过滤的调研端点，自动医学终验仍失败。
+以下保留方案交付时状态：当时已核验根因并保存版本检查点，尚未实施P0–P3，也未重调过滤端点。之后用户确认服务可正常受理并授权全部实施，最终验收以§0与STATUS为准。
 
 额外修复的推送阻塞：OCR测试以PID文件存在作为就绪，`write_text`先创建空文件后写入，父进程可能读到空串。延迟发布探针确定性复现；改为写同目录临时文件再rename发布，原取消/回收/无存活子进程断言不变。18项相关通过，真实推送钩子1214 passed/3 skipped，失败日志保留。
 
