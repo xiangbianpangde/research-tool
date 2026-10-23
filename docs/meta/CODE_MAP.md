@@ -22,7 +22,7 @@ WebUI、research ui 命令及 Gradio 安装项已移除。
 | application/pipeline.py | 唯一九阶段调度、恢复、取消、预算和摘要 |
 | nine_loop/runtime_state.py | macOS/POSIX fcntl 文件锁、原子写和 CAS |
 | nine_loop/evidence.py | 来源正文哈希、偏移及逐字引用核验 |
-| nine_loop/knowledge_min.py | 确定性事实/来源/主题证据图 |
+| nine_loop/knowledge_min.py | 精确原文事实/来源与topic原字符串单层分桶；当前无临床关系边 |
 | nine_loop/merge_min.py | 有摘要前置条件的无损增量合并 |
 | nine_loop/research.py | 检视、缺口解决记录、按优先级与finding类型公平分配补搜查询、质量门控、报告支持核验 |
 | infrastructure/stages/collector.py、fetcher.py | 搜索与真实正文抓取 |
@@ -48,5 +48,7 @@ WebUI、research ui 命令及 Gradio 安装项已移除。
 分层报告 `final/evidence-audit.json`保留selected/unselected原始claim IDs、节点内容家族覆盖、未解决finding、显式known_limitations及“不等于独立研究”的边界；与全部final文件共同受summary哈希校验。核心选材有maxItems和最多一次纠正，模型短编号映回ledger ID；邻近原文与限制仅作反向审核，不把选材遗漏解释成论文未报告。content_filter在抽取/阶段即停不重试。`run-record.json`字段不扩展，summary只附report_contract/strict_evidence_complete/unresolved_finding_count。
 
 默认model_support仍使用section_facts，不把其称为全文语义保证。显式source_grounded已接snapshot/full-source读取、现有merge/inspect/qgate内部提交、程序验证的类型/原句闭集choice选择、固定中文边界及数值原文渲染、源内E短引用核验后映回不可变ID，以及独立review；source_exact仅窄原文模式。required_source_evidence锁定必带原句及任务方冲突候选，不允许模型裁掉。生产者/消费者字段与final集合互操作由真实九段测试验证。P3真实医学终验状态从STATUS读取，不能由代码或离线绿灯推定。
+
+当前extractor的relations/triples只是候选产物，只有facts及documents进入正式knowledge链；不能把974条无span的抽取关系当已验证临床网络。[问题处置与网络设计](../plan/2026-10-23-finding-disposition-design.md)规定拟议Observation/Issue/Constraint、reviewed裁决及网络scope/队列关系，当前只设计，不是已有执行能力。
 
 历史来源和边界见 docs/plan/NINE-STAGE-BASELINE.json；当前进度及可复现实验从 STATUS.md 进入。

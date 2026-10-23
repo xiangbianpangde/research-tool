@@ -50,6 +50,8 @@ scripts/         # 可复用脚本
 
 引用覆盖率 1.0 表示报告段落绑定了通过原文跨度校验的事实并通过模型支持检查。标题和正文均接受支持核验。模型可能判断错误；这不是语义正确性的形式化证明或调研质量评分。
 
+当前knowledge产物是可核验原文事实＋topic分桶，不是完整临床关系/因果网络。107finding（97coverage＋10模型问题）与28局限的只读审计已发现主题碎片、关系未接线和统一三源规则失配。[知识网络与问题处置设计](docs/plan/2026-10-23-finding-disposition-design.md)提出双线修正，**尚未实施新处置状态机或改变任何原问题状态**。
+
 真实医学回读曾发现“未选入报告的证据被误称原文未报告”。[根因与修复计划](docs/plan/2026-10-23-researchctl-grounded-report-repair.md)记录原始失败。显式`reporter.grounding_policy: source_grounded`现接入成文前已提交证据快照、ResearchCTL全量facts/完整正文反查、精确上下文入账后CAS合并/重检，以及中文原子论断的正反证检查；它仍不是任意医学语义正确或人类临床验收保证。默认model_support不宣称拥有新保证。
 
 ## 安装与配置

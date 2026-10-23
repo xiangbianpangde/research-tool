@@ -4,6 +4,10 @@
 > 范围：research-tool报告证据消费、ResearchCTL接口与验收合同。不新增搜索引擎、不重建向量RAG、不改历史自动成果。
 > 开发入口：[Agent.md](../../Agent.md)；前序[接入方案](2026-10-18-researchctl-integration-plan.md)及[路线图](2026-10-18-researchctl-integration-roadmap.md)。
 
+## 后续问题处置设计（未实施）
+
+本轮通过范围不意味着现有knowledge已经是完整临床关系网络，或107finding/28局限可忽略。后续[知识网络审计与问题处置机制设计](2026-10-23-finding-disposition-design.md)保留135个原观察，区分网络结构/覆盖指标、报告纠错、真科学缺证、持续约束与历史；本轮不改原报告、问题状态或生产行为。
+
 ## 0. 实施与验收结果
 
 - reader `341d044`：真实producer/consumer文件集合和title合同、报告采用review及成文前evidence-snapshot/v1；独立feature分支已推送，未改主文字系统dirty工作。

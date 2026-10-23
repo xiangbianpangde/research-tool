@@ -1,6 +1,16 @@
 # research-tool 当前状态
 
-## 当前验收：P0–P3成文前证据与自动报告（2026-10-23）
+## 当前设计：知识网络审计与问题处置（2026-10-23）
+
+用户质疑107finding/28局限是否暴露网络问题，并明确先设计处置机制。已核源码和原run：当前正式graph仅是counts/facts/nodes/sources的原文账本＋topic原字符串分桶，无显式临床scope/研究队列/正反证边；974条抽取relations无精确span且未进入正式建图链，不能直接提升为可信关系。119节点47个单fact、单一归属；伦理/结论/strengths也按三内容家族评估，且出血风险/诊断准确性等实际成员含义不准。因此确有组织、关系和度量能力缺口，不是107处错误医学知识，也不只是缺论文。
+
+设计[问题处置与网络修正v1](docs/plan/2026-10-23-finding-disposition-design.md)分两线：原观察→原子问题/持续约束/历史，提案→证据review→单HEAD/CAS裁决；网络侧逐claim对齐主题、研究/队列/转述/上下文、scope证据关系及用途特定coverage。已有原文纠错允许关闭表述问题而不伪造新claim；缺数据/不可识别不计resolved；旧raw verdict与新reviewed评估并列，硬引用/来源失败不可豁免。
+
+本轮医学工作区`runs/finding-disposition-design-20261023/`保留107finding＋28局限逐记录原文/hash审计，97coverage的238条成员均已读取，10模型问题提出22个设计parts。全部`review_only=true/decision_applied=false`，没有关闭、迁移、改阈值或修改生产代码。源run173个非派生文件前后SHA一致。持续约束、历史保留、原文冲突、材料/数据任务分别处理，不以计数清零为目标。
+
+当前仅设计与审计交付，**新状态机/网络映射/事务/命令未实施，I1–I4尚未开始**。所有新并发/崩溃/门禁反例仅是设计验收要求，不声称已测试。版本分支`docs/finding-disposition-design-20261023`基线acf6ff5；外部reader及dirty文字系统主树不写。证据`research-output/finding-disposition-design-20261023/`。
+
+## 已有验收：P0–P3成文前证据与自动报告（2026-10-23）
 
 **P0–P2工程实现与回归通过；P3在“冻结10篇公开全文的自动综合＋Agent原文审校”范围通过。** 新文献覆盖、人类临床/统计专家验收及个体风险模型有效性不在此次通过范围。上游benchmark三项既有失败仍独立披露，不用本轮绿灯覆盖。
 
