@@ -593,9 +593,20 @@ def build_retrieval_manifest(topic_root: Path, summary: Mapping[str, Any]) -> di
             artifact_hashes[name] = _hash_file_manifest(path)
         citation_sources = _citation_sources(root, run_root, source_records)
 
+    contracts = {}
+    if 'report' in record['runtime']['completed_stages']:
+        entry = record['runtime']['completed_stages']['report']
+        envelope = _read_json(root / entry['artifact_path'])
+        evaluation = envelope['result'].get('issue_evaluation')
+        if evaluation is not None:
+            if evaluation.get('schema') != 'issue-evaluation/v1':
+                raise ValueError('unknown issue evaluation contract')
+            contracts = {'required_contracts': ['issue-evaluation/v1'],
+                         'issue_head_sha256': evaluation['issue_head_sha256']}
     return {
-        "schema": RETRIEVAL_MANIFEST_VERSION,
-        "schema_version": RETRIEVAL_MANIFEST_VERSION,
+        **contracts,
+        "schema": 2 if contracts else RETRIEVAL_MANIFEST_VERSION,
+        "schema_version": 2 if contracts else RETRIEVAL_MANIFEST_VERSION,
         "producer": "research-tool",
         "topic": record["topic"],
         "topic_slug": record["topic_slug"],

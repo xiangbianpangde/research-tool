@@ -165,6 +165,32 @@ class ResearchPipeline:
                 python_executable=cfg.python_executable,
             ).reader_identity()
             config["grounding_reader"] = self._grounding_reader_identity
+        self._issue_snapshot = None
+        # Default raw is exactly the pre-disposition runtime-19 identity.
+        if self.config.disposition.policy == 'raw':
+            config.pop('disposition', None)
+        if self.config.disposition.policy == 'reviewed':
+            from ..infrastructure.disposition import Registry
+            from ..infrastructure.retrieval import ResearchCtlClient
+            reader = self.config.retrieval
+            client = ResearchCtlClient(
+                self.root, module_root=reader.module_root or reader.researchctl_root,
+                python_executable=reader.python_executable, timeout_sec=reader.timeout_sec,
+            )
+            self._issue_reader_identity = client.reader_identity()
+            capabilities = client.capabilities()
+            if (capabilities.get('status') != 'success'
+                    or 'issue-evaluation/v1' not in capabilities.get('contracts', [])):
+                raise StageError('collect', 'ResearchCTL issue-evaluation/v1 capability required')
+            config['issue_reader'] = self._issue_reader_identity
+            cfg = self.config.disposition
+            self._issue_snapshot = Registry(cfg.registry_root).snapshot(
+                expected_head=cfg.expected_head_sha256, require_fresh=True,
+            )
+            config['issue_registry_identity'] = {
+                'registry_id': self._issue_snapshot['registry_id'],
+                'head_sha256': self._issue_snapshot['head_sha256'],
+            }
         inputs = {}
         if self.config.input_dir:
             path = Path(self.config.input_dir).resolve()
@@ -214,6 +240,15 @@ class ResearchPipeline:
                                     max_total=self.config.nine_loop.max_total_findings,
                                     evidence_policy=self.config.reporter.evidence_policy,
                                     final_round=round_no == self.config.nine_loop.max_rounds)
+            if self.config.disposition.policy == 'reviewed':
+                evaluation = self._evaluate_issues(graph, inspection)
+                from ..infrastructure.disposition.evaluation import reviewed_gate
+                decision = reviewed_gate(
+                    decision, evaluation, max_high=self.config.nine_loop.max_high_findings,
+                    max_total=self.config.nine_loop.max_total_findings,
+                    evidence_policy=self.config.reporter.evidence_policy,
+                    final_round=round_no == self.config.nine_loop.max_rounds,
+                )
             async for event in self._step(f"qgate:{round_no}", lambda: decision):
                 yield event
             decision = self._payload(f"qgate:{round_no}")
@@ -468,6 +503,10 @@ class ResearchPipeline:
     async def _targeted(self, inspection: dict[str, Any], round_no: int) -> dict[str, Any]:
         queries = plan_targeted(inspection)
         if not queries:
+            if self.config.disposition.policy == 'reviewed':
+                return {'queries': [], 'sources': [], 'facts': [],
+                        'warnings': ['处置账本仍有未决要求；本轮没有可执行补搜查询，未关闭问题'],
+                        'output_files': []}
             raise StageError("targeted", "闸门要求补搜但没有有效查询")
         work = self.run_root / f"targeted-{round_no}"
         collector = Collector(self.config.collector)
@@ -500,6 +539,20 @@ class ResearchPipeline:
     def _merge(self, graph: dict[str, Any], delta: dict[str, Any]) -> dict[str, Any]:
         return merge_evidence_graph(graph, delta, graph_digest(graph))
 
+    def _evaluate_issues(self, graph, inspection):
+        from ..infrastructure.disposition.evaluation import evaluate_registry
+        from ..infrastructure.retrieval import ResearchCtlClient
+        reader = self.config.retrieval
+        current = ResearchCtlClient(
+            self.root, module_root=reader.module_root or reader.researchctl_root,
+            python_executable=reader.python_executable,
+        ).reader_identity()
+        if current != self._issue_reader_identity:
+            raise StageError('qgate', 'issue reader changed during research run')
+        cfg = self.config.disposition
+        return evaluate_registry(cfg.registry_root, cfg.expected_head_sha256, inspection, graph,
+                                 known_limitations=self.config.reporter.known_limitations)
+
     async def _report(
         self, graph: dict[str, Any], inspection: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
@@ -521,6 +574,43 @@ class ResearchPipeline:
                 self.run_root / 'grounding-attempts.json', _bytes({'attempts': rows}),
             ),
         )
+        if self.config.disposition.policy == 'reviewed':
+            issue_view = self._evaluate_issues(graph, inspection)
+            issue_text = ('\n## 问题处置（显式reviewed合同）\n\n'
+                          '原始finding/局限保持不变，处置完成不等于科学问题解决。\n\n'
+                          f"活动必需问题：{issue_view['required_unresolved_total']}；"
+                          f"已处置：{issue_view['counts']['administratively_disposed']}；"
+                          f"科学已回答：{issue_view['counts']['scientifically_answered']}。\n\n"
+                          '[完整处置版本与未决问题](issue-evaluation.json)\n')
+            if len(report['markdown'] + issue_text) > self.config.reporter.max_length:
+                raise StageError('report', 'issue disclosure exceeds report budget; no truncation')
+            report['markdown'] += issue_text
+            report['content_sha256'] = _hash(report['markdown'].encode())
+            report['issue_evaluation'] = issue_view
+            from ..infrastructure.disposition.records import digest
+            inspect_keys = [key for key in self._state['completed_stages']
+                            if key.startswith('inspect:')]
+            inspect_key = max(inspect_keys, key=lambda key: int(key.split(':')[1]))
+            inspect_entry = self._state['completed_stages'][inspect_key]
+            committed_inspection = self._payload(inspect_key)
+            if (committed_inspection.get('findings') != inspection['findings']
+                    or digest(committed_inspection) != digest(inspection)):
+                raise StageError('report', 'reviewed inspection is not latest committed identity')
+            report['issue_inputs'] = {
+                'schema': 'issue-evaluation-inputs/v1',
+                'inspection_stage_key': inspect_key,
+                'inspection_artifact_sha256': inspect_entry['artifact_digest'],
+                'inspection_sha256': digest(inspection),
+                'raw_findings': inspection['findings'],
+                'known_limitations': self.config.reporter.known_limitations,
+            }
+            if 'evidence_audit' not in report:
+                report['evidence_audit'] = {
+                    'contract': 'issue_evidence_inputs/v1',
+                    'strict_evidence_complete': not inspection['findings'],
+                    'unresolved_findings': inspection['findings'],
+                    'known_limitations': self.config.reporter.known_limitations,
+                }
         final = self.run_root / "final"
         files = materialize_graph(graph, final, self.topic)
         files += [final / "tree" / "00-主表.md", final / "tree" / "knowledge.json"]
@@ -531,6 +621,10 @@ class ResearchPipeline:
             audit_file = final / "evidence-audit.json"
             _atomic(audit_file, _bytes(report["evidence_audit"]))
             files.append(audit_file)
+        if 'issue_evaluation' in report:
+            issue_file = final / 'issue-evaluation.json'
+            _atomic(issue_file, _bytes(report['issue_evaluation']))
+            files.append(issue_file)
         if "grounding_audit" in report:
             grounding_file = final / "grounding-audit.json"
             _atomic(grounding_file, _bytes(report["grounding_audit"]))
@@ -829,6 +923,12 @@ class ResearchPipeline:
                     strict_evidence_complete=audit["strict_evidence_complete"],
                     unresolved_finding_count=len(audit["unresolved_findings"]),
                 )
+        if (self.config.disposition.policy == 'reviewed'
+                and 'report' in self._state.get('completed_stages', {})):
+            evaluation = self._payload('report').get('issue_evaluation')
+            if evaluation is not None:
+                summary.update(required_contracts=['issue-evaluation/v1'],
+                               issue_head_sha256=evaluation['issue_head_sha256'])
         if self._state.get("run_id"):
             failures = [metric for metric in result.stage_metrics if metric.diagnostic is not None]
             if failures:

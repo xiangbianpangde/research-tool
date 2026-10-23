@@ -55,6 +55,16 @@ def record_review(
                                       else final / "tree/knowledge.json").relative_to(root)),
                "status": status, "level": level, "reviewer": reviewer,
                "reason": reason, "reviewed_at": datetime.now(timezone.utc).isoformat()}
+    evaluation = envelope['result'].get('issue_evaluation')
+    if evaluation is not None:
+        issue_path = str((final / 'issue-evaluation.json').relative_to(root))
+        issue_hash = hashlib.sha256((root / issue_path).read_bytes()).hexdigest()
+        if envelope['files'].get(issue_path) != issue_hash:
+            raise ValueError('issue evaluation is not committed to report')
+        payload.update(issue_evaluation_sha256=issue_hash,
+                       issue_head_sha256=evaluation['issue_head_sha256'],
+                       network_sha256=evaluation['network_sha256'],
+                       policy_sha256=evaluation['policy_sha256'])
     identifier = uuid4().hex
     temporary = directory / ('.' + identifier + '.pending')
     path = directory / (identifier + '.json')

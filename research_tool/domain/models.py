@@ -393,6 +393,21 @@ class RetrievalConfig(BaseModel):
         return self
 
 
+class DispositionConfig(BaseModel):
+    """Explicit reviewed decision consumption; raw preserves the original gate contract."""
+    model_config = {'extra': 'forbid'}
+    policy: Literal['raw', 'reviewed'] = 'raw'
+    registry_root: Path | None = None
+    expected_head_sha256: str | None = Field(default=None, pattern=r'^[0-9a-f]{64}$')
+
+    @model_validator(mode='after')
+    def _review_identity(self):
+        if (self.policy == 'reviewed'
+                and (self.registry_root is None or self.expected_head_sha256 is None)):
+            raise ValueError('reviewed issues require explicit registry root and expected HEAD')
+        return self
+
+
 class PipelineConfig(BaseModel):
     """管道总配置。依据 01 §7.3 + 03 §2。"""
 
@@ -402,6 +417,7 @@ class PipelineConfig(BaseModel):
     stages: list[StageName] = Field(
         default_factory=lambda: list(NINE_STAGES)
     )
+    disposition: DispositionConfig = Field(default_factory=DispositionConfig)
     collector: CollectorConfig = Field(default_factory=CollectorConfig)
     pdf_ingest: PdfIngestConfig = Field(default_factory=PdfIngestConfig)
     pdf_dir: str | None = None  # 设置后 collect 阶段改为摄取该目录下的 PDF

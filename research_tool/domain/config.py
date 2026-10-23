@@ -119,6 +119,7 @@ def _flatten_to_pipeline(raw: dict) -> dict:
         # 阶段 F：论文 ↔ YouTube talk；遗漏会导致 config.yaml talk: 段静默丢弃
         ("talk", "talk"),
         ("retrieval", "retrieval"),
+        ("disposition", "disposition"),
         # P3 预留：("bilinote", "bilinote") —— 待 BiliNoteConfig 落地后启用
         # B8 产品集成：九段管线 feature flag（默认全关 → 逐字节 legacy）
         ("nine_loop", "nine_loop"),
@@ -180,6 +181,7 @@ _MAPPING_SECTIONS = (
     "reporter",
     "talk",
     "retrieval",
+    "disposition",
     "pipeline",
 )
 

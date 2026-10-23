@@ -911,6 +911,26 @@ def publish_wiki(
     _print_warnings(list(result.warnings))
 
 
+@app.command(name='issues')
+def issues(
+    action: str = typer.Argument(..., help='view/create/import/propose/review and network review'),
+    registry: Path = typer.Option(..., '--registry'),
+    request: Optional[Path] = typer.Option(
+        None, '--request', help='Exact JSON request; never model auto-write',
+    ),
+) -> None:
+    """Local evidence-pinned disposition API; raw reports and verdicts are never edited."""
+    from ..infrastructure.disposition.commands import execute
+    from ..infrastructure.disposition.records import strict_json
+    try:
+        payload = strict_json(request.read_bytes()) if request else {}
+        result = execute(action, registry, payload)
+    except (OSError, ValueError, KeyError) as exc:
+        _fail(str(exc))
+        return
+    _out.print_json(json.dumps(result, ensure_ascii=False))
+
+
 @app.command(name="retrieval")
 def retrieval(
     action: str = typer.Argument(
