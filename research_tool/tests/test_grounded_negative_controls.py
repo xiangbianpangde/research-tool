@@ -13,9 +13,8 @@ async def test_approving_verifier_cannot_make_a_global_absence_statement_pass():
     calls = []
     def reply(prompt, schema):
         calls.append(schema.__name__)
-        if schema.__name__ == 'ObservationPlan':
-            return schema.model_validate({'observations':[{'code':'study_observation',
-                'text':'原文未报告调整变量。','claim_ids':['c0']}]})
+        if schema.__name__ == 'ObservationChoice':
+            return schema.model_validate({'choice_ids':['C1'], 'text':'原文未报告调整变量。'})
         if schema.__name__ == 'AtomChecks':
             return schema(checks=[{'index': 0, 'status': 'supported', 'supporting_ids': ['c0'],
                                    'counterevidence_ids': [], 'reason': 'wrongly approves'}])
@@ -25,7 +24,7 @@ async def test_approving_verifier_cannot_make_a_global_absence_statement_pass():
     with pytest.raises(StageError):
         await synthesize_grounded_report(graph, MockLLMClient(structured_response=reply),
                                          'test', audit, bundle, 30000)
-    assert calls == ['ObservationPlan', 'ObservationPlan']  # hard failure before lying verifier
+    assert calls == ['ObservationChoice', 'ObservationChoice']  # hard failure before lying verifier
 
 
 def test_negative_lifetime_limitation_is_not_a_positive_safety_claim():
@@ -41,8 +40,11 @@ async def test_verifier_receives_unselected_and_nonclaim_original_text():
     full = graph['sources'][0]['text'] + '\nFigure: source context remains relevant.'
     seen = []
     def reply(prompt, schema):
-        if schema.__name__ == 'ObservationPlan':
-            return schema(observations=[{'code':'study_observation','claim_ids':['c0']}])
+        if schema.__name__ == 'ObservationChoice':
+            import json
+            choices=json.loads(prompt.split('\nCHOICES:',1)[1].split('\nFULL_SOURCE:',1)[0])
+            return schema(choice_ids=[next(c['choice_id'] for c in choices
+                                          if c['code']=='study_observation' and c['claim_ids']==['c0'])])
         if schema.__name__ == 'AtomChecks':
             seen.append(prompt)
             assert 'adjusted for age and parity' in prompt

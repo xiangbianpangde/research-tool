@@ -11,11 +11,13 @@ async def test_chinese_observation_schema_rejects_numeric_prose_and_report_shows
     graph = graph_for(['The adjusted OR was 5.8 (95% CI 1.2–28.0).'])
     seen = []
     def reply(prompt, schema):
-        if schema.__name__ == 'ObservationPlan':
+        if schema.__name__ == 'ObservationChoice':
             with pytest.raises(ValidationError):
-                schema.model_validate({'observations':[{'code':'study_observation','text':'OR为5.8。','claim_ids':['c0']}]})
+                schema.model_validate({'choice_ids':['C1'],'text':'OR为5.8。'})
+            import json
+            choices = json.loads(prompt.split('\nCHOICES:',1)[1].split('\nFULL_SOURCE:',1)[0])
             seen.append(schema.__name__)
-            return schema(observations=[{'code':'adjusted_association','claim_ids':['c0']}])
+            return schema(choice_ids=[next(c['choice_id'] for c in choices if c['code']=='adjusted_association')])
         if schema.__name__ == 'AtomChecks':
             return schema(checks=[{'index':0,'status':'supported','supporting_ids':['c0'],
                                    'counterevidence_ids':[],'reason':'Faithful bounded interpretation.'}])

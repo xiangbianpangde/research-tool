@@ -134,6 +134,27 @@ def render_observation(observation, graph):
             'claim_ids': observation.claim_ids, 'code': code}
 
 
+class ObservationChoice(BaseModel):
+    model_config = {'extra': 'forbid'}
+    choice_ids: list[str] = Field(min_length=1, max_length=6)
+
+
+def build_observation_choices(candidates, graph):
+    """Expose only mechanically admissible source/type bindings, never arbitrary pairings."""
+    result = []
+    for fact in candidates:
+        for code in _TEMPLATES:
+            if code == 'source_conflict':
+                continue
+            try:
+                render_observation({'code': code, 'claim_ids': [fact['claim_id']]}, graph)
+            except StageError:
+                continue
+            result.append({'choice_id': f'C{len(result) + 1}', 'code': code,
+                           'claim_ids': [fact['claim_id']], 'evidence_text': fact['text']})
+    return result
+
+
 class AtomCheck(BaseModel):
     index: int
     status: Literal["supported", "contradicted", "insufficient", "source_conflict"]
@@ -277,9 +298,12 @@ async def synthesize_grounded_report(  # noqa: PLR0915 - bounded draft/review co
     atoms, traces, attempts = [], [], []
     for sid, candidates in sorted(by_source.items()):
         compact = [{'claim_id': f['claim_id'], 'text': f['text']} for f in candidates]
+        choices = build_observation_choices(candidates, graph)
+        choice_map = {c['choice_id']: c for c in choices}
         complete_source = [b for b in bundle['source_blocks'] if b['source_id'] == sid]
         prompt = (
-            '为本研究选择最多6个关键观察，每个只返回code与claim_ids，禁止返回text或新事实。'
+            '为本研究选择最多6个关键观察，只返回choice_ids，必须来自CHOICES。'
+            '不得另配code/claim_ids，不生成text或新事实。'
             '程序按固定中文模板解释类型并逐字附上原证据数值/分母/CI。'
             '紧扣谁在何种挑战条件下出血、未经预防的阴性挑战、保护下阴性、调整关联和反证。'
             '代码含义：untreated_negative_challenge仅明确未预防且挑战后无出血；'
@@ -292,6 +316,10 @@ async def synthesize_grounded_report(  # noqa: PLR0915 - bounded draft/review co
             '\n主题：' + topic + '\nLIMITATIONS:'
             + json.dumps(audit['known_limitations'], ensure_ascii=False)
             + '\nFACTS:' + json.dumps(compact, ensure_ascii=False)
+            + '\nCHOICES:' + json.dumps(
+                [{k: v for k, v in c.items() if k != 'evidence_text'} for c in choices],
+                ensure_ascii=False,
+            )
             + '\nFULL_SOURCE:' + json.dumps(complete_source, ensure_ascii=False)
         )
         last_error = None
@@ -301,8 +329,22 @@ async def synthesize_grounded_report(  # noqa: PLR0915 - bounded draft/review co
             if audit_callback:
                 audit_callback(attempts)
             try:
-                plan = await llm.chat_structured(prompt, ObservationPlan)
+                selection = await llm.chat_structured(prompt, ObservationChoice)
+                if (len(set(selection.choice_ids)) != len(selection.choice_ids)
+                        or not set(selection.choice_ids) <= set(choice_map)):
+                    raise StageError('report', 'unknown or duplicate closed observation choice')
+                plan = ObservationPlan(observations=[
+                    {'code': choice_map[cid]['code'], 'claim_ids': choice_map[cid]['claim_ids']}
+                    for cid in selection.choice_ids
+                ])
+                if attempt and attempts[-2].get('plan'):
+                    prior_ids = {cid for o in attempts[-2]['plan']['observations']
+                                 for cid in o['claim_ids']}
+                    now_ids = {cid for o in plan.observations for cid in o.claim_ids}
+                    if prior_ids != now_ids:
+                        raise StageError('report', 'repair cannot replace selected evidence')
                 row['plan'] = plan.model_dump()
+                row['choice_ids'] = selection.choice_ids
                 rendered, plan_errors = [], []
                 for index, observation in enumerate(plan.observations):
                     try:
@@ -398,8 +440,11 @@ async def synthesize_grounded_report(  # noqa: PLR0915 - bounded draft/review co
                            + '\n逐项机械检查：' + json.dumps(
                                row.get('mechanical_errors', []), ensure_ascii=False,
                            )
-                           + '\n只能输出observations:[{code,claim_ids}]，不得输出text或数字。'
-                           '类型不能证明时使用study_observation，不改引文、不删除原问题。'
+                           + '\n只能输出choice_ids，从CHOICES选择合法ID，不得另配类型/原句。'
+                           '保留上次选中全部claim_ids，仅可调整同一证据的类型，不删换证据。'
+                           + '\n语义复核结果：' + json.dumps(
+                               row.get('checks', {}), ensure_ascii=False,
+                           )
                            + '\n上次待修正原子项：' + json.dumps(
                                row.get('plan', row.get('atoms', [])), ensure_ascii=False,
                            ))

@@ -9,10 +9,10 @@ from research_tool.tests.test_nine_loop_runner import config, model_reply, exter
 
 
 def grounded_reply(prompt, schema):
-    if schema.__name__ == 'ObservationPlan':
-        facts = json.loads(prompt.split('\nFACTS:', 1)[1].split('\nFULL_SOURCE:', 1)[0])
-        return schema(observations=[{'code': 'study_observation',
-                                     'claim_ids': [facts[0]['claim_id']]}])
+    if schema.__name__ == 'ObservationChoice':
+        choices = json.loads(prompt.split('\nCHOICES:', 1)[1].split('\nFULL_SOURCE:', 1)[0])
+        return schema(choice_ids=[next(c['choice_id'] for c in choices
+                                      if c['code'] == 'study_observation')])
     if schema.__name__ == 'AtomChecks':
         atoms = json.loads(prompt.split('\nATOMS:', 1)[1].split('\nCOMPLETE_SOURCE', 1)[0])
         return schema(checks=[{'index': i, 'status': 'supported',
