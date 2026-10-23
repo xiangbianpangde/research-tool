@@ -8,7 +8,9 @@ P1增加evidence-snapshot/v1全量graph/clean正文公开查询，不依赖成�
 
 P2显式`source_grounded`中文原子论断读取完整来源而非局部选材；已增加数值关系/单位/OR-HR-RR/否定/冲突硬检查及全原文verifier、一次修复与持久审计。source_exact仅原文窄保证，不用来替代中文综合验收。工程实现/验收仍在推进，不将代码存在当P0–P3全部完成。
 
-当前新增反例与恢复测试已实际红绿；最终全量/审查/远程版本及P3新run验收尚待后续记录。用户已明确确认此前过滤端点现在正常受理；P3只按原端点/原研究目的一次有界新run，过滤再现即停，不绕过滤。所有旧医学失败/原件保留。
+工程首批已提交推送research-tool `054768d`、reader `341d044`，实际pre-push **1267 passed / 3 skipped**，源码审查最终0 findings。用户已确认此前过滤端点正常受理，实际新run `59c0f6f1cf29426cae0acbe216c7e22d`完成10源1558facts缓存消费者校验、完整source反查、CAS上下文合并和重检；在report原子草稿两次机械校验耗尽后STOP_ERROR，无final，不是content_filter。
+
+真实失败暴露草稿把多个数值塞进单数量字段、纠正又改成description，且具体失败未持久化。已新增失败审计callback和schema约束：中文观察不重打数字，程序逐项附精确原文数值与范围；不是放宽单位/效应校验。加入每次started/draft/机械索引/语义checks/过滤安全诊断，限定否定终身安全句不会误当正向保证。新增反例先红后绿，完整全量 **1269 passed / 3 skipped**；原文同源诊断一次完整draft+verify成功但只标报告段诊断，不充当新pipeline成功。P3完整新run仍待复验，旧失败/原件保留。
 
 上游验证：layout与新增body查询10项通过，legacy独立脚本50/32/139/85/83/54 checks通过（用隔离只读源clone fixture）；上游bench三处attestation/public-root失败在未修改HEAD归档中同样复现，未改历史证据或断言，不计通过。researchctl子目录旧pyproject为JSON而非TOML，pytest用-c pytest.ini，顶层SystemExit的legacy脚本直接运行。证据`research-output/grounded-report-implementation-20261023/`。
 

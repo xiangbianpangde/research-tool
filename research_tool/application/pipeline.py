@@ -517,6 +517,9 @@ class ResearchPipeline:
             known_limitations=self.config.reporter.known_limitations,
             max_selected_claims=self.config.reporter.max_selected_claims,
             grounding_policy=self.config.reporter.grounding_policy, grounding_bundle=bundle,
+            grounding_audit_callback=lambda rows: _atomic(
+                self.run_root / 'grounding-attempts.json', _bytes({'attempts': rows}),
+            ),
         )
         final = self.run_root / "final"
         files = materialize_graph(graph, final, self.topic)

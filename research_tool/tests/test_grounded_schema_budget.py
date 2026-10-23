@@ -19,13 +19,17 @@ def inputs():
 async def test_invalid_atom_schema_is_corrected_once_and_exhaustion_is_terminal():
     graph, audit, bundle = inputs()
     calls = []
+    audit_rows = []
     def invalid(prompt, schema):
         calls.append(schema.__name__)
         return schema.model_validate({'atoms': []})
     with pytest.raises(StageError) as caught:
         await synthesize_grounded_report(graph, MockLLMClient(structured_response=invalid),
-                                         'test', audit, bundle, 30000)
+                                         'test', audit, bundle, 30000,
+                                         audit_callback=lambda rows: audit_rows.extend(rows))
     assert calls == ['AtomDraft', 'AtomDraft']
+    assert audit_rows and audit_rows[-1]['status'] == 'rejected'
+    assert audit_rows[-1]['failure_type'] == 'schema_invalid'
     assert caught.value.diagnostic.reason == 'selection_invalid'
 
 
@@ -33,10 +37,14 @@ async def test_invalid_atom_schema_is_corrected_once_and_exhaustion_is_terminal(
 async def test_filtered_grounded_synthesis_never_enters_semantic_repair():
     graph, audit, bundle = inputs()
     calls = []
+    rows = []
     def filtered(prompt, schema):
         calls.append(schema.__name__)
         raise LLMStructuredOutputError(LLMFailureDiagnostic(reason='content_filter'))
     with pytest.raises(LLMStructuredOutputError):
         await synthesize_grounded_report(graph, MockLLMClient(structured_response=filtered),
-                                         'test', audit, bundle, 30000)
+                                         'test', audit, bundle, 30000,
+                                         audit_callback=lambda value: rows.extend(value))
     assert calls == ['AtomDraft']
+    assert rows and rows[-1]['status'] == 'failed'
+    assert rows[-1]['diagnostic']['reason'] == 'content_filter'

@@ -368,6 +368,7 @@ async def assemble_report(  # noqa: PLR0915 - strict support/repair loop remains
     inspection: dict[str, Any] | None = None, minimum_sources: int = 3,
     known_limitations: list[str] | None = None, max_selected_claims: int = 60,
     grounding_policy: str = "model_support", grounding_bundle: dict[str, Any] | None = None,
+    grounding_audit_callback=None,
 ) -> dict[str, Any]:
     validate_graph(graph)
     if grounding_policy in {"source_exact", "source_grounded"}:
@@ -392,6 +393,7 @@ async def assemble_report(  # noqa: PLR0915 - strict support/repair loop remains
             from .grounded_synthesis import synthesize_grounded_report
             return await synthesize_grounded_report(
                 graph, llm, topic, audit, grounding_bundle, maximum,
+                audit_callback=grounding_audit_callback,
             )
         result = literal_report(graph, inspection, topic, audit, maximum)
         result["grounding_audit"] = {**grounding_bundle,

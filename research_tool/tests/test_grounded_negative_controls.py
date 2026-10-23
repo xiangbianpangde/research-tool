@@ -27,6 +27,13 @@ async def test_approving_verifier_cannot_make_a_global_absence_statement_pass():
     assert calls == ['AtomDraft', 'AtomDraft']  # hard failure precedes the lying verifier
 
 
+def test_negative_lifetime_limitation_is_not_a_positive_safety_claim():
+    from research_tool.nine_loop.grounded_synthesis import check_atom
+    graph = graph_for(['The retrospective study had limited follow-up.'])
+    assert check_atom({'kind': 'description', 'text': '有限随访不能识别终身不出血。',
+                       'claim_ids': ['c0']}, graph)['status'] == 'supported'
+
+
 @pytest.mark.asyncio
 async def test_verifier_receives_unselected_and_nonclaim_original_text():
     graph = graph_for(['Outcome odds ratio was 5.8.', 'Methods: adjusted for age and parity.'])
@@ -34,8 +41,8 @@ async def test_verifier_receives_unselected_and_nonclaim_original_text():
     seen = []
     def reply(prompt, schema):
         if schema.__name__ == 'AtomDraft':
-            return schema(atoms=[{'kind': 'effect', 'text': '原文OR为5.8。',
-                                   'claim_ids': ['c0'], 'effect_type': 'OR', 'quantity': '5.8'}])
+            return schema(atoms=[{'kind': 'description', 'text': '原文报告了比值比。',
+                                   'claim_ids': ['c0']}])
         if schema.__name__ == 'AtomChecks':
             seen.append(prompt)
             assert 'adjusted for age and parity' in prompt

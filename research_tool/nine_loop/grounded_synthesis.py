@@ -27,8 +27,15 @@ class Atom(BaseModel):
     effect_type: Literal["unknown", "OR", "HR", "RR"] = "unknown"
 
 
+class ChineseObservation(BaseModel):
+    model_config = {"extra": "forbid"}
+    kind: Literal['description'] = 'description'
+    text: str = Field(pattern=r'^[^0-9]+$', min_length=1, max_length=400)
+    claim_ids: list[str] = Field(min_length=1)
+
+
 class AtomDraft(BaseModel):
-    atoms: list[Atom] = Field(min_length=1, max_length=30)
+    atoms: list[ChineseObservation] = Field(min_length=1, max_length=6)
 
 
 class AtomCheck(BaseModel):
@@ -69,7 +76,8 @@ def check_atom(item, graph):  # noqa: PLR0915 - one source-bound atomic validati
     if len(set(atom.claim_ids)) != len(atom.claim_ids) or not set(atom.claim_ids) <= set(facts):
         raise StageError('report', 'atomic assertion has unknown or duplicate claim identities')
     evidence = '\n'.join(facts[cid]['text'] for cid in atom.claim_ids)
-    if _ABSENCE.search(atom.text) or _CAUSAL.search(atom.text):
+    safety_text = re.sub(r'不能识别终身不出血|不能判定终身安全|不代表终身安全', '', atom.text)
+    if _ABSENCE.search(atom.text) or _CAUSAL.search(safety_text):
         raise StageError('report', 'global absence/causal assertion is not mechanically supported')
     numbers = set(_NUM.findall(atom.text))
     if not numbers <= set(_NUM.findall(evidence)):
@@ -158,7 +166,7 @@ def check_atom(item, graph):  # noqa: PLR0915 - one source-bound atomic validati
 
 
 async def synthesize_grounded_report(  # noqa: PLR0915 - bounded draft/review contract
-    graph, llm, topic, audit, bundle, maximum,
+    graph, llm, topic, audit, bundle, maximum, *, audit_callback=None,
 ):
     from .research import _render_evidence_limits
 
@@ -170,19 +178,19 @@ async def synthesize_grounded_report(  # noqa: PLR0915 - bounded draft/review co
     for cid in candidate_ids:
         sid = facts[cid]['citations'][0]['source_id']
         by_source.setdefault(sid, []).append(facts[cid])
-    atoms, traces = [], []
+    atoms, traces, attempts = [], [], []
     for sid, candidates in sorted(by_source.items()):
         compact = [{'claim_id': f['claim_id'], 'text': f['text']} for f in candidates]
         complete_source = [b for b in bundle['source_blocks'] if b['source_id'] == sid]
         prompt = (
-            '为本研究写最多12条中文原子陈述。逐条只描述明确报告的信息，'
-            '每条只陈述一件事，必须带claim_ids。数字必须标kind=count或effect，'
-            'count的quantity为原文数字字符串、unit为原文紧邻单位；不得把女人/妊娠/分娩互换。'
-            '原文逐字n/N分数用kind=fraction，quantity为原分数、unit为原文紧邻分母单位，'
-            '不改算或翻转条件概率；没有紧邻单位时不强行作数值结论。'
-            'source_conflict须引用两处所有原值并明确不一致，禁止用子组猜测消解。'
-            'effect标OR/HR/RR与quantity点估计，正文必须写OR为x/HR为x；不能将OR写成倍数风险。'
-            'count每条只写一个数值与单位，分数不得改算，必要时另条描述原分母。'
+            '为本研究写最多6条中文原子解读，每条只陈述一件事，必须带claim_ids。'
+            '紧扣谁在何种挑战条件下出血、阴性挑战、已调整关联和反证；'
+            '不要用常规人口学或实验室描述占掉核心条件性风险证据。'
+            'kind只能description；text禁止任何阿拉伯数字，schema会拒绝。'
+            '不要重打OR/CI/人数/分数：程序将直接在每条解读下附上所引完整原文，保留数值和单位。'
+            '中文只解释本来源与主题有关的现象、调整关联和局限，不用中文数字绕过数值限制。'
+            '无症状、挑战阴性、治疗保护、出血和流产须区别；选择对应原文claim_id。'
+            '遇源文冲突明确写冲突未解、同时引用两处，不用子组猜测或选定正确值。'
             '禁止全文缺失、治疗、终身安全、因果结论；不猜图文冲突。'
             '保留调整项、CI、分母、治疗状态；已有局限只是审查线索不是事实。'
             '所有事实均已精确入账，不能从未选事实推断来源未报告。'
@@ -193,12 +201,25 @@ async def synthesize_grounded_report(  # noqa: PLR0915 - bounded draft/review co
         )
         last_error = None
         for attempt in range(2):
+            row = {'source_id': sid, 'attempt': attempt, 'status': 'started'}
+            attempts.append(row)
+            if audit_callback:
+                audit_callback(attempts)
             try:
                 draft = await llm.chat_structured(prompt, AtomDraft)
+                row['atoms'] = [a.model_dump() for a in draft.atoms]
                 scope_ids = {f['claim_id'] for f in candidates}
                 if any(not set(a.claim_ids) <= scope_ids for a in draft.atoms):
                     raise StageError('report', 'draft references sources outside this review scope')
-                mechanical = [check_atom(a.model_dump(), graph) for a in draft.atoms]
+                mechanical, errors = [], []
+                for index, atom in enumerate(draft.atoms):
+                    try:
+                        mechanical.append(check_atom(atom.model_dump(), graph))
+                    except StageError as exc:
+                        errors.append({'index': index, 'reason': str(exc)})
+                if errors:
+                    row['mechanical_errors'] = errors
+                    raise StageError('report', 'atomic mechanical checks rejected specific items')
                 verification = await llm.chat_structured(
                     '逐条回查全部原文依赖，判断中文陈述是否准确，特别核对单位/分母/调整项/'
                     '治疗条件/来源冲突。不能仅相信writer的引用；原文未支持或存在反证则'
@@ -211,13 +232,15 @@ async def synthesize_grounded_report(  # noqa: PLR0915 - bounded draft/review co
                     + '\nFULL_SOURCE:' + json.dumps(complete_source, ensure_ascii=False),
                     AtomChecks,
                 )
+                row['checks'] = verification.model_dump()
                 if (len(verification.checks) != len(draft.atoms)
                         or {c.index for c in verification.checks} != set(range(len(draft.atoms)))):
                     raise StageError('report', 'atomic verifier omitted assertion checks')
                 verified = {check.index: check for check in verification.checks}
                 for check in verification.checks:
                     expected_status = ('source_conflict'
-                                       if draft.atoms[check.index].kind == 'source_conflict'
+                                       if re.search(r'冲突|不一致|待澄清|矛盾',
+                                                    draft.atoms[check.index].text)
                                        else 'supported')
                     if (check.status != expected_status
                             or not check.supporting_ids
@@ -227,6 +250,9 @@ async def synthesize_grounded_report(  # noqa: PLR0915 - bounded draft/review co
                             or not set(check.supporting_ids + check.counterevidence_ids)
                             <= scope_ids):
                         raise StageError('report', 'atomic statement lacks verified support')
+                row.update(status='accepted', checks=verification.model_dump())
+                if audit_callback:
+                    audit_callback(attempts)
                 atoms.extend(draft.atoms)
                 traces.extend({'source_id': sid, 'attempt': attempt, 'mechanical': m,
                                'semantic': verified[i].model_dump()}
@@ -236,13 +262,34 @@ async def synthesize_grounded_report(  # noqa: PLR0915 - bounded draft/review co
                 detail = find_llm_diagnostic(exc)
                 if (isinstance(exc, LLMError)
                         and (detail is None or detail.reason != 'schema_invalid')):
+                    row.update(status='failed', failure_type=type(exc).__name__)
+                    if detail is not None:
+                        row['diagnostic'] = detail.model_dump(exclude_none=True)
+                    if audit_callback:
+                        audit_callback(attempts)
                     raise
                 last_error = exc
+                row.update(status='rejected', failure_type=(
+                    'schema_invalid' if isinstance(exc, (ValidationError, LLMError))
+                    else 'atomic_invalid'),
+                    reason=(str(exc) if isinstance(exc, StageError)
+                            else 'structured schema invalid'))
+                if audit_callback:
+                    audit_callback(attempts)
                 if attempt:
                     terminal = StageError('report', 'atomic draft/review correction exhausted')
                     terminal.diagnostic = LLMFailureDiagnostic(reason='selection_invalid')
                     raise terminal from None
-                prompt += '\n保守修复一次：仅保留可核实原子事实；修正schema/单位/效应/冲突。'
+                prompt += ('\n保守修复一次：仅保留可核实原子事实；修正schema/单位/效应/冲突。'
+                           + '\n失败类别：' + row['reason']
+                           + '\n逐项机械检查：' + json.dumps(
+                               row.get('mechanical_errors', []), ensure_ascii=False,
+                           )
+                           + '\n只能输出description，无阿拉伯数字；数值由程序原文附证，'
+                           '不要用中文数字改写数值或猜测缺失单位。'
+                           + '\n上次待修正原子项：' + json.dumps(
+                               row.get('atoms', []), ensure_ascii=False,
+                           ))
         else:
             raise last_error or StageError('report', 'atomic synthesis failed')
     sources = {s['source_id']: s for s in graph['sources']}
@@ -259,6 +306,11 @@ async def synthesize_grounded_report(  # noqa: PLR0915 - bounded draft/review co
             refs = ' '.join(f'[{i}]' for i in sorted({indices[c['source_id']] for c in citations}))
             lines.extend([atom.text + ' ' + refs, ''])
             claims.append({'text': atom.text, 'claim_ids': atom.claim_ids, 'citations': citations})
+            for cid in atom.claim_ids:
+                literal = facts[cid]['text']
+                lines.extend(['**数值与范围原文证据：**', '', literal + ' ' + refs, ''])
+                claims.append({'text': literal, 'claim_ids': [cid],
+                               'citations': facts[cid]['citations']})
     used = sorted({cid for c in claims for cid in c['claim_ids']})
     audit['selected_claim_ids'] = used
     audit['unselected_claim_ids'] = sorted(set(facts) - set(used))
@@ -275,4 +327,6 @@ async def synthesize_grounded_report(  # noqa: PLR0915 - bounded draft/review co
             'verification': 'atomic-full-source/v1',
             'verification_limit': 'Not clinical acceptance',
             'grounding_audit': {**bundle, 'contract': 'atomic-full-source/v1',
-                                'atomic_checks': traces, 'clinical_truth_certified': False}}
+                                'atomic_checks': traces, 'attempts': attempts,
+                                'numerical_rendering': 'literal_source_only',
+                                'clinical_truth_certified': False}}
