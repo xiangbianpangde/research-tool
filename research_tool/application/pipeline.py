@@ -176,7 +176,7 @@ class ResearchPipeline:
             from ..infrastructure.ingest.pdf import _collect_pdfs
             path = Path(self.config.pdf_dir).resolve()
             inputs[str(path)] = {p.name: _hash(p.read_bytes()) for p in _collect_pdfs(path)}
-        fingerprint = _hash(_bytes({"runtime_contract": 11, "topic": self.topic,
+        fingerprint = _hash(_bytes({"runtime_contract": 12, "topic": self.topic,
                                    "config": config, "inputs": inputs}))
         self._state = (self.runtime.load_or_init(fingerprint) if self.config.resume
                        else self.runtime.start_new(fingerprint))
