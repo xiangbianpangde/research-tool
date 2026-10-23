@@ -2,7 +2,11 @@
 
 > 对应方案：[2026-10-18-researchctl-integration-plan.md](2026-10-18-researchctl-integration-plan.md)
 
-## 当前状态
+## 2026-10-23真实产物复核补充
+
+下列M0–M5勾选保留当时限定实现/fixture验收记录，**不表示当前医学真实输出已互操作通过，更不表示医学语义正确**。本次只读复核发现：主文字系统CLI与adapter工作树版本不同，生产citation_sources缺adapter要求的title，summary/record文件集合语义也不同；当前报告生成没有成文前ResearchCTL回查。实际失败证据、P0合同修复与成文前证据闭环见[2026-10-23根因与修复方案](2026-10-23-researchctl-grounded-report-repair.md)。新P0–P3待实施，不追溯修改旧测试结果。
+
+## 原接入状态（历史限定范围）
 
 - [x] 已完成两仓库只读架构核对
 - [x] 已确认 `research-tool` 是证据生产者，ResearchCTL 是派生检索层

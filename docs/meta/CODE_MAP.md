@@ -29,6 +29,7 @@ WebUI、research ui 命令及 Gradio 安装项已移除。
 | infrastructure/stages/research_strategies.py | Collect 内部的实体拆分、画像与查询策略 |
 | infrastructure/stages/cleaner.py、extractor.py | 保留科学比较符/表格边界的清洗、去重、原文片段ID选择式抽取、严格跨度校验与块级诊断 |
 | infrastructure/llm/openai_client.py、domain/errors.py | 结构化结束状态/JSON/schema校验与安全LLMFailureDiagnostic |
+| infrastructure/retrieval/manifest.py、client.py | 运行末尾检索清单与ResearchCTL公开CLI薄适配；当前未用于成文前完整证据反查 |
 | infrastructure/ingest/、application/video_pipeline.py | PDF/视频输入适配 |
 | domain/models.py、config.py | 固定九段配置与字段校验 |
 
@@ -43,5 +44,7 @@ WebUI、research ui 命令及 Gradio 安装项已移除。
 结构化失败诊断在 `run-summary.json` 的 `stage_metrics[].diagnostic`，同轮 `diagnostic_path` 指向 `runs/<run_id>/failure-diagnostic.json`。只含结束原因/长度哈希/token/JSON位置/schema字段及来源块/选择条目标识，不含响应正文、推理正文、headers或密钥。canonical `run-record.json` 严格字段保持不变；失败诊断sidecar不作为成功成果或医学证据。
 
 分层报告 `final/evidence-audit.json`保留selected/unselected原始claim IDs、节点内容家族覆盖、未解决finding、显式known_limitations及“不等于独立研究”的边界；与全部final文件共同受summary哈希校验。核心选材有maxItems和最多一次纠正，模型短编号映回ledger ID；邻近原文与限制仅作反向审核，不把选材遗漏解释成论文未报告。content_filter在抽取/阶段即停不重试。`run-record.json`字段不扩展，summary只附report_contract/strict_evidence_complete/unresolved_finding_count。
+
+当前报告选材及逐段核验共用section_facts，邻近上下文不是完整论文检索；生产manifest与ResearchCTL layout reader的真实互操作存在字段/文件集合差异。[根因与修复方案](../plan/2026-10-23-researchctl-grounded-report-repair.md)明确待实施的成文前snapshot、全量原文反查、原子论断正反证和独立审校状态，不作为当前已有能力。
 
 历史来源和边界见 docs/plan/NINE-STAGE-BASELINE.json；当前进度及可复现实验从 STATUS.md 进入。

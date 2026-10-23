@@ -1,6 +1,20 @@
 # research-tool 当前状态
 
-## 当前分层报告合同与医学回读（2026-10-22）
+## 当前：自动报告根因、修复方案与版本检查点（2026-10-23）
+
+用户要求追查医学解读错误与本地文字Agent检索系统的关系，并提供方案、及时提交推送。已完成[根因与分阶段修复方案](docs/plan/2026-10-23-researchctl-grounded-report-repair.md)，含PNG流程图、证据案例及10项反例验收；**P0–P3尚未实施，自动医学终验仍失败**。
+
+根因已由真实run原件/源码核验：Casini年龄产次调整、PRO-RBDD5女性10妊娠均在全量账本却未进入40条核心选材；Sun部分调整OR只在clean表格，未抽成facts。起草与支持核验共用所选局部证据，不能据此证明“原论文未报告”。ResearchCTL现有接线在_summary末尾，未被成文前消费；本次配置未启用refresh。用户指定文字系统主树bbbe00b无research-tool layout，adapter在独立553b3ab工作树；真实生产manifest缺consumer要求的title，summary123文件又与consumer要求等于record4文件的断言不符。既有双方fixture各自通过不能替代生产输出互操作验收。
+
+方案先修P0双边合同/审校采用状态，再P1成文前证据snapshot与全量原文查询、P2原子论断正反证及冲突、P3新run独立验收；不新增搜索引擎或向量库，不猜解原论文矛盾，不用索引成功冒充医学正确。外部两文字系统与医学运行仅只读，170个原成功run文件前后SHA一致；未修改被过滤端点配置或再调用。
+
+前期16文件修补已提交`fe7677960cdb0efac360dc93d9a8ffd0a9c6321d`。首次push被OCR取消测试读取空PID文件拦住，已用延迟发布探针复现；最小修复仅fixture写完pid.pending后rename，原取消/reap/无活子进程断言不变，提交`5917608`。18项相关及真实pre-push全量 **1214 passed / 3 skipped** 通过，两提交已推送`origin/fix/structured-extraction-diagnostics-20261020`；没有绕过hook或推main。Ruff、差异、锁文件与shell检查通过；未发布新包版本/tag，Git提交为版本身份。
+
+本轮诊断与验证：`research-output/report-grounding-20261022/`（目录沿用任务开始名，实际核验2026-10-23），含omission-trace、adapter probes、合成错误verifier反例、PID红绿/推送日志。未提交论文、运行原件、凭据、锁/CI/归档；未改外部dirty工作树。下一步是方案P0真实producer→consumer合同验收，不是再加提示词或重复付费生成。
+
+以下2026-10-22及更早状态保留为历史快照；其中“未提交/推送”描述不覆盖上述当前版本记录。
+
+## 历史：分层报告合同与医学回读（2026-10-22）
 
 用户明确批准“证据与局限分层报告”，已新增显式`reporter.evidence_policy=strict|layered`（strict默认），核心选择maxItems硬上限/一次纠正、短模型编号映回原ledger ID、完整selected/unselected审计、来源内容家族覆盖、全部finding与known_limitations直接可见。最后有界补搜轮允许layered报告，保留strict_verdict/high/total；未解问题不关闭，STOP_SUCCESS不等于科学未知或人类验收清零。canonical run-record严格字段不变，evidence-audit.json与全部final文件进入summary/SHA检查。
 
