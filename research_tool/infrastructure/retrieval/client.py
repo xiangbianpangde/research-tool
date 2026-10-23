@@ -8,8 +8,10 @@ research-tool topic across threads and processes.
 from __future__ import annotations
 
 import fcntl
+import hashlib
 import json
 import os
+import shutil
 import subprocess
 import sys
 import threading
@@ -66,10 +68,11 @@ class ResearchCtlClient:
             raise ValueError("timeout_sec must be positive")
         self.timeout_sec = float(timeout_sec)
         self.last_envelope: dict[str, Any] | None = None
+        self._resolved_python: str | None = None
 
     def _command(self, action: str, args: Sequence[str]) -> list[str]:
         command = [
-            self.python_executable,
+            self._resolved_python or self.python_executable,
             "-m",
             "researchctl",
             "--layout",
@@ -222,9 +225,52 @@ class ResearchCtlClient:
         with self._singleflight():
             return self.execute("index", *( ["--semantic"] if semantic else [] ))
 
+    def reader_identity(self) -> dict[str, Any]:
+        """Pin code bytes actually selected for report-time evidence, not just a capability name."""
+        module = self.researchctl_root
+        if module is None:
+            raise RetrievalClientError("Grounded reports require an explicit module_root")
+        package = module / "researchctl"
+        files = {str(p.relative_to(package)): hashlib.sha256(p.read_bytes()).hexdigest()
+                 for p in sorted(package.rglob("*.py")) if "__pycache__" not in p.parts}
+        if not files:
+            raise RetrievalClientError("Grounded reader has no implementation files")
+        resolved = shutil.which(self.python_executable, path=self._environment().get('PATH'))
+        if resolved is None:
+            raise RetrievalClientError('Grounded interpreter is unavailable')
+        invocation = Path(os.path.abspath(resolved))
+        executable = invocation.resolve()
+        self._resolved_python = str(invocation)
+        venv_config = invocation.parent.parent / 'pyvenv.cfg'
+        return {"module_root": str(module), "python_executable": str(invocation),
+                "python_target": str(executable),
+                "python_sha256": hashlib.sha256(executable.read_bytes()).hexdigest(),
+                "venv_config_sha256": (hashlib.sha256(venv_config.read_bytes()).hexdigest()
+                                       if venv_config.is_file() else None),
+                "contract": "evidence-snapshot/v1", "files": files}
+
+    def capabilities(self) -> dict[str, Any]:
+        """Return the explicitly selected reader's supported contracts."""
+        return self.execute("capabilities")
+
+    def evidence(
+        self, snapshot: Path, *, view: str = "body", source_id: str | None = None,
+        text: str | None = None, offset: int = 0, limit: int = 50,
+    ) -> dict[str, Any]:
+        """Query committed full evidence with an expected immutable snapshot digest."""
+        args = ["--snapshot", str(snapshot), "--snapshot-hash",
+                hashlib.sha256(Path(snapshot).read_bytes()).hexdigest(), "--view", view,
+                "--offset", str(offset), "--limit", str(limit)]
+        if source_id:
+            args.extend(("--source-id", source_id))
+        if text:
+            args.extend(("--text", text))
+        return self.execute("evidence", *args)
+
     def query(
         self,
         *,
+        require_review: str | None = None,
         entity: str | None = None,
         text: str | None = None,
         doc_type: str | None = None,
@@ -234,6 +280,8 @@ class ResearchCtlClient:
         limit: int | None = None,
     ) -> dict[str, Any]:
         args: list[str] = []
+        if require_review:
+            args.extend(("--require-review", require_review))
         if entity:
             args.extend(("--entity", entity))
         if text:

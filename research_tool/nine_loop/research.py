@@ -367,8 +367,39 @@ async def assemble_report(  # noqa: PLR0915 - strict support/repair loop remains
     *, style: str = "report", evidence_policy: str = "strict",
     inspection: dict[str, Any] | None = None, minimum_sources: int = 3,
     known_limitations: list[str] | None = None, max_selected_claims: int = 60,
+    grounding_policy: str = "model_support", grounding_bundle: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     validate_graph(graph)
+    if grounding_policy in {"source_exact", "source_grounded"}:
+        if grounding_bundle is None or not grounding_bundle.get("full_source_scope"):
+            raise StageError("report", "source-exact report requires complete pre-report evidence")
+        if evidence_policy != "layered" or inspection is None:
+            raise StageError("report", "source-exact report requires explicit layered contract")
+        from .grounding import literal_report
+        # Selection is deterministic and includes distinct sources before repeated facts.
+        chosen = []
+        queues = {}
+        for fact in graph["facts"]:
+            sid = fact["citations"][0]["source_id"]
+            queues.setdefault(sid, []).append(fact["claim_id"])
+        while any(queues.values()) and len(chosen) < max_selected_claims:
+            for sid in sorted(queues):
+                if queues[sid] and len(chosen) < max_selected_claims:
+                    chosen.append(queues[sid].pop(0))
+        audit = _layered_evidence_audit(graph, inspection, minimum_sources, chosen,
+                                       known_limitations or [])
+        if grounding_policy == "source_grounded":
+            from .grounded_synthesis import synthesize_grounded_report
+            return await synthesize_grounded_report(
+                graph, llm, topic, audit, grounding_bundle, maximum,
+            )
+        result = literal_report(graph, inspection, topic, audit, maximum)
+        result["grounding_audit"] = {**grounding_bundle,
+                                     "atomic_checks": result.pop("atomic_checks"),
+                                     "contract": "source-exact-grounding/v1",
+                                     "unregistered_model_assertions": 0,
+                                     "medical_truth_certified": False}
+        return result
     if evidence_policy == "layered" and (inspection is None or "findings" not in inspection):
         raise StageError("report", "分层报告必须提供实际检视记录")
     reference_map = None

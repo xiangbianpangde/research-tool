@@ -156,6 +156,15 @@ class ResearchPipeline:
         # Retrieval refresh is a derived post-run side effect; changing its
         # transport/location must not create a different research identity.
         config.pop("retrieval", None)
+        if self.config.reporter.grounding_policy != "model_support":
+            # Report-time reader code is research semantics, not a refresh side effect.
+            from ..infrastructure.retrieval import ResearchCtlClient
+            cfg = self.config.retrieval
+            self._grounding_reader_identity = ResearchCtlClient(
+                self.root, module_root=cfg.module_root or cfg.researchctl_root,
+                python_executable=cfg.python_executable,
+            ).reader_identity()
+            config["grounding_reader"] = self._grounding_reader_identity
         inputs = {}
         if self.config.input_dir:
             path = Path(self.config.input_dir).resolve()
@@ -167,14 +176,19 @@ class ResearchPipeline:
             from ..infrastructure.ingest.pdf import _collect_pdfs
             path = Path(self.config.pdf_dir).resolve()
             inputs[str(path)] = {p.name: _hash(p.read_bytes()) for p in _collect_pdfs(path)}
-        fingerprint = _hash(_bytes({"runtime_contract": 10, "topic": self.topic,
+        fingerprint = _hash(_bytes({"runtime_contract": 11, "topic": self.topic,
                                    "config": config, "inputs": inputs}))
         self._state = (self.runtime.load_or_init(fingerprint) if self.config.resume
                        else self.runtime.start_new(fingerprint))
         self.run_root = self.root / "runs" / self._state["run_id"]
-        for record in self._state["completed_stages"].values():
+        for key, record in self._state["completed_stages"].items():
             envelope = read_json(self.root / record["artifact_path"])
-            self._verify_files(envelope.get("files", {}))
+            try:
+                self._verify_files(envelope.get("files", {}))
+            except RuntimeStateError:
+                if key in {'qgate:100', 'qgate:101'}:
+                    self._active = 'report'
+                raise
 
     async def _execute(self) -> AsyncIterator[StageEvent]:
         for key, action in (
@@ -304,6 +318,8 @@ class ResearchPipeline:
             key, artifact, _hash(artifact.read_bytes()), self._state["latest_digest"])
         if stage not in self._result.stages_completed:
             self._result.stages_completed.append(stage)
+        if stage in self._result.stages_skipped:
+            self._result.stages_skipped.remove(stage)
         self._result.stage_metrics.append(StageRunMetric(
             stage=stage, status="completed", duration_sec=time.monotonic() - started))
         yield StageEvent(stage=stage, status="completed", progress=1.0, message=f"{stage} 完成",
@@ -487,12 +503,20 @@ class ResearchPipeline:
     async def _report(
         self, graph: dict[str, Any], inspection: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
+        bundle = None
+        snapshot = None
+        if self.config.reporter.grounding_policy != "model_support":
+            try:
+                graph, bundle, snapshot = await self._ground_evidence(graph, inspection)
+            finally:
+                self._active = "report"
         report = await assemble_report(
             graph, self._get_llm(), self.topic, self.config.reporter.max_length,
             style=self.config.reporter.style, evidence_policy=self.config.reporter.evidence_policy,
             inspection=inspection, minimum_sources=self.config.organizer.min_evidence_per_node,
             known_limitations=self.config.reporter.known_limitations,
             max_selected_claims=self.config.reporter.max_selected_claims,
+            grounding_policy=self.config.reporter.grounding_policy, grounding_bundle=bundle,
         )
         final = self.run_root / "final"
         files = materialize_graph(graph, final, self.topic)
@@ -504,9 +528,95 @@ class ResearchPipeline:
             audit_file = final / "evidence-audit.json"
             _atomic(audit_file, _bytes(report["evidence_audit"]))
             files.append(audit_file)
+        if "grounding_audit" in report:
+            grounding_file = final / "grounding-audit.json"
+            _atomic(grounding_file, _bytes(report["grounding_audit"]))
+            files.append(grounding_file)
+        if snapshot is not None:
+            files.extend([snapshot, self.run_root / "evidence-initial.json"])
         report_file = self.run_root / "final" / "report.md"
         _atomic(report_file, report["markdown"].encode("utf-8"))
         return {**report, "output_files": [str(path) for path in files] + [str(report_file)]}
+
+    async def _ground_evidence(self, graph, inspection):
+        from ..infrastructure.retrieval import ResearchCtlClient
+        from ..infrastructure.retrieval.snapshot import write_evidence_snapshot
+        from ..nine_loop.grounding import build_evidence_bundle, dependency_facts
+
+        cfg = self.config.retrieval
+        client = ResearchCtlClient(
+            self.root, module_root=cfg.module_root or cfg.researchctl_root,
+            python_executable=cfg.python_executable, timeout_sec=cfg.timeout_sec,
+        )
+        if client.reader_identity() != self._grounding_reader_identity:
+            raise StageError('report', 'evidence reader changed during research run')
+        capabilities = await asyncio.to_thread(client.capabilities)
+        if "evidence-snapshot/v1" not in capabilities.get("contracts", []):
+            raise StageError("report", "ResearchCTL evidence-snapshot/v1 capability required")
+        keys = [key for key in self._state["completed_stages"]
+                if key.startswith("merge:") and key != "merge:100"]
+        stage = max(keys, key=lambda key: int(key.split(":")[1])) if keys else "knowledge"
+        initial = self.run_root / "evidence-initial.json"
+        if "qgate:100" not in self._state['completed_stages']:
+            # Only uncommitted preparation is disposable; rebuild it from pinned stages.
+            initial.unlink(missing_ok=True)
+        async for _ in self._step('qgate:100', lambda: {
+            'snapshot': str(write_evidence_snapshot(
+                self.root, self._state, stage, provisional=True,
+            )), 'output_files': [str(initial)],
+        }):
+            pass
+        self._verify_files(read_json(
+            self.root / self._state['completed_stages']['qgate:100']['artifact_path'],
+        )['files'])
+        blocks, scopes = [], []
+        offset = 0
+        for _ in range(100):
+            response = await asyncio.to_thread(client.evidence, initial, offset=offset, limit=100)
+            if response.get("status") != "success":
+                raise StageError("report", "ResearchCTL full-source evidence query failed closed")
+            blocks.extend(response["results"])
+            scopes.append(response["scope"])
+            if not response["scope"]["truncated"]:
+                break
+            offset += len(response["results"])
+        else:
+            raise StageError("report", "full-source evidence query budget exhausted")
+        added = dependency_facts(graph, blocks)
+        if added and "merge:100" not in self._state["completed_stages"]:
+            delta = {"facts": added, "sources": graph["sources"]}
+            async for _ in self._step("merge:100", lambda: self._merge(graph, delta)):
+                pass
+        if "merge:100" in self._state["completed_stages"]:
+            graph = self._payload("merge:100")["graph"]
+            async for _ in self._step("inspect:100", lambda: self._inspect(
+                graph, inspection, {f["claim_id"] for f in added},
+            )):
+                pass
+            inspection.update(self._payload("inspect:100"))
+            stage = "merge:100"
+        snapshot = self.run_root / 'evidence-snapshot.json'
+        if 'qgate:101' not in self._state['completed_stages']:
+            snapshot.unlink(missing_ok=True)
+        async for _ in self._step('qgate:101', lambda: {
+            'snapshot': str(write_evidence_snapshot(self.root, self._state, stage)),
+            'output_files': [str(snapshot)],
+        }):
+            pass
+        self._verify_files(read_json(
+            self.root / self._state['completed_stages']['qgate:101']['artifact_path'],
+        )['files'])
+        resolved = await asyncio.to_thread(client.evidence, snapshot, view="graph")
+        if resolved.get("status") != "success" or resolved["results"][0]["graph"] != graph:
+            raise StageError("report", "ResearchCTL graph identity check failed closed")
+        bundle = build_evidence_bundle(graph, blocks, [])
+        if client.reader_identity() != self._grounding_reader_identity:
+            raise StageError('report', 'evidence reader changed during retrieval')
+        bundle.update(reader_identity=self._grounding_reader_identity,
+                      snapshot_sha256=_hash(snapshot.read_bytes()), retrieval_scopes=scopes,
+                      source_blocks=blocks, findings=inspection["findings"],
+                      original_conflicts_preserved=True)
+        return graph, bundle, snapshot
 
     def _refresh_retrieval_index(self, summary: dict[str, Any]) -> None:
         """Optionally refresh the derived ResearchCTL index after run close."""

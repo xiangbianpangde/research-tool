@@ -915,7 +915,7 @@ def publish_wiki(
 def retrieval(
     action: str = typer.Argument(
         ...,
-        help="ResearchCTL 动作：index/query/sources/trace/history/reconcile/generate-index",
+        help="ResearchCTL 动作：capabilities/index/query/sources/trace/history/reconcile/evidence",
     ),
     root: Path = typer.Option(
         Path("./research-output"), "--root", help="research-output 根目录或主题目录"
@@ -930,6 +930,9 @@ def retrieval(
     as_of: Optional[str] = typer.Option(None, "--as-of"),
     limit: Optional[int] = typer.Option(None, "--limit"),
     semantic: bool = typer.Option(False, "--semantic"),
+    require_review: Optional[str] = typer.Option(None, "--require-review"),
+    snapshot: Optional[Path] = typer.Option(None, "--snapshot"),
+    view: str = typer.Option("body", "--view"),
 ) -> None:
     """通过 ResearchCTL 公开 CLI 查询 research-tool 运行状态。"""
     from ..infrastructure.retrieval import ResearchCtlClient, RetrievalClientError
@@ -940,7 +943,14 @@ def retrieval(
         db_path=db,
     )
     try:
-        if action == "index":
+        if action == "capabilities":
+            payload = client.capabilities()
+        elif action == "evidence":
+            if snapshot is None:
+                _fail("retrieval evidence 需要 --snapshot")
+                return
+            payload = client.evidence(snapshot, text=text, view=view, limit=limit or 50)
+        elif action == "index":
             payload = client.index(semantic=semantic)
         elif action == "query":
             payload = client.query(
@@ -948,6 +958,7 @@ def retrieval(
                 text=text,
                 semantic=semantic,
                 limit=limit,
+                **({"require_review": require_review} if require_review else {}),
             )
         elif action == "sources":
             if owner is None:

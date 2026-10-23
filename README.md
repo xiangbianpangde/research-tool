@@ -50,7 +50,7 @@ scripts/         # 可复用脚本
 
 引用覆盖率 1.0 表示报告段落绑定了通过原文跨度校验的事实并通过模型支持检查。标题和正文均接受支持核验。模型可能判断错误；这不是语义正确性的形式化证明或调研质量评分。
 
-真实医学回读已发现“未选入报告的证据被误称原文未报告”。现有ResearchCTL接线用于运行末尾清单/可选索引刷新，尚未在成文前查询完整证据；当前producer/consumer真实产物另有字段与文件集合合同不一致。已定位根因与[分阶段修复方案](docs/plan/2026-10-23-researchctl-grounded-report-repair.md)，方案待实施，不能仅开启refresh就宣称医学验收通过。
+真实医学回读曾发现“未选入报告的证据被误称原文未报告”。[根因与修复计划](docs/plan/2026-10-23-researchctl-grounded-report-repair.md)记录原始失败。显式`reporter.grounding_policy: source_grounded`现接入成文前已提交证据快照、ResearchCTL全量facts/完整正文反查、精确上下文入账后CAS合并/重检，以及中文原子论断的正反证检查；它仍不是任意医学语义正确或人类临床验收保证。默认model_support不宣称拥有新保证。
 
 ## 安装与配置
 
@@ -126,6 +126,22 @@ reporter:
 正文先有界选择核心证据（模型可见maxItems且最多一次纠正，耗尽不可由阶段重试重开），再分配章节并核验。模型交互短编号最终映回原始不可变claim_id；正文所选事实须全部进入支持核验。未选事实ID在 `final/evidence-audit.json`逐项列出，全量事实仍在`tree/knowledge.json`。报告直接可见来源内容家族覆盖/证据强度、所有未解决finding及显式输入的既有局限；`known_limitations`不因本轮模型未提及而消失。内容家族仅识别近似转载，**不等于独立研究/队列**；单家族/多家族不是GRADE等级。医学分母、亚型/共病、重复队列和原论文错误仍需原文审核。机器生成局限附录与模型核验的医学正文分开标注。分层模式下邻近原文上下文和显式限制用于反向核对表头/范围、否定与分母，不可扩充所引事实或把限制说明当真值；限制本身也可能错误，必须回原PDF裁定，不能凭猜测解释源文矛盾。
 
 `evidence-audit.json`与报告、来源、树一并进入summary文件清单/SHA校验，canonical `run-record.json`严格字段不变。未通过schema、引用、支持或文件完整性仍失败；本模式不是关闭校验，也不把未知改成结论。
+
+## 成文前证据回查与审校采用
+
+```yaml
+reporter:
+  evidence_policy: layered
+  grounding_policy: source_grounded
+retrieval:
+  module_root: /path/to/pinned-researchctl-checkout
+```
+
+reader必须握手支持`evidence-snapshot/v1`，旧CLI/legacy不回退。全部来源的raw/clean/hash与knowledge/merge已提交envelope先被固定，未选方法、分母和未抽表格仍可查；缺附件、分页截断与范围单列。初始/最终快照准备使用已有qgate提交与CAS，未提交中断可恢复，已提交文件丢失/变化硬拒绝。
+
+`source_grounded`在同一九段report内生成中文原子陈述；verifier读全部本来源facts与完整正文，而非writer选材子集。数值/效应/计数单位、全局否定和冲突有机械约束与一次有界修复，逐论断结果写入`final/grounding-audit.json`。`source_exact`只输出原文陈述，是独立窄合同，不能冒充中文医学综合已通过。
+
+原run-record字段不变；summary列全部已提交final，ResearchCTL核验实际目录与运行envelope集合。审校单独append-only绑定run/report/evidence哈希，不改执行verdict。采用查询使用`research retrieval query --entity CURRENT --require-review agent_source_review ...`；未审/拒绝/失败当前run不能回退旧机器success。Agent审校不匹配human_clinical要求。
 
 ## CLI
 

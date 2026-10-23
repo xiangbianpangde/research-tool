@@ -1,6 +1,18 @@
 # research-tool 当前状态
 
-## 当前：自动报告根因、修复方案与版本检查点（2026-10-23）
+## 当前实施：ResearchCTL成文前证据与中文原子报告（2026-10-23）
+
+用户已授权实施P0–P3。开发分支research-tool `feat/researchctl-grounded-report-20261023`（基线dbeb57a），ResearchCTL干净adapter工作树`feat/grounded-evidence-20261023`（基线553b3ab）；主文字系统dirty树不写。P0初4项真实producer/consumer红后绿，修复citation title兼容与summary/record/实际final集合；独立review绑定run/report/已提交evidence，采用查询不回退旧success，不宣称临床许可。
+
+P1增加evidence-snapshot/v1全量graph/clean正文公开查询，不依赖成功report，不仅搜selected facts；source/hash/阶段身份和分页/缺附件范围显式。快照准备使用qgate:100/101的既有CAS提交，未提交中断从证据重建、已提交丢失/变化硬失败；原record字段不变。
+
+P2显式`source_grounded`中文原子论断读取完整来源而非局部选材；已增加数值关系/单位/OR-HR-RR/否定/冲突硬检查及全原文verifier、一次修复与持久审计。source_exact仅原文窄保证，不用来替代中文综合验收。工程实现/验收仍在推进，不将代码存在当P0–P3全部完成。
+
+当前新增反例与恢复测试已实际红绿；最终全量/审查/远程版本及P3新run验收尚待后续记录。用户已明确确认此前过滤端点现在正常受理；P3只按原端点/原研究目的一次有界新run，过滤再现即停，不绕过滤。所有旧医学失败/原件保留。
+
+上游验证：layout与新增body查询10项通过，legacy独立脚本50/32/139/85/83/54 checks通过（用隔离只读源clone fixture）；上游bench三处attestation/public-root失败在未修改HEAD归档中同样复现，未改历史证据或断言，不计通过。researchctl子目录旧pyproject为JSON而非TOML，pytest用-c pytest.ini，顶层SystemExit的legacy脚本直接运行。证据`research-output/grounded-report-implementation-20261023/`。
+
+## 历史：自动报告根因、修复方案与版本检查点（2026-10-23）
 
 用户要求追查医学解读错误与本地文字Agent检索系统的关系，并提供方案、及时提交推送。已完成[根因与分阶段修复方案](docs/plan/2026-10-23-researchctl-grounded-report-repair.md)，含PNG流程图、证据案例及10项反例验收；**P0–P3尚未实施，自动医学终验仍失败**。
 

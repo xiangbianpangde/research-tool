@@ -29,7 +29,9 @@ WebUI、research ui 命令及 Gradio 安装项已移除。
 | infrastructure/stages/research_strategies.py | Collect 内部的实体拆分、画像与查询策略 |
 | infrastructure/stages/cleaner.py、extractor.py | 保留科学比较符/表格边界的清洗、去重、原文片段ID选择式抽取、严格跨度校验与块级诊断 |
 | infrastructure/llm/openai_client.py、domain/errors.py | 结构化结束状态/JSON/schema校验与安全LLMFailureDiagnostic |
-| infrastructure/retrieval/manifest.py、client.py | 运行末尾检索清单与ResearchCTL公开CLI薄适配；当前未用于成文前完整证据反查 |
+| infrastructure/retrieval/manifest.py、client.py | 运行检索清单、能力握手、成文前evidence公开CLI与审校采用查询 |
+| infrastructure/retrieval/snapshot.py、review.py | 已提交stage/全量raw-clean证据快照与run/report/evidence哈希绑定的独立审校记录 |
+| nine_loop/grounding.py、grounded_synthesis.py | 全文依赖精确入账、中文原子论断数值/单位/效应硬检查、全部来源正反证核验及逐项审计 |
 | infrastructure/ingest/、application/video_pipeline.py | PDF/视频输入适配 |
 | domain/models.py、config.py | 固定九段配置与字段校验 |
 
@@ -45,6 +47,6 @@ WebUI、research ui 命令及 Gradio 安装项已移除。
 
 分层报告 `final/evidence-audit.json`保留selected/unselected原始claim IDs、节点内容家族覆盖、未解决finding、显式known_limitations及“不等于独立研究”的边界；与全部final文件共同受summary哈希校验。核心选材有maxItems和最多一次纠正，模型短编号映回ledger ID；邻近原文与限制仅作反向审核，不把选材遗漏解释成论文未报告。content_filter在抽取/阶段即停不重试。`run-record.json`字段不扩展，summary只附report_contract/strict_evidence_complete/unresolved_finding_count。
 
-当前报告选材及逐段核验共用section_facts，邻近上下文不是完整论文检索；生产manifest与ResearchCTL layout reader的真实互操作存在字段/文件集合差异。[根因与修复方案](../plan/2026-10-23-researchctl-grounded-report-repair.md)明确待实施的成文前snapshot、全量原文反查、原子论断正反证和独立审校状态，不作为当前已有能力。
+默认model_support仍使用section_facts，不把其称为全文语义保证。显式source_grounded已接snapshot/full-source读取、现有merge/inspect/qgate内部提交、中文原子正反证与独立review；source_exact仅窄原文模式。生产者/消费者字段与final集合互操作由真实九段测试验证。P3真实医学终验状态从STATUS读取，不能由代码或离线绿灯推定。
 
 历史来源和边界见 docs/plan/NINE-STAGE-BASELINE.json；当前进度及可复现实验从 STATUS.md 进入。

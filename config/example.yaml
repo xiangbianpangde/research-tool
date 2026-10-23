@@ -165,6 +165,8 @@ reporter:
   evidence_policy: strict         # strict默认零缺口合同；layered需显式选择证据与局限分层
   max_selected_claims: 60         # 仅layered正文选核心事实；未选ID与全量账本保留
   known_limitations: []           # 显式保留历史未解局限，不用模型遗漏冒充解决
+  grounding_policy: model_support # source_grounded: 成文前全文回查+中文原子论断；需ResearchCTL能力
+                                 # source_exact: 仅原文陈述的窄合同，不替代中文综合验收
 
 # Pipeline 配置：阶段固定为完整九段，不支持跳过或重排
 pipeline:

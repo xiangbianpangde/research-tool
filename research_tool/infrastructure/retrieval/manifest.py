@@ -522,6 +522,7 @@ def _citation_sources(
         result.append({
             "source_id": source_id,
             "locator": locator,
+            "title": str(source.get("title") or clean_parsed.get("title") or ""),
             "clean_path": _relative_path(root, clean_path),
             "raw_path": _relative_path(root, raw_path),
             "body_sha256": "sha256:" + clean_hash,
