@@ -27,7 +27,8 @@ _BLOCK_TAGS = re.compile(
     r"<(script|style|noscript|nav|footer|form|header|aside)[^>]*>.*?</\1>",
     re.DOTALL | re.IGNORECASE,
 )
-_ANY_TAG = re.compile(r"<[^>]+>")
+# Real markup starts with a tag name; '<0.7 ... >50' is scientific source text.
+_ANY_TAG = re.compile(r"</?[A-Za-z][A-Za-z0-9:_-]*(?=\s|/?>)[^<>]*>")
 # 广告关键词（01 §3.4 规则4）
 _AD = re.compile(r"\b(advertisement|sponsored|promoted|ad[_\-]?block|adsbygoogle)\b", re.IGNORECASE)
 # 尾部截断标题（01 §3.4 规则6）
@@ -73,7 +74,10 @@ def _split_meta(text: str) -> tuple[str, str]:
 
 
 def _strip_html(text: str) -> str:
+    text = re.sub(r"<!--.*?-->", "", text, flags=re.DOTALL)
     text = _BLOCK_TAGS.sub("\n", text)
+    text = re.sub(r"</t[dh]\s*>\s*<t[dh]\b[^<>]*>", " | ", text, flags=re.IGNORECASE)
+    text = re.sub(r"</tr\s*>", "\n", text, flags=re.IGNORECASE)
     text = _ANY_TAG.sub("", text)
     return unescape(text)
 
@@ -98,8 +102,10 @@ def _remove_nav_blocks(lines: list[str]) -> list[str]:
             j += 1
         block = lines[i:j]
         short = sum(1 for ln in block if _is_short(ln))
-        if len(block) >= _NAV_RUN_MIN and short / len(block) >= _NAV_SHORT_RATIO:
-            pass  # 视为导航，丢弃
+        table_rows = sum(" | " in ln for ln in block)
+        if (len(block) >= _NAV_RUN_MIN and short / len(block) >= _NAV_SHORT_RATIO
+                and table_rows < 2):
+            pass  # 视为导航，丢弃；临床/实验表格短行仍是正文
         else:
             out.extend(block)
         i = j
@@ -113,6 +119,8 @@ def _is_linkish(line: str) -> bool:
 def _find_content_start(lines: list[str]) -> int:
     """返回首个达到 _CONTENT_START_MIN 长度且非链接的行索引（01 §3.4 规则5）。"""
     for idx, ln in enumerate(lines):
+        if " | " in ln and idx + 1 < len(lines) and " | " in lines[idx + 1]:
+            return idx  # Preserve a substantive table even when all rows are short.
         if _is_linkish(ln):
             continue
         # A short, complete evidence sentence is already substantive content.

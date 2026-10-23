@@ -1,5 +1,59 @@
 # research-tool 当前状态
 
+## 当前分层报告合同与医学回读（2026-10-22）
+
+用户明确批准“证据与局限分层报告”，已新增显式`reporter.evidence_policy=strict|layered`（strict默认），核心选择maxItems硬上限/一次纠正、短模型编号映回原ledger ID、完整selected/unselected审计、来源内容家族覆盖、全部finding与known_limitations直接可见。最后有界补搜轮允许layered报告，保留strict_verdict/high/total；未解问题不关闭，STOP_SUCCESS不等于科学未知或人类验收清零。canonical run-record严格字段不变，evidence-audit.json与全部final文件进入summary/SHA检查。
+
+新真实10源运行`53a9c17d04834a2696ac0819f9e36348`（原8篇+用户只读库新增Shapiro35例/Miesbach37例）：9阶段completed，1558facts、118nodes、40核心选用/1518未选、24正文段、105finding+21known limits，机器STOP_SUCCESS，123final hashes/引用span通过。但医学回读发现无症状人数冲突/以选材遗漏误称论文无调整或无分母，**此自动版未作为最终医学报告采用，原件哈希保留**。
+
+此前本会话把Shapiro图1“10/35”解释为子组，**已由原PDF印刷p222推翻并撤回**：图注为全部35受试者，图1A10/35、同页正文15/35、摘要20/35均应并列作口径冲突，不能用猜测消解。25/35无促止血的阴性挑战原句仍直接成立。纠正记录在医学工作区source-page-checks/，没有偷偷改历史config或自动final。
+
+加入原文上下文和反向约束后的运行`58cc82a47cfc4bbe80f506842e67e92e`，report端点明确`content_filter`、0正文/0completion，终态STOP_ERROR，无final；不绕过滤、不再调用该端点。已离线复现并修复报告/抽取阶段重试过滤请求的缺陷，新增测试保证仅一次请求立即终止；选材纠正耗尽也不被stage重试放大次数。
+
+科研成果另存为Agent原文审校版`/Users/xbpd/Projects/纤维蛋白预测/runs/layered-report-20261021/审校分层报告.md`，连同105问题完整附录、26原句锚点、补件更新及运行边界，**不是新成功自动pipeline final或人类临床验收**。不得用机器支持检查替代原PDF/分母/独立性核对。最终回读另确认Miesbach原PDFp36的全体9人/子组12人无症状及血栓9/37与19%两处冲突，单列纠错与页图，不改原21项历史限制或自动审计。
+
+最终全量 **1214 passed / 3 skipped**，Ruff、git diff、uv lock离线、shell语法通过；Pi review限定production scope最终approve/0（untracked测试不入diff限制明示），content-filter即停新增回归由红绿/全量实际验证。代码仍本地`fix/structured-extraction-diagnostics-20261020`未提交/推送；未改密钥/锁文件/CI/归档/两处只读源库。证据`research-output/layered-reporting-20261021/`；DAUG无ledger不可用，人工同步README/config/CODE_MAP。
+
+## 当前恢复与证据完整性补修（2026-10-21，后续）
+
+最终prompt历史运行`602fdd07c4344cc2a851c9bfb3601cf7`在限流约8小时后按原配置实际resume：85块缓存身份/原句先回验、collect/clean持久哈希通过，97块抽取完成，1150条选择记录去重1131facts/8源；后续补搜无新正文、qgate94项（86coverage+8model），仍STOP_BUDGET。旧失败summary/runtime/cache已先复制到医学工作区`resume-20261021/`，没有把启动或缓存存在当成功。
+
+逐原文复核发现新的数据损坏根因：旧HTML正则`<[^>]+>`将`<0.7`至后文`>50`跨段当标签删掉；去标签粘连表格数字，短表又被导航过滤。已先写4项医学清洗回归（分别先红再绿），最小修复保留合法比较符、单元格/行边界及短表格；runtime输入契约8隔离旧clean提交。PDF两栏`pdftotext -layout`混行另改为新工作区默认阅读序副本并记来源hash/范围/单换行合并规则，不改原PDF或历史输入。
+
+补搜planner另有可复现的预算饥饿：按finding字典序取前8，模型缺口全部被细主题coverage挤掉。新增3项回归旧实现2失败1通过；现在优先级排序后同级model/coverage交替选，保留全部finding和门控。实际独立补搜验证选4model/4coverage，落盘5页；回读含不相关/导航/摘要，不作为医学补证。PubMed简短关键词可命中46，旧超长查询零命中，不能说数据库无资料。
+
+最新完整阅读输入8篇267937字符在新`evidence-integrity-20261021/`运行：99块extract、1247facts/103nodes/8源，所有span/hash/locator通过，32/102阴性挑战、22人手术阴性、80%/12%和比较阈值原句完整恢复。终态仍STOP_BUDGET，仅87coverage findings；新模型未报告旧8缺口不代表科学未知已解决，另建逐条原文锚定audit并明确`closed_in_pipeline=false`。未生成自动报告、未改质量阈值；是否允许单源局限型报告属于新契约，不能静默绕门控。
+
+本轮全量 **1197 passed / 3 skipped**，Ruff、git diff --check、uv lock离线、shell语法通过；离线九段补搜/合并/零模型resume通过。继续保留本地分支未提交改动，不改锁文件/CI/归档/凭据/只读源库/旧报告。运行及审计：`/Users/xbpd/Projects/纤维蛋白预测/runs/evidence-integrity-20261021/`；回归证据：`research-output/targeted-query-fix-20261021/`。
+
+## 当前修复续作：可验证原文片段选择（2026-10-21）
+
+继续在 `fix/structured-extraction-diagnostics-20261020` 本地分支，保留上一轮全部未提交改动；本轮仍未提交/推送/建PR。将自由生成quote的提示改为从 `EVIDENCE_UNITS` 选择带chunk哈希作用域的 `evidence_id`，事实/引用/偏移由程序从原文生成；不做空白/NFKC模糊匹配，不接受跨块/未知ID，模型附加的改写text/quote不进入账本。精确quote输入兼容路径仍逐字校验。缓存契约`extract-evidence-v4-selection`、运行输入契约7隔离旧输入/提示缓存。
+
+新增 `selection_invalid` / `quote_mismatch` 安全diagnostic含source、chunk索引/偏移/长度和selection索引；语义错误在抽取及阶段重试处显式拒绝盲重试。先写12项回归在旧实现全失败，后增加near-max块“提示不重复发送正文”回归；最终13项新增、受影响66项通过，全量 **1190 passed / 3 skipped**，离线九段含1轮补搜/零模型resume通过。Ruff、差异空白、锁文件离线校验和shell语法通过。
+
+真实验证：同一原失败区域2800字符块，最终prompt一次生成16条事实、全部精确跨度通过，6.099秒。8篇正文版真实整批已完成extract与knowledge：97块、1175条选择记录去重1159条facts、8个来源，全部graph/span/hash/locator回读通过。原输入Fibrinogest首块纯作者/机构，模型正确返回空，原运行停止保留；随后只在独立正文副本移除明确文前元数据7210字符，保留原8篇305218字符及全部后续正文，记录每篇裁剪偏移/哈希，不改原件或放宽空结果检查。
+
+整批后续执行inspect/qgate、targeted/merge及重检，但补搜无新增正文，质量门控仍有来源覆盖及真实证据缺口，终态`STOP_BUDGET`、`pipeline_complete=false`；**抽取修复成功不等于完整自动调研成功**。最终不重复正文的prompt独立同8篇重跑在85/97块后遇HTTP429停止，1099条部分选择记录全部回读通过，缓存保留；`STOP_ERROR`不是成功，不能采用旧报告冒充。限流后未密集盲重试。
+
+现有Pi `/review`两项告警（语义失败隐式上下文重试识别、提示重复正文）均已修复，最终复审approve/0 findings；其报告明确两份untracked测试未包含diff，测试已实际执行红绿/全量。DAUG因仓库无ledger不可用，未初始化额外设施，现行README/CODE_MAP与本页人工同步。
+
+工具修复证据：`research-output/evidence-selection-fix-20261020/`。医学重跑及文前裁剪证据：`/Users/xbpd/Projects/纤维蛋白预测/runs/rerun-evidence-selection-20261021/`。本轮没有覆盖历史报告/失败、两处只读源库、`.env`、`uv.lock`、CI或归档，也不声称临床模型/医学语义已验收。
+
+## 当前修复：结构化抽取与安全诊断（2026-10-20）
+
+分支 `fix/structured-extraction-diagnostics-20261020`，基于已合并 `origin/main`；尚未提交、推送或建PR。此前根目录同步PR #3已合入main，下面2026-10-19快照保持历史原文。
+
+- 已修复：OpenAI-compatible结构化调用拒绝空正文、仅推理、无choices、截断/过滤/非正常结束；JSON/schema异常保留typed安全诊断，不再将空正文替成`{}`。正式抽取反复全空则停止，不写成功缓存；原文逐字引用检查与质量门控不放宽。
+- `run-summary.stage_metrics[].diagnostic`、失败事件及`runs/<run_id>/failure-diagnostic.json`保留reason、结束原因、长度/SHA、可得token、JSON位置/schema字段与来源块；不保存响应/推理原文、headers、密钥。canonical `run-record.json`字段契约不变。runtime输入契约5、chunk契约`extract-evidence-v2`隔离旧缓存，旧运行原件保留。
+- 已证实真实失败机制：同2800字符原研究清洗块、4096输出预算，实测`finish_reason=length`、正文0字符、completion_tokens=reasoning_tokens=4096；不能据此断言以前未保存响应全部同因。
+- 已查DeepSeek官方thinking-mode参数，并实际验证本OpenCode Go模型支持显式`thinking: disabled`：同SHA输入、同预算，一次正常结束，reasoning_tokens=0、completion_tokens=2024、13条事实逐字引文全部通过，约10.841秒。另430字符原文真实抽取3条通过，约13.421秒。默认不猜模型参数、不自动加预算；显式本机示例位于忽略运行目录`nonthinking-run.yaml`。
+- 验证：新增17项回归先在旧实现16 failed/1 passed，再全通过；受影响192 passed；全量隔离环境 **1177 passed / 3 skipped**；Ruff、差异空白、`uv lock --check --offline`、shell语法与示例配置解析通过。离线九段生产冒烟PASS，含一轮补搜合并、报告SHA核对与resume_model_calls=0；它仍模拟外部I/O，不是完整真实联网研究验收。
+- 初次扩展回归暴露canonical run-record不可直接加字段，已改sidecar并复验检索契约。首次全量命令因显式禁用dotenv导致一项dotenv加载测试失败；改用隔离空RESEARCH_HOME保留dotenv行为后通过，不修改断言。原始失败日志均保留。
+- 现有Pi `/review`已实际运行：生产补丁approve/0 findings；其报告明确新增untracked测试未进入diff，新增测试由红绿和全量验证。DAUG因未初始化ledger不可用，未擅自初始化；README、配置例和CODE_MAP按真实代码人工同步。
+
+证据：`research-output/structured-extraction-fix-20261020/`，含red/affected/full日志XML、live-initial/live-original-block/live-nonthinking回执、offline-smoke、review.md及本地无密钥配置。未改 `.env`、`uv.lock`、CI/归档或两处只读医学资料库；未重跑整批医学调研，未声称完整九段或医学语义已验证。
+
 ## 当前快照（2026-10-19）
 
 - 默认分支为 `main`。根目录重组已由 [PR #2](https://github.com/xiangbianpangde/research-tool/pull/2) 合入，merge commit `56f370e`；当前根文件同步工作在 `chore/sync-root-files`，本地实际分支以 `git status` 为准。

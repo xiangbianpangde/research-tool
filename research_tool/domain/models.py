@@ -334,6 +334,9 @@ class ReporterConfig(BaseModel):
     format: Literal["markdown", "html"] = "markdown"
     style: Literal["report", "feasibility", "review", "article"] = "report"
     max_length: int = Field(default=30000, gt=0)
+    evidence_policy: Literal["strict", "layered"] = "strict"
+    max_selected_claims: int = Field(default=60, ge=1, le=200)
+    known_limitations: list[str] = Field(default_factory=list)
 
 
 class TalkConfig(BaseModel):
@@ -694,6 +697,35 @@ class VideoIngestConfig(BaseModel):
     ffmpeg_path: str | None = None
 
 
+class LLMFailureDiagnostic(BaseModel):
+    """Allowlisted structured-output metadata; never response text or provider headers."""
+
+    model_config = {"extra": "forbid"}
+    reason: Literal[
+        "missing_choices", "invalid_response", "truncated", "content_filter",
+        "unexpected_finish", "empty_content", "json_invalid", "schema_invalid",
+        "empty_extraction", "selection_invalid", "quote_mismatch",
+    ]
+    finish_reason: Literal[
+        "stop", "length", "content_filter", "tool_calls", "function_call", "other",
+    ] | None = None
+    content_chars: int | None = Field(default=None, ge=0)
+    content_sha256: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
+    prompt_tokens: int | None = Field(default=None, ge=0)
+    completion_tokens: int | None = Field(default=None, ge=0)
+    total_tokens: int | None = Field(default=None, ge=0)
+    reasoning_tokens: int | None = Field(default=None, ge=0)
+    json_line: int | None = Field(default=None, ge=1)
+    json_column: int | None = Field(default=None, ge=1)
+    json_position: int | None = Field(default=None, ge=0)
+    schema_fields: list[str] = Field(default_factory=list, max_length=8)
+    source_id: str | None = Field(default=None, pattern=r"^[0-9a-f]{16}$")
+    chunk_index: int | None = Field(default=None, ge=0)
+    chunk_offset: int | None = Field(default=None, ge=0)
+    chunk_chars: int | None = Field(default=None, ge=0)
+    selection_index: int | None = Field(default=None, ge=0)
+
+
 class StageRunMetric(BaseModel):
     """One stage's wall-clock result, persisted in ``run-summary.json``."""
 
@@ -701,6 +733,7 @@ class StageRunMetric(BaseModel):
     status: Literal["completed", "failed", "skipped"]
     duration_sec: float = Field(default=0.0, ge=0.0)
     message: str = ""
+    diagnostic: LLMFailureDiagnostic | None = None
 
 
 class PipelineResult(BaseModel):

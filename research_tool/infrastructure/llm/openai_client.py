@@ -7,6 +7,7 @@ DeepSeek、Ollama 均提供 OpenAI 兼容端点，通过 base_url 区分。
 from __future__ import annotations
 
 import copy
+import hashlib
 import json
 from collections.abc import AsyncIterator
 from typing import TYPE_CHECKING, TypeVar
@@ -14,8 +15,10 @@ from typing import TYPE_CHECKING, TypeVar
 import httpx
 from pydantic import BaseModel, ValidationError
 
-from ...domain.errors import LLMAuthenticationError, LLMError, classify_llm_error
-from ...domain.models import LLMConfig
+from ...domain.errors import (
+    LLMAuthenticationError, LLMError, LLMStructuredOutputError, classify_llm_error,
+)
+from ...domain.models import LLMConfig, LLMFailureDiagnostic
 from .base import LLMClient
 
 if TYPE_CHECKING:
@@ -157,8 +160,8 @@ class OpenAILLMClient(LLMClient):
             if isinstance(error, LLMAuthenticationError):
                 self._mark_authentication_failed()
             raise error
-        content = resp.choices[0].message.content or "{}"
-        return _parse_structured(content, schema)
+        content, metadata = _structured_content(resp)
+        return _parse_structured(content, schema, metadata=metadata)
 
     async def stream(self, prompt: str, system: str | None = None) -> AsyncIterator[str]:
         import asyncio
@@ -360,9 +363,72 @@ def _strip_think(text: str) -> str:
     return out.strip()
 
 
-def _parse_structured(content: str, schema: type[T]) -> T:
-    """容错解析：剥离 <think> 推理块 / ```json 包裹 / 多余文本后再解析。"""
+def _structured_content(response) -> tuple[str, dict]:
+    """Validate completion status before parsing; retain numeric metadata, never text."""
+    choices = getattr(response, "choices", None)
+    choice = choices[0] if isinstance(choices, list) and choices else None
+    message = getattr(choice, "message", None)
+    content = getattr(message, "content", None)
+    finish = getattr(choice, "finish_reason", None)
+    known = {"stop", "length", "content_filter", "tool_calls", "function_call"}
+    metadata = {"finish_reason": finish if finish in known else "other"} if finish else {}
+    if isinstance(content, str):
+        metadata.update(content_chars=len(content),
+                        content_sha256=hashlib.sha256(content.encode()).hexdigest())
+    usage = getattr(response, "usage", None)
+    for name in ("prompt_tokens", "completion_tokens", "total_tokens", "reasoning_tokens"):
+        owner = usage
+        if name == "reasoning_tokens":
+            owner = getattr(usage, "completion_tokens_details", None)
+        value = getattr(owner, name, None)
+        if isinstance(value, int) and not isinstance(value, bool) and value >= 0:
+            metadata[name] = value
+    reason = None
+    if choice is None:
+        reason = "missing_choices"
+    elif finish == "length":
+        reason = "truncated"
+    elif finish == "content_filter" or getattr(message, "refusal", None):
+        reason = "content_filter"
+    elif finish is not None and finish != "stop":
+        reason = "unexpected_finish"
+    elif content is not None and not isinstance(content, str):
+        reason = "invalid_response"
+    elif not content or not _strip_think(content).strip():
+        reason = "empty_content"
+    if reason:
+        raise LLMStructuredOutputError(LLMFailureDiagnostic(reason=reason, **metadata))
+    return content, metadata
+
+
+def _schema_error_fields(schema: type[BaseModel], error: ValidationError) -> list[str]:
+    """Only declared property names may appear; dictionary keys/model values are untrusted."""
+    properties: set[str] = set()
+
+    def collect(node):
+        if isinstance(node, dict):
+            properties.update(node.get("properties", {}))
+            for value in node.values():
+                collect(value)
+        elif isinstance(node, list):
+            for value in node:
+                collect(value)
+
+    collect(schema.model_json_schema())
+    paths = []
+    for item in error.errors(include_url=False, include_context=False, include_input=False)[:8]:
+        path = ".".join(str(part) if isinstance(part, int) or part in properties else "*"
+                        for part in item["loc"][:12])
+        paths.append(path or "root")
+    return list(dict.fromkeys(paths))
+
+
+def _parse_structured(content: str, schema: type[T], *, metadata: dict | None = None) -> T:
+    """容错解析完整响应；解析失败只公开安全位置与schema字段，不公开模型正文。"""
+    metadata = metadata or {}
     text = _strip_think(content.strip())
+    if not text:
+        raise LLMStructuredOutputError(LLMFailureDiagnostic(reason="empty_content", **metadata))
     # 2) 去掉 ```json ... ``` 代码块包裹
     if text.startswith("```"):
         text = text.split("```", 2)[1]
@@ -378,10 +444,18 @@ def _parse_structured(content: str, schema: type[T]) -> T:
             try:
                 data = json.loads(text[start : end + 1])
             except json.JSONDecodeError:
-                raise LLMError("LLM 结构化输出不是合法 JSON") from e
+                raise LLMStructuredOutputError(LLMFailureDiagnostic(
+                    reason="json_invalid", json_line=e.lineno, json_column=e.colno,
+                    json_position=e.pos, **metadata,
+                )) from e
         else:
-            raise LLMError("LLM 结构化输出不是合法 JSON") from e
+            raise LLMStructuredOutputError(LLMFailureDiagnostic(
+                reason="json_invalid", json_line=e.lineno, json_column=e.colno,
+                json_position=e.pos, **metadata,
+            )) from e
     try:
         return schema.model_validate(data)
     except ValidationError as e:
-        raise LLMError("LLM 结构化输出不符合预期 schema") from e
+        raise LLMStructuredOutputError(LLMFailureDiagnostic(
+            reason="schema_invalid", schema_fields=_schema_error_fields(schema, e), **metadata,
+        )) from e

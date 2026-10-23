@@ -19,7 +19,7 @@ from typing import Any
 
 from ..common.logging_config import get_logger
 from ..common.slug import slugify
-from ..domain.errors import LLMAuthenticationError, LLMError, StageError
+from ..domain.errors import LLMAuthenticationError, LLMError, StageError, find_llm_diagnostic
 from ..domain.models import (
     NINE_STAGES, PipelineConfig, PipelineResult, ReportResult, StageEvent, StageRunMetric,
 )
@@ -134,9 +134,14 @@ class ResearchPipeline:
                 self._result.failed_stage = self._active
                 self._result.verdict = "STOP_ERROR"
                 self._result.report_result = None
+                diagnostic = find_llm_diagnostic(exc)
                 self._result.stage_metrics.append(StageRunMetric(
-                    stage=self._active, status="failed", message=str(exc)))
-                yield StageEvent(stage=self._active, status="failed", message=str(exc))
+                    stage=self._active, status="failed", message=str(exc),
+                    diagnostic=diagnostic))
+                data = (
+                    {"diagnostic": diagnostic.model_dump(exclude_none=True)} if diagnostic else None
+                )
+                yield StageEvent(stage=self._active, status="failed", message=str(exc), data=data)
             finally:
                 self._summary()
 
@@ -162,7 +167,7 @@ class ResearchPipeline:
             from ..infrastructure.ingest.pdf import _collect_pdfs
             path = Path(self.config.pdf_dir).resolve()
             inputs[str(path)] = {p.name: _hash(p.read_bytes()) for p in _collect_pdfs(path)}
-        fingerprint = _hash(_bytes({"runtime_contract": 4, "topic": self.topic,
+        fingerprint = _hash(_bytes({"runtime_contract": 10, "topic": self.topic,
                                    "config": config, "inputs": inputs}))
         self._state = (self.runtime.load_or_init(fingerprint) if self.config.resume
                        else self.runtime.start_new(fingerprint))
@@ -192,7 +197,9 @@ class ResearchPipeline:
             inspection = self._payload(f"inspect:{round_no}")
             decision = gate_decision(inspection,
                                     max_high=self.config.nine_loop.max_high_findings,
-                                    max_total=self.config.nine_loop.max_total_findings)
+                                    max_total=self.config.nine_loop.max_total_findings,
+                                    evidence_policy=self.config.reporter.evidence_policy,
+                                    final_round=round_no == self.config.nine_loop.max_rounds)
             async for event in self._step(f"qgate:{round_no}", lambda: decision):
                 yield event
             decision = self._payload(f"qgate:{round_no}")
@@ -201,7 +208,7 @@ class ResearchPipeline:
                     if stage not in self._result.stages_completed:
                         self._result.stages_skipped.append(stage)
                         yield StageEvent(stage=stage, status="skipped", message="无需补搜")
-                async for event in self._step("report", lambda: self._report(graph)):
+                async for event in self._step("report", lambda: self._report(graph, inspection)):
                     yield event
                 report = self._payload("report")
                 self._result.report_result = ReportResult(
@@ -261,11 +268,21 @@ class ResearchPipeline:
             except LLMAuthenticationError:
                 raise
             except StageError as exc:
-                if not isinstance(exc.__cause__, LLMError) or attempt >= attempts:
+                diagnostic = find_llm_diagnostic(exc)
+                semantic_failure = diagnostic is not None and diagnostic.reason in {
+                    "selection_invalid", "quote_mismatch", "content_filter",
+                }
+                if (
+                    semantic_failure
+                    or not isinstance(exc.__cause__, LLMError)
+                    or attempt >= attempts
+                ):
                     raise
                 await self._retry_delay(attempt)
-            except LLMError:
-                if attempt >= attempts:
+            except LLMError as exc:
+                diagnostic = find_llm_diagnostic(exc)
+                if (attempt >= attempts
+                        or diagnostic is not None and diagnostic.reason == "content_filter"):
                     raise
                 await self._retry_delay(attempt)
         assert payload is not None
@@ -467,16 +484,26 @@ class ResearchPipeline:
     def _merge(self, graph: dict[str, Any], delta: dict[str, Any]) -> dict[str, Any]:
         return merge_evidence_graph(graph, delta, graph_digest(graph))
 
-    async def _report(self, graph: dict[str, Any]) -> dict[str, Any]:
-        report = await assemble_report(graph, self._get_llm(), self.topic,
-                                       self.config.reporter.max_length,
-                                       style=self.config.reporter.style)
+    async def _report(
+        self, graph: dict[str, Any], inspection: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        report = await assemble_report(
+            graph, self._get_llm(), self.topic, self.config.reporter.max_length,
+            style=self.config.reporter.style, evidence_policy=self.config.reporter.evidence_policy,
+            inspection=inspection, minimum_sources=self.config.organizer.min_evidence_per_node,
+            known_limitations=self.config.reporter.known_limitations,
+            max_selected_claims=self.config.reporter.max_selected_claims,
+        )
         final = self.run_root / "final"
         files = materialize_graph(graph, final, self.topic)
         files += [final / "tree" / "00-主表.md", final / "tree" / "knowledge.json"]
         sources_file = final / "sources.json"
         _atomic(sources_file, _bytes(graph["sources"]))
         files.append(sources_file)
+        if "evidence_audit" in report:
+            audit_file = final / "evidence-audit.json"
+            _atomic(audit_file, _bytes(report["evidence_audit"]))
+            files.append(audit_file)
         report_file = self.run_root / "final" / "report.md"
         _atomic(report_file, report["markdown"].encode("utf-8"))
         return {**report, "output_files": [str(path) for path in files] + [str(report_file)]}
@@ -647,8 +674,7 @@ class ResearchPipeline:
         summary_files = {}
         if verdict == "STOP_SUCCESS":
             final = self.run_root / "final"
-            for path in [final / "report.md", final / "sources.json",
-                         *sorted((final / "tree").glob("*"))]:
+            for path in sorted(final.rglob("*")):
                 if path.is_file():
                     summary_files[path.relative_to(self.root).as_posix()] = _hash(path.read_bytes())
         summary = {"version": 1, "run_id": self._state.get("run_id"),
@@ -661,7 +687,8 @@ class ResearchPipeline:
                    "pipeline_complete": pipeline_complete,
                    "started_at": self._started_at, "finished_at": finished_at,
                    "input_fingerprint": self._state.get("input_fingerprint"),
-                   "stage_metrics": [metric.model_dump() for metric in result.stage_metrics],
+                   "stage_metrics": [metric.model_dump(exclude_none=True)
+                                     for metric in result.stage_metrics],
                    "files": summary_files,
                    "output_dir": (
                        (self.run_root / "final").relative_to(self.root).as_posix()
@@ -671,6 +698,24 @@ class ResearchPipeline:
                        record_path.relative_to(self.root).as_posix() if record_path else None
                    ),
                    "elapsed_sec": round(result.elapsed_sec, 3)}
+        if "report" in self._state.get("completed_stages", {}):
+            audit = self._payload("report").get("evidence_audit")
+            if audit is not None:
+                summary.update(
+                    report_contract=audit["contract"],
+                    strict_evidence_complete=audit["strict_evidence_complete"],
+                    unresolved_finding_count=len(audit["unresolved_findings"]),
+                )
+        if self._state.get("run_id"):
+            failures = [metric for metric in result.stage_metrics if metric.diagnostic is not None]
+            if failures:
+                metric = failures[-1]
+                path = self.run_root / "failure-diagnostic.json"
+                _atomic(path, _bytes({
+                    "version": 1, "run_id": self._state["run_id"], "stage": metric.stage,
+                    "diagnostic": metric.diagnostic.model_dump(exclude_none=True),
+                }))
+                summary["diagnostic_path"] = path.relative_to(self.root).as_posix()
         result.run_summary_path = self.root / "run-summary.json"
         _atomic(result.run_summary_path, _bytes(summary))
         if record_path is not None:

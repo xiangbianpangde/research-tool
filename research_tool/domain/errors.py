@@ -17,6 +17,8 @@ import traceback
 from dataclasses import dataclass, field
 from enum import Enum
 
+from .models import LLMFailureDiagnostic
+
 
 # --------------------------------------------------------------------------- #
 # 异常基类（V1.0 已有，保持向后兼容）
@@ -34,6 +36,8 @@ class ConfigValidationError(ResearchToolError):
 class StageError(ResearchToolError):
     """某个 Stage 执行失败。"""
 
+    diagnostic: LLMFailureDiagnostic | None = None
+
     def __init__(self, stage: str, message: str) -> None:
         self.stage = stage
         super().__init__(f"[{stage}] {message}")
@@ -45,6 +49,33 @@ class LLMError(ResearchToolError):
 
 class LLMAuthenticationError(LLMError):
     """LLM provider 拒绝凭据。必须立即终止，禁止阶段降级或继续请求。"""
+
+
+class LLMStructuredOutputError(LLMError):
+    """A safe, retryable structured-response failure with no model text in its message."""
+
+    def __init__(self, diagnostic: LLMFailureDiagnostic) -> None:
+        self.diagnostic = diagnostic
+        description = {
+            "json_invalid": "LLM 结构化输出不是合法 JSON",
+            "schema_invalid": "LLM 结构化输出不符合预期 schema",
+            "empty_extraction": "LLM 反复返回空抽取结果",
+        }.get(diagnostic.reason, "LLM 结构化输出失败")
+        super().__init__(f"{description}（{diagnostic.reason}）")
+
+
+def find_llm_diagnostic(exc: BaseException) -> LLMFailureDiagnostic | None:
+    """Recover only our typed metadata, never stringify an arbitrary exception chain."""
+    seen: set[int] = set()
+    current: BaseException | None = exc
+    while current is not None and id(current) not in seen:
+        seen.add(id(current))
+        if isinstance(current, (LLMStructuredOutputError, StageError)):
+            diagnostic = getattr(current, "diagnostic", None)
+            if isinstance(diagnostic, LLMFailureDiagnostic):
+                return diagnostic
+        current = current.__cause__ or current.__context__
+    return None
 
 
 def _status_code_from_exception(exc: BaseException) -> int | None:
@@ -629,6 +660,8 @@ __all__ = [
     "ConfigValidationError",
     "StageError",
     "LLMError",
+    "LLMStructuredOutputError",
+    "find_llm_diagnostic",
     "SearchError",
     "CollectError",
     "UrlBlockedError",

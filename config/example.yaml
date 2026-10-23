@@ -10,7 +10,7 @@ llm:
   api_key: ${DEEPSEEK_API_KEY}  # 支持 ${ENV_VAR} 环境变量引用
   base_url: https://api.deepseek.com/v1  # DeepSeek endpoint；OpenAI 留 null
   temperature: 0.3
-  max_tokens: 4096
+  max_tokens: 4096            # 推理模型可能将此预算耗在推理上；truncated时先查reasoning_tokens
   connect_timeout_sec: 10       # TCP 建连硬超时
   read_timeout_sec: 120         # 单次网络读取超时（不采用 SDK 默认 600s）
   request_timeout_sec: 180      # 整个 chat/stream 调用硬墙
@@ -21,7 +21,8 @@ llm:
   # 密钥通过 LLM_API_KEY 注入。支持 LLM_PROVIDER / LLM_MODEL / LLM_BASE_URL 临时切换。
   # request_options:
   #   extra_body:
-  #     thinking: {type: disabled}  # 仅在端点确实支持时启用，不按模型名自动猜参数
+  #     thinking: {type: disabled}  # 仅显式启用；OpenCode Go deepseek-v4.1-flash单块已实测有效
+  # 默认不控制推理、不自动增预算。空正文/length会失败并写安全diagnostic，不能当{}成功。
 
 # Collector 配置
 collector:
@@ -139,7 +140,7 @@ cleaner:
 # Extractor 配置
 extractor:
   enabled: true                  # 九段主链固定启用，不支持关闭 extract
-  fail_on_chunk_error: true      # 失败块不写完成产物，由 pipeline 有界重试
+  fail_on_chunk_error: true      # 失败/反复全空块不写完成产物；保留安全诊断并有界重试
   concurrency: 4                 # LLM 并行块数（实测 4 并发无限流；1=串行最稳）
   tasks:
     - ner
@@ -161,6 +162,9 @@ reporter:
   format: markdown               # 正式九段输出固定 markdown；html 会报错
   style: report                  # report | feasibility | review | article
   max_length: 20000
+  evidence_policy: strict         # strict默认零缺口合同；layered需显式选择证据与局限分层
+  max_selected_claims: 60         # 仅layered正文选核心事实；未选ID与全量账本保留
+  known_limitations: []           # 显式保留历史未解局限，不用模型遗漏冒充解决
 
 # Pipeline 配置：阶段固定为完整九段，不支持跳过或重排
 pipeline:

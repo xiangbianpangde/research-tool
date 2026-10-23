@@ -11,6 +11,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+import re
 from pathlib import Path
 from typing import Any
 from uuid import uuid4
@@ -19,13 +20,17 @@ from pydantic import BaseModel, Field, ValidationError
 
 from ..llm.base import LLMClient, gather_fail_fast
 from ..llm.openai_client import OpenAILLMClient
-from ...domain.errors import LLMAuthenticationError, StageError
-from ...domain.models import Entity, ExtractorConfig, ExtractResult, Relation, Triple
+from ...domain.errors import (
+    LLMAuthenticationError, LLMStructuredOutputError, StageError, find_llm_diagnostic,
+)
+from ...domain.models import (
+    Entity, ExtractorConfig, ExtractResult, LLMFailureDiagnostic, Relation, Triple,
+)
 from .base import ensure_dir, write_json
 from ...nine_loop.evidence import parse_source
 
 _CACHE_VERSION = 1
-_CACHE_CONTRACT = "extract-evidence-v1"
+_CACHE_CONTRACT = "extract-evidence-v4-selection"
 _COMPLETED_FILES = ("entities.json", "claims.json", "relations.json", "triples.json", "schema.json")
 
 _SYSTEM = (
@@ -80,6 +85,27 @@ def _strip_meta(text: str) -> str:
     return parse_source(text)["text"]
 
 
+def _evidence_units(chunk: str) -> list[dict[str, Any]]:
+    """Partition exact source text, never normalize PDF columns, Unicode or whitespace."""
+    scope = hashlib.sha256(chunk.encode()).hexdigest()[:12]
+    units = []
+    for piece in re.finditer(r"[^\r\n]+", chunk):
+        line = piece.group()
+        start = piece.start()
+        # A boundary is presentation-only: every emitted span still slices original bytes/text.
+        for match in re.finditer(r".*?(?:[.!?。！？](?=\s|$)|$)", line):
+            value = match.group()
+            if not value.strip():
+                continue
+            left = start + match.start() + len(value) - len(value.lstrip())
+            right = start + match.end() - (len(value) - len(value.rstrip()))
+            units.append({
+                "evidence_id": f"{scope}:{len(units)}", "start": left, "end": right,
+                "text": chunk[left:right],
+            })
+    return units
+
+
 def _build_prompt(config: ExtractorConfig, chunk: str) -> str:
     parts = ["请从下面文本中抽取信息。\n"]
     if "ner" in config.tasks:
@@ -94,12 +120,16 @@ def _build_prompt(config: ExtractorConfig, chunk: str) -> str:
         parts.append("抽取 relations: [{subject, predicate, object, confidence}]。")
     if "triple" in config.tasks:
         parts.append("抽取 triples: [{head, relation, tail}]（用于知识图谱）。")
-    parts.append("\n未涉及的字段返回空数组。\n\n--- 文本 ---\n")
+    parts.append("\n未涉及的字段返回空数组。\n\n")
     parts.insert(1, (
-        "同时提取有实质内容的事实 claims:[{text,quote,topic}]；quote 必须逐字复制下面正文的"
-        "完整证据句；topic 为简短子主题。禁止用URL或标题代替正文证据。\n"
+        "事实使用下面的原文片段选择，不要重打或改写引文：claims:[{evidence_id,topic}]。"
+        "evidence_id必须从EVIDENCE_UNITS逐字选择；程序会用该片段原文生成quote及偏移。"
+        "不要返回text/quote或自行拼句。只选实质事实、定义、数量、限制与反面材料，"
+        "不要选作者、单位、题名、参考文献、表格碎片或无意义的残句。"
+        "topic用少量稳定的宽主题（例如人群/结局/风险因素/方法/局限），避免每句造新主题。\n"
     ))
-    parts.append(chunk)
+    parts.append("EVIDENCE_UNITS:\n")
+    parts.append(json.dumps(_evidence_units(chunk), ensure_ascii=False))
     return "".join(parts)
 
 
@@ -120,9 +150,15 @@ def _verified_claims(
 ) -> list[dict]:
     """Bind quotes to both the prompt chunk and canonical source body."""
     verified = []
-    for proposed in claims:
-        quote = proposed.get("quote", "").strip()
-        chunk_start = chunk.find(quote) if quote else -1
+    choices = {item["evidence_id"]: item for item in _evidence_units(chunk)}
+    for selection_index, proposed in enumerate(claims):
+        chosen = choices.get(proposed.get("evidence_id", ""))
+        if "evidence_id" in proposed and chosen is None:
+            raise _evidence_failure(
+                "selection_invalid", source, chunk, chunk_offset, selection_index,
+            )
+        quote = chosen["text"] if chosen else proposed.get("quote", "").strip()
+        chunk_start = chosen["start"] if chosen else (chunk.find(quote) if quote else -1)
         start = chunk_offset + chunk_start
         if (
             chunk_start < 0
@@ -130,7 +166,7 @@ def _verified_claims(
             or source["text"][start:start + len(quote)] != quote
             or not source["locator"]
         ):
-            raise StageError("extract", "模型引用不在当前正文块或规范化正文中，停止抽取")
+            raise _evidence_failure("quote_mismatch", source, chunk, chunk_offset, selection_index)
         claim_id = hashlib.sha256((source["source_id"] + quote).encode()).hexdigest()
         verified.append({
             "claim_id": claim_id,
@@ -143,6 +179,15 @@ def _verified_claims(
             }],
         })
     return verified
+
+
+def _evidence_failure(reason, source, chunk, offset, selection_index) -> StageError:
+    error = StageError("extract", f"原文引用选择无效（{reason}），停止抽取")
+    error.__cause__ = LLMStructuredOutputError(LLMFailureDiagnostic(
+        reason=reason, source_id=source["source_id"], chunk_offset=offset,
+        chunk_chars=len(chunk), selection_index=selection_index,
+    ))
+    return error
 
 
 def _digest(value: Any) -> str:
@@ -190,15 +235,39 @@ def _save_chunk_cache(path: Path, entries: dict[str, dict[str, Any]]) -> None:
 
 
 def _is_structured_failure(exc: BaseException) -> bool:
-    """Recognize parser/schema errors without trusting provider message text."""
+    """Recognize retryable parser/schema errors without trusting provider text."""
+    detail = find_llm_diagnostic(exc)
+    if detail is not None and detail.reason in {
+        "selection_invalid", "quote_mismatch", "content_filter",
+    }:
+        return False
     seen: set[int] = set()
     current: BaseException | None = exc
     while current is not None and id(current) not in seen:
         seen.add(id(current))
-        if isinstance(current, (ValidationError, json.JSONDecodeError)):
+        if isinstance(current, (LLMStructuredOutputError, ValidationError, json.JSONDecodeError)):
             return True
         current = current.__cause__ or current.__context__
     return False
+
+
+def _structured_chunk_error(exc: BaseException, context: dict[str, Any]) -> StageError:
+    detail = find_llm_diagnostic(exc)
+    if detail is not None:
+        detail = detail.model_copy(update=context)
+        exc = LLMStructuredOutputError(detail)
+    suffix = f"（{detail.reason}）" if detail is not None else ""
+    evidence_failure = detail is not None and detail.reason in {
+        "selection_invalid", "quote_mismatch",
+    }
+    label = "模型原文引用选择无效" if evidence_failure else "模型结构化证据无效"
+    error = StageError("extract", f"{label}{suffix}，停止抽取")
+    if evidence_failure:
+        # Semantic evidence failures must not use the LLM stage's transient retry path.
+        error.diagnostic = detail
+    else:
+        error.__cause__ = exc
+    return error
 
 
 def _isolate_previous_outputs(out_dir: Path) -> None:
@@ -246,7 +315,7 @@ class Extractor:
         )
         invalid_evidence = False
 
-        async def _do(job):
+        async def _do(job):  # noqa: PLR0915 - cache/retry/filter paths share fail-fast state
             nonlocal invalid_evidence
             source_file, source, file_lines, offset, ch, index = job
             key = _digest({"identity": identity, "source": source,
@@ -260,7 +329,7 @@ class Extractor:
                 if cached is not None:
                     try:
                         res = _ChunkResult.model_validate(cached["result"])
-                        if transient_retry and not (
+                        if (transient_retry or self.config.fail_on_chunk_error) and not (
                             res.claims or res.entities or res.relations or res.triples
                         ):
                             raise ValueError("empty extraction cache")
@@ -276,25 +345,30 @@ class Extractor:
                             res = await llm.chat_structured(
                                 prompt, _ChunkResult, system=_SYSTEM
                             )
-                            if (
-                                structured_attempts > 1
-                                and not res.claims
-                                and not res.entities
-                                and not res.relations
-                                and not res.triples
-                                and structured_attempt == 0
-                            ):
-                                prompt += (
-                                    "\n\n上一次返回了空结果。正文包含可抽取证据时，"
-                                    "至少返回一个 claims 条目；quote 必须逐字复制正文中的完整"
-                                    "证据句，不能编造或使用 URL。"
-                                )
-                                continue
+                            if not (res.claims or res.entities or res.relations or res.triples):
+                                if structured_attempt < structured_attempts - 1:
+                                    prompt += (
+                                        "\n\n上一次返回了空结果。正文包含可抽取证据时，"
+                                        "至少选择一个实质证据的claims条目；evidence_id必须来自"
+                                        "EVIDENCE_UNITS，不重打引文、不能编造ID或使用URL。"
+                                    )
+                                    continue
+                                if self.config.fail_on_chunk_error:
+                                    raise LLMStructuredOutputError(LLMFailureDiagnostic(
+                                        reason="empty_extraction",
+                                    ))
                             break
                         except LLMAuthenticationError:
                             invalid_evidence = True
                             raise
                         except Exception as exc:  # noqa: BLE001
+                            diagnostic = find_llm_diagnostic(exc)
+                            if diagnostic is not None and diagnostic.reason == "content_filter":
+                                invalid_evidence = True
+                                raise _structured_chunk_error(exc, {
+                                    "source_id": source["source_id"], "chunk_index": int(index),
+                                    "chunk_offset": offset, "chunk_chars": len(ch),
+                                })
                             if (
                                 structured_attempts > 1
                                 and _is_structured_failure(exc)
@@ -307,19 +381,22 @@ class Extractor:
                                 continue
                             if _is_structured_failure(exc):
                                 invalid_evidence = True
-                                # Preserve the LLMError cause so the pipeline can
-                                # apply its bounded stage retry budget to transient
-                                # malformed structured responses.
-                                raise StageError(
-                                    "extract", "模型结构化证据无效，停止抽取"
-                                ) from exc
+                                # Keep a typed safe cause; never interpolate provider text.
+                                raise _structured_chunk_error(exc, {
+                                    "source_id": source["source_id"],
+                                    "chunk_index": int(index), "chunk_offset": offset,
+                                    "chunk_chars": len(ch),
+                                })
                             return source_file, file_lines, _ChunkResult(), [], exc
                 try:
                     res = _ChunkResult.model_validate(res)
                     verified = _verified_claims(source, ch, res.claims, chunk_offset=offset)
-                except (StageError, ValidationError, TypeError, AttributeError):
+                except (StageError, ValidationError, TypeError, AttributeError) as exc:
                     invalid_evidence = True
-                    raise StageError("extract", "模型结构化证据或正文引用无效，停止抽取") from None
+                    raise _structured_chunk_error(exc, {
+                        "source_id": source["source_id"], "chunk_index": int(index),
+                        "chunk_offset": offset, "chunk_chars": len(ch),
+                    }) from None
                 if identity is not None:
                     dumped = res.model_dump(mode="json")
                     cache[key] = {"key": key, "result": dumped, "result_sha256": _digest(dumped)}

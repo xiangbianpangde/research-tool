@@ -24,19 +24,24 @@ WebUI、research ui 命令及 Gradio 安装项已移除。
 | nine_loop/evidence.py | 来源正文哈希、偏移及逐字引用核验 |
 | nine_loop/knowledge_min.py | 确定性事实/来源/主题证据图 |
 | nine_loop/merge_min.py | 有摘要前置条件的无损增量合并 |
-| nine_loop/research.py | 检视、缺口解决记录、质量门控、报告支持核验 |
+| nine_loop/research.py | 检视、缺口解决记录、按优先级与finding类型公平分配补搜查询、质量门控、报告支持核验 |
 | infrastructure/stages/collector.py、fetcher.py | 搜索与真实正文抓取 |
 | infrastructure/stages/research_strategies.py | Collect 内部的实体拆分、画像与查询策略 |
-| infrastructure/stages/cleaner.py、extractor.py | 正文清洗、去重、相关性过滤及事实抽取 |
+| infrastructure/stages/cleaner.py、extractor.py | 保留科学比较符/表格边界的清洗、去重、原文片段ID选择式抽取、严格跨度校验与块级诊断 |
+| infrastructure/llm/openai_client.py、domain/errors.py | 结构化结束状态/JSON/schema校验与安全LLMFailureDiagnostic |
 | infrastructure/ingest/、application/video_pipeline.py | PDF/视频输入适配 |
 | domain/models.py、config.py | 固定九段配置与字段校验 |
 
-正式阶段：collect、clean、extract、knowledge、inspect、targeted、merge、qgate、report。初次知识构建后先 inspect/qgate；CONTINUE 才 targeted/merge 并重检；STOP_SUCCESS 才生成报告。
+正式阶段：collect、clean、extract、knowledge、inspect、targeted、merge、qgate、report。初次知识构建后先 inspect/qgate；CONTINUE 才 targeted/merge 并重检；默认strict仅满足原缺口阈值才报告。显式reporter.evidence_policy=layered在最后补搜轮后可生成证据与局限分层报告，保留strict_verdict/finding/coverage，不把生成成功当科学问题清零。
 
 ## AI 读取的产物
 
 主题目录下，runtime-state.json 记录输入指纹、run_id、阶段提交和摘要；run-summary.json 记录本次 verdict、pipeline_complete、output_dir 及 final 文件哈希。只有成功且校验通过的当前运行可交付。
 
 阶段 envelope 位于 artifacts/<run_id>/；首次及补搜资料位于 runs/<run_id>/initial/ 和 targeted-N/；最终 report.md、sources.json、tree/ 位于 runs/<run_id>/final/。目录存在或历史报告存在不能替代当前运行成功。
+
+结构化失败诊断在 `run-summary.json` 的 `stage_metrics[].diagnostic`，同轮 `diagnostic_path` 指向 `runs/<run_id>/failure-diagnostic.json`。只含结束原因/长度哈希/token/JSON位置/schema字段及来源块/选择条目标识，不含响应正文、推理正文、headers或密钥。canonical `run-record.json` 严格字段保持不变；失败诊断sidecar不作为成功成果或医学证据。
+
+分层报告 `final/evidence-audit.json`保留selected/unselected原始claim IDs、节点内容家族覆盖、未解决finding、显式known_limitations及“不等于独立研究”的边界；与全部final文件共同受summary哈希校验。核心选材有maxItems和最多一次纠正，模型短编号映回ledger ID；邻近原文与限制仅作反向审核，不把选材遗漏解释成论文未报告。content_filter在抽取/阶段即停不重试。`run-record.json`字段不扩展，summary只附report_contract/strict_evidence_complete/unresolved_finding_count。
 
 历史来源和边界见 docs/plan/NINE-STAGE-BASELINE.json；当前进度及可复现实验从 STATUS.md 进入。

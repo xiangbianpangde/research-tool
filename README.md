@@ -33,7 +33,7 @@ scripts/         # 可复用脚本
 | 阶段 | 职责 |
 |---|---|
 | ① collect | 多源采集或摄入 Markdown/PDF；内部保留实体拆分、画像、时间线、消歧与查询扩展 |
-| ② clean | 正文降噪、近似去重、50,000 字符上限；可配置 LLM 相关性过滤 |
+| ② clean | 正文降噪、近似去重、默认50,000字符上限；保留科学比较符与表格边界，可配置LLM相关性过滤 |
 | ③ extract | 抽取事实，绑定原文、来源、正文哈希与偏移 |
 | ④ knowledge | 聚合事实、来源和主题节点，拒绝无效引用 |
 | ⑤ inspect | 检查独立来源覆盖，检视证据缺口、冲突与限制 |
@@ -42,7 +42,7 @@ scripts/         # 可复用脚本
 | ⑧ qgate | 按 high / total findings 阈值确定 CONTINUE 或 STOP_SUCCESS |
 | ⑨ report | 章节规划、正文综合、逐段模型支持核验，生成报告与知识树 |
 
-初次知识构建后先 inspect/qgate；CONTINUE 才 targeted → merge 并重新检视。无缺口时记录补搜、合并为不适用。只有 STOP_SUCCESS 才出报告；预算耗尽、取消或错误不发布成功成果。既有模型缺口只有在记录新增事实 ID 及解决理由后才可关闭，不能靠下一轮省略而消失。
+初次知识构建后先 inspect/qgate；CONTINUE 才 targeted → merge 并重新检视。补搜查询先按high/medium/low排序，在同优先级的模型缺口和覆盖缺口间交替分配有限查询槽，避免大量细主题覆盖告警挤掉实质证据问题；查询选择不会关闭或降级finding。无缺口时记录补搜、合并为不适用。默认 `reporter.evidence_policy: strict` 只有缺口满足原阈值才出报告；预算耗尽、取消或错误不发布成功成果。显式 `layered` 模式在有界补搜结束后允许生成“证据与局限分层报告”，不关闭缺口、不提高阈值，且仍须通过事实/标题/段落支持核验。既有模型缺口只有在记录新增事实 ID 及解决理由后才可关闭，不能靠下一轮省略而消失。
 
 阶段使用 Protocol v1 JSON envelope；runtime-state.json 记录输入指纹、run_id、阶段产物摘要与 CAS。`--resume` 只复用输入和已提交文件哈希均有效的缓存。损坏缓存使恢复失败；输入变化建立新运行。输入支持单个 PDF 或 PDF 目录，不能同时指定 input_dir 和 pdf_dir；指纹只包含实际摄入文件。
 
@@ -82,9 +82,48 @@ research run "你的研究主题" --output ./research-output
 
 需要额外 provider 参数时，可在 YAML 的 `llm.request_options.extra_body` 中明确配置，例如 `thinking: {type: disabled}`；仅适用于该端点实际支持的选项。该映射不能覆盖 model/messages/stream/response_format 等客户端字段，不用于存放凭据。`research config` 会递归脱敏嵌套敏感键。结构化请求仅在端点明确拒绝 response_format 功能时尝试一次提示词 JSON 兼容路径，仍校验 JSON/schema，并共享原请求超时预算；鉴权、额度、限流和超时不会触发这条兼容重试。
 
+结构化响应会检查结束状态及可见正文：`length` 截断、内容过滤、缺少 choices、空正文或仅有推理内容会明确失败，不再把空正文替成 `{}`。明确 `content_filter` 在抽取及管线层均立即终止，不作为瞬时失败重试或通过改写请求规避。合法 JSON 仍须通过 schema 和正文逐字引用检查；正式抽取块两次返回全空结果时停止，不写成功缓存。通用 schema 本身允许的空列表（如没有检视缺口）不受影响。
+
+正式抽取提示提供 `EVIDENCE_UNITS` 原文片段及带块哈希作用域的 `evidence_id`，模型返回 `claims:[{evidence_id,topic}]`，程序从原文生成事实、引文及偏移，不再要求模型重新抄写或重排PDF文本。未知ID、跨块ID和不匹配原文均拒绝，整块不写成功缓存；即使模型附加改写的text/quote，也不会进入账本。既有精确quote输入仍逐字核验，不做NFKC/空白模糊匹配。`selection_invalid`/`quote_mismatch`诊断含source/chunk及selection索引；它们是语义错误，不按瞬时网络故障盲重试。
+
+输入应是有实质正文的阅读材料。作者机构名单等纯文前块可能合法地没有事实；工具不会为通过抽取而强造事实。需要去掉文前元数据时，请在原件之外生成有裁剪标记/哈希的正文副本，保留原始来源与全部摘要、方法、结果、讨论和限制。PDF多栏应先核对阅读顺序，不可把按物理行拼接的左右列直接当事实句。
+
+HTML清洗只删除合法标签名形式的标记，保留 `<0.7`、`P < .05`、`>50` 等科学比较式，避免跨段误删。HTML表格转为有单元格分隔符和行界的文本；短表格不会因多行较短被当作导航删除。引文精确匹配只证明其匹配清洗后正文，不能替代原PDF/表格的身份、阅读顺序和医学语义核验。
+
+失败摘要的 `stage_metrics[].diagnostic` 及 `diagnostic_path` 指向的 `runs/<run_id>/failure-diagnostic.json` 保留安全诊断：`reason`、结束原因、正文长度/SHA-256、可得的 token/推理 token 数、JSON位置或声明字段路径、来源ID、块及选择条目索引。不会保存响应正文、推理正文、headers 或密钥；`run-record.json` 的严格外部字段契约不变。新运行指纹/块缓存契约会隔离修复前的阶段产物，旧运行原件保留。
+
+推理模型的输出预算可能被推理 token 耗尽，降低 temperature 不保证能限制推理。若诊断为 `truncated` 且 `reasoning_tokens` 接近 `completion_tokens`，应先核对端点文档，在单次运行配置中显式控制推理，或自行调整预算；工具不按模型名猜参数，也不自动增支出。当前 OpenCode Go 的 `deepseek-v4.1-flash` 已用同一2800字符公开原文块实测以下配置有效（其他端点不能据此推定兼容）：
+
+```yaml
+llm:
+  max_tokens: 4096
+  request_options:
+    extra_body:
+      thinking: {type: disabled}
+```
+
+将其放入不含密钥的本机 YAML，并用 `research --config /path/to/run.yaml run ...`；凭据继续由环境或本机忽略 `.env` 注入。不控制推理时同块出现4096个推理token、0正文并截断；显式关闭后一次输出13条通过逐字核验的事实。这证明单块抽取路径，不等于完整九段研究或医学结论已通过验收。
+
 同一个 ResearchPipeline 实例同时只允许一个运行。健康检查、阶段执行和重试等待共同遵守总墙钟预算。正式输出固定 Markdown，reporter.format=html 会报配置错误。
 
 full、standard、deep 执行同一九段链，collector.depth 必须至少为 2；搜索摘要和未转写的视频发现记录不能作为正文证据。brief/fast、--skip、阶段重排、关闭 extract、旧 deepen/max_backward_rounds 和 legacy/shadow 开关报错。画像策略使用 `collector.strategies`；补搜上限与时限使用 `nine_loop.max_rounds`、`nine_loop.wall_s_max`。
+
+## 证据与局限分层报告（显式选择）
+
+```yaml
+reporter:
+  evidence_policy: layered     # 默认strict；不静默修改旧合同
+  max_selected_claims: 40      # 核心综述事实数上限；全量账本仍保留
+  max_length: 45000
+  known_limitations:
+    - 缺乏患者×挑战完整分母，不能识别终身不出血或独立因果贡献。
+```
+
+`layered` 先执行现有inspect与有界targeted/merge，最后一轮可转入报告。qgate保留原 `strict_verdict`、high/total与全部finding；报告摘要额外标记 `report_contract=evidence_with_limitations/v1`、`strict_evidence_complete` 和 `unresolved_finding_count`。`STOP_SUCCESS` 在此只表示分层交付合同完成，**不表示科学缺口清零、临床模型有效或用户验收**。旧strict失败回执不会变成成功。
+
+正文先有界选择核心证据（模型可见maxItems且最多一次纠正，耗尽不可由阶段重试重开），再分配章节并核验。模型交互短编号最终映回原始不可变claim_id；正文所选事实须全部进入支持核验。未选事实ID在 `final/evidence-audit.json`逐项列出，全量事实仍在`tree/knowledge.json`。报告直接可见来源内容家族覆盖/证据强度、所有未解决finding及显式输入的既有局限；`known_limitations`不因本轮模型未提及而消失。内容家族仅识别近似转载，**不等于独立研究/队列**；单家族/多家族不是GRADE等级。医学分母、亚型/共病、重复队列和原论文错误仍需原文审核。机器生成局限附录与模型核验的医学正文分开标注。分层模式下邻近原文上下文和显式限制用于反向核对表头/范围、否定与分母，不可扩充所引事实或把限制说明当真值；限制本身也可能错误，必须回原PDF裁定，不能凭猜测解释源文矛盾。
+
+`evidence-audit.json`与报告、来源、树一并进入summary文件清单/SHA校验，canonical `run-record.json`严格字段不变。未通过schema、引用、支持或文件完整性仍失败；本模式不是关闭校验，也不把未知改成结论。
 
 ## CLI
 
