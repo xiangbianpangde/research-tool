@@ -50,7 +50,7 @@ scripts/         # 可复用脚本
 
 引用覆盖率 1.0 表示报告段落绑定了通过原文跨度校验的事实并通过模型支持检查。标题和正文均接受支持核验。模型可能判断错误；这不是语义正确性的形式化证明或调研质量评分。
 
-当前knowledge产物是可核验原文事实＋topic分桶，不是完整临床关系/因果网络。107finding（97coverage＋10模型问题）与28局限的只读审计已发现主题碎片、关系未接线和统一三源规则失配。[知识网络与问题处置设计](docs/plan/2026-10-23-finding-disposition-design.md)提出双线修正，**尚未实施新处置状态机或改变任何原问题状态**。
+当前knowledge产物是可核验原文事实＋topic分桶，不是完整临床关系/因果网络。107finding（97coverage＋10模型问题）与28局限的只读审计已发现主题碎片、关系未接线和统一三源规则失配。[知识网络与问题处置设计](docs/plan/2026-10-23-finding-disposition-design.md)提出双线修正；现有显式处置API/CLI、单HEAD审核账本与用途评估保持原观察不变，具体实现与验收状态见[实施合同](docs/plan/2026-10-23-finding-disposition-implementation.md)。
 
 真实医学回读曾发现“未选入报告的证据被误称原文未报告”。[根因与修复计划](docs/plan/2026-10-23-researchctl-grounded-report-repair.md)记录原始失败。显式`reporter.grounding_policy: source_grounded`现接入成文前已提交证据快照、ResearchCTL全量facts/完整正文反查、精确上下文入账后CAS合并/重检，以及中文原子论断的正反证检查；它仍不是任意医学语义正确或人类临床验收保证。默认model_support不宣称拥有新保证。
 
@@ -146,6 +146,20 @@ reader必须握手支持`evidence-snapshot/v1`，旧CLI/legacy不回退。全部
 任务可显式指定`reporter.required_source_evidence`（locator、精确quotes、kind=required/source_conflict），每句必须唯一绑定现有事实；缺失、重复或歧义硬拒绝。必带原句及任务方标记的冲突候选始终直接可见，不交模型裁掉；配置解释不自动成为真值。
 
 原run-record字段不变；summary列全部已提交final，ResearchCTL核验实际目录与运行envelope集合。审校单独append-only绑定run/report/evidence哈希，不改执行verdict。采用查询使用`research retrieval query --entity CURRENT --require-review agent_source_review ...`；未审/拒绝/失败当前run不能回退旧机器success。Agent审校不匹配human_clinical要求。
+
+## 问题处置（raw默认，reviewed显式）
+
+`research issues <action> --registry <path> --request <json>`复用本机CLI；`view`只读、不自动初始化，`create/import/propose/review/propose-network/review-network`使用严格JSON请求。每次写入需要actor、idempotency_key、expected_head；提案和审核分开，审核锁定proposal hash与scope/network/policy，未认证actor只标self-asserted Agent。`Registry` SDK及字段示例见[实施合同](docs/plan/2026-10-23-finding-disposition-implementation.md)。
+
+```yaml
+disposition:
+  policy: raw  # 默认旧门禁；不改变既有runtime19输入指纹
+  registry_root: null
+  expected_head_sha256: null
+# reviewed需显式指定registry_root、expected_head_sha256，且retrieval.module_root必须支持issue-evaluation/v1
+```
+
+只有显式reviewed运行消费固定HEAD；来源/跨度/运行硬失败不可豁免。`final/issue-evaluation.json`同时显示raw findings、活动必需问题、约束、科学回答及新证据计数，嵌入可核验决策链和network/policy版本；summary/manifest声明required contract；仅reviewed manifest升为v2，raw仍v1，旧reader明确拒绝新合同；报告审校绑定sidecar。canonical run-record仍仅四个主final文件；全部实际final受summary/envelope哈希保护。分类、拆分、同义归并不增加独立研究；等待数据、不明分母、同库/转引不自动resolved。135条医学迁移仅预演：分类/网络提案均未审核，原107＋28仍未决、科学增益0。
 
 ## CLI
 

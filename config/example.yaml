@@ -196,6 +196,13 @@ retrieval:
   db_path: null                 # 默认 <research-output>/.index/research.sqlite
   timeout_sec: 60
 
+# 问题处置：raw默认保留原runtime19身份；reviewed显式锁单registry HEAD
+# reviewed还要求retrieval.module_root指向支持issue-evaluation/v1的固定reader
+disposition:
+  policy: raw
+  registry_root: null
+  expected_head_sha256: null
+
 # 九段闭环边界：qgate 判定 CONTINUE 时执行 targeted → merge → inspect
 nine_loop:
   max_rounds: 2                  # 最多补搜轮数；0=仅评估初次采集，不绕过质量门控

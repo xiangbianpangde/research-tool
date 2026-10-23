@@ -1,6 +1,17 @@
 # research-tool 当前状态
 
-## 当前设计：知识网络审计与问题处置（2026-10-23）
+## 当前实施：问题处置 I1–I4（2026-10-23）
+
+用户已批准全部I1–I4实施与非main分批提交推送，当前分支tool `feat/finding-disposition-20261023`、reader `feat/disposition-reader-20261023`。生产代码包括精确135观察导入、分类/原子拆分/持续约束/HistoryLink提案审核、单HEAD/CAS/fsync/幂等与真实SIGKILL、经审核语义映射与用途评估、显式raw/reviewed九段/报告/Reader合同。实现字段及边界见[实施合同](docs/plan/2026-10-23-finding-disposition-implementation.md)。
+
+- 医学真实迁移预演：107 finding＋28局限全映射；135分类proposal、238主题成员候选均未审核。原135 required仍未决，科学回答/新证据均0，22模型parts仍为not_applied设计候选。原run173文件/report/graph/audit/review SHA不变，public CLI view回读不写账本。医学成果`runs/finding-disposition-implementation-20261023/`。
+- 回归包含同源重跑/改claim ID不算新science、真新增已摄入原句可审验、未知scope/不明分母不解决、拆分/重复/复开/拒绝和旧决策stale计数；默认raw保持runtime19旧指纹。reviewed必须显式reader能力/代码身份及HEAD锁定，来源硬失败不可豁免，canonical record保持四主final。
+- 独立Pi review实际发现并补测修复必需计数/当前证据遗漏/重放context、请求与payload绑定、过期network拒绝、重复读取SHA及pending target、完整audit导入/JSON pointer等问题；最终分范围registry/state/runtime与reader replay/projection均approve、0 findings。reader只读replay每revision state并重算活动要求，不是第二账本。
+- 实现提交真实pre-push全量 **1381 passed/3 skipped**；71项处置反例通过，后补strict+source_grounded拒绝不支持合同回归通过。Reader layout/body11项、legacy六脚本443checks通过；真实reviewed完整九段、Agent采用/human fail_closed、strict STOP_BUDGET及零模型resume报告SHA保持（reviewed-e2e-v2/receipt.json），source_grounded最新inspect100绑定也通过。Ruff、diff、uv lock离线、shell语法通过。DAUG无ledger不可用，未初始化，文档人工同步。
+
+实现批次已提交推送：tool `b1c25a58dc5e12f1c55a2d71fe1b4012a257ed79`，reader `1602bd48bcefb921b0a20fc2614fd646429c1d6e`，两feature远程SHA已核。仅reviewed manifest v2防旧reader静默误读，raw仍v1；原record/医学原件/失败历史未改，无新依赖、包版本/tag/main推送。文档与最后测试补充作为后续小提交收束；**工程验收不代表135科学问题已回答或人类临床验收**。日志与回执`research-output/finding-disposition-implementation-20261023/`。下节保留设计时状态，不覆盖本节当前实施结果。
+
+## 历史设计：知识网络审计与问题处置（2026-10-23）
 
 用户质疑107finding/28局限是否暴露网络问题，并明确先设计处置机制。已核源码和原run：当前正式graph仅是counts/facts/nodes/sources的原文账本＋topic原字符串分桶，无显式临床scope/研究队列/正反证边；974条抽取relations无精确span且未进入正式建图链，不能直接提升为可信关系。119节点47个单fact、单一归属；伦理/结论/strengths也按三内容家族评估，且出血风险/诊断准确性等实际成员含义不准。因此确有组织、关系和度量能力缺口，不是107处错误医学知识，也不只是缺论文。
 

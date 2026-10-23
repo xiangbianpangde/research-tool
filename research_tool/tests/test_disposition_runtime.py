@@ -95,6 +95,56 @@ async def test_reviewed_source_grounded_uses_latest_context_inspection(tmp_path,
 
 
 @pytest.mark.asyncio
+async def test_strict_cannot_publish_new_context_gap_after_original_finding_corrected(
+    tmp_path, external_io
+):
+    from research_tool.tests.test_grounded_pipeline_synthesis import grounded_reply
+    from research_tool.tests.test_disposition_transitions import classify_wording, decide
+
+    cfg = config(tmp_path / "origin", minimum=2)
+    cfg.nine_loop.max_rounds = 0
+    cfg.reporter = ReporterConfig(evidence_policy="layered")
+    original = await ResearchPipeline(cfg, llm=MockLLMClient(structured_response=model_reply)).run()
+    summary = json.loads(original.run_summary_path.read_text())
+    final = original.report_result.report_path.parent
+    graph = json.loads((final / "tree/knowledge.json").read_text())
+    reg = Registry.create(
+        tmp_path / "registry", registry_id="context-gate", roots={"corpus": str(original.topic_dir)}
+    )
+    reg.import_audit(
+        root_id="corpus",
+        run_id=summary["run_id"],
+        expected_audit_sha256=hashlib.sha256(
+            (final / "evidence-audit.json").read_bytes()
+        ).hexdigest(),
+        expected_head=reg.head(),
+        idempotency_key="import",
+        actor="agent",
+    )
+    issue = next(iter(reg.view()["issues"].values()))
+    ref = reg.claim_reference("corpus", summary["run_id"], graph["facts"][0]["claim_id"])
+    issue = classify_wording(reg, issue, ref)
+    decide(
+        reg,
+        issue,
+        "corrected",
+        {"rationale": "Scoped legacy wording correction only", "evidence_refs": [ref]},
+        "correct",
+    )
+    cfg.work_dir = tmp_path / "consumer"
+    cfg.disposition = DispositionConfig(
+        policy="reviewed", registry_root=reg.root, expected_head_sha256=reg.head()
+    )
+    cfg.retrieval = RetrievalConfig(module_root=module_root())
+    cfg.reporter = ReporterConfig(evidence_policy="strict", grounding_policy="source_grounded")
+    result = await ResearchPipeline(
+        cfg, llm=MockLLMClient(structured_response=grounded_reply)
+    ).run()
+    assert result.verdict != "STOP_SUCCESS"
+    assert result.report_result is None
+
+
+@pytest.mark.asyncio
 async def test_unsupported_registry_head_fails_without_current_success(tmp_path, external_io):
     cfg = config(tmp_path)
     reg = Registry.create(tmp_path / "registry", registry_id="head", roots={"root": str(tmp_path)})

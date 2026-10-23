@@ -9,6 +9,7 @@
 | research run | research_tool/presentation/cli.py | 主题、已有 Markdown、PDF 和视频输入的完整研究 |
 | research status | research_tool/presentation/cli.py | 根据 runtime 与摘要校验当前阶段及成果 |
 | research config | research_tool/presentation/cli.py | 查看脱敏 JSON 配置 |
+| research issues | infrastructure/disposition/commands.py、presentation/cli.py | 精确导入、只读投影、提案及显式审核 |
 | research wiki-stage | research_tool/infrastructure/export/wiki_stage.py | 校验并打包当前成功运行的 final |
 | research setup | research_tool/presentation/setup_deployment.py、scripts/setup_interactive.py | CLI 依赖安装、凭据配置与环境检查 |
 | Python SDK | research_tool/__init__.py | research()、ResearchPipeline.run/stream() |
@@ -30,7 +31,10 @@ WebUI、research ui 命令及 Gradio 安装项已移除。
 | infrastructure/stages/cleaner.py、extractor.py | 保留科学比较符/表格边界的清洗、去重、原文片段ID选择式抽取、严格跨度校验与块级诊断 |
 | infrastructure/llm/openai_client.py、domain/errors.py | 结构化结束状态/JSON/schema校验与安全LLMFailureDiagnostic |
 | infrastructure/retrieval/manifest.py、client.py | 运行检索清单、能力握手、成文前evidence公开CLI与审校采用查询 |
-| infrastructure/retrieval/snapshot.py、review.py | 已提交stage/全量raw-clean证据快照与run/report/evidence哈希绑定的独立审校记录 |
+| infrastructure/retrieval/snapshot.py、review.py | 已提交stage/全量raw-clean证据快照与run/report/evidence/issue版本哈希绑定的独立审校记录 |
+| infrastructure/disposition/records.py、schema.py | 严格来源/JSON pointer/已提交claim/span绑定、事件字段与回执校验 |
+| infrastructure/disposition/state.py、registry.py | 原观察/原子问题/持续约束的单HEAD事件重放、flock/CAS/fsync、幂等、提案/审核和stale重审 |
+| infrastructure/disposition/network.py、evaluation.py | 经审核语义映射、用途特定requirements、raw/reviewed并列与完整required计数 |
 | nine_loop/grounding.py、grounded_synthesis.py | 全文依赖精确入账、中文原子论断数值/单位/效应硬检查、全部来源正反证核验及逐项审计 |
 | infrastructure/ingest/、application/video_pipeline.py | PDF/视频输入适配 |
 | domain/models.py、config.py | 固定九段配置与字段校验 |
@@ -49,6 +53,6 @@ WebUI、research ui 命令及 Gradio 安装项已移除。
 
 默认model_support仍使用section_facts，不把其称为全文语义保证。显式source_grounded已接snapshot/full-source读取、现有merge/inspect/qgate内部提交、程序验证的类型/原句闭集choice选择、固定中文边界及数值原文渲染、源内E短引用核验后映回不可变ID，以及独立review；source_exact仅窄原文模式。required_source_evidence锁定必带原句及任务方冲突候选，不允许模型裁掉。生产者/消费者字段与final集合互操作由真实九段测试验证。P3真实医学终验状态从STATUS读取，不能由代码或离线绿灯推定。
 
-当前extractor的relations/triples只是候选产物，只有facts及documents进入正式knowledge链；不能把974条无span的抽取关系当已验证临床网络。[问题处置与网络设计](../plan/2026-10-23-finding-disposition-design.md)规定拟议Observation/Issue/Constraint、reviewed裁决及网络scope/队列关系，当前只设计，不是已有执行能力。
+当前extractor的relations/triples只是候选产物，只有facts及documents进入正式knowledge链；不能把974条无span的抽取关系当已验证临床网络。[问题处置与网络设计](../plan/2026-10-23-finding-disposition-design.md)为历史设计v1；[实施合同](../plan/2026-10-23-finding-disposition-implementation.md)记录实际API、单HEAD裁决、网络scope/队列映射及显式reviewed消费。原974关系仍非已审核边，不自动导入；原图与医学报告不改写。
 
 历史来源和边界见 docs/plan/NINE-STAGE-BASELINE.json；当前进度及可复现实验从 STATUS.md 进入。
