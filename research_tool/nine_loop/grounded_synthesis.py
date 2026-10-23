@@ -95,7 +95,7 @@ def render_observation(observation, graph):
         'challenge_bleeding': (r'bleed|hemorrhag|PPH',),
         'adjusted_association': (r'\badjusted\b|multivaria',),
         'unadjusted_association': (r'\bunadjusted\b|\bcrude\b|%|proportion|incidence',),
-        'null_association': (r'not associated|no significant|not signific|P\s*>\s*',),
+        'null_association': (r'not associated|no signi(?:fi|ﬁ)cant|not signi(?:fi|ﬁ)c|P\s*>\s*',),
         'subtype_limitation': (r'hypodys|dysfibrin|hypofibrin|subtype|classified',),
     }
     if code == 'source_conflict' and len(set(observation.claim_ids)) < 2:
@@ -303,7 +303,16 @@ async def synthesize_grounded_report(  # noqa: PLR0915 - bounded draft/review co
             try:
                 plan = await llm.chat_structured(prompt, ObservationPlan)
                 row['plan'] = plan.model_dump()
-                rendered = [render_observation(o, graph) for o in plan.observations]
+                rendered, plan_errors = [], []
+                for index, observation in enumerate(plan.observations):
+                    try:
+                        rendered.append(render_observation(observation, graph))
+                    except StageError as exc:
+                        plan_errors.append({'index': index, 'code': observation.code,
+                                            'reason': str(exc)})
+                if plan_errors:
+                    row['mechanical_errors'] = plan_errors
+                    raise StageError('report', 'observation plan has unsupported type bindings')
                 draft = AtomDraft(atoms=[{k: value for k, value in a.items() if k != 'code'}
                                          for a in rendered])
                 row['atoms'] = [a.model_dump() for a in draft.atoms]
@@ -392,7 +401,7 @@ async def synthesize_grounded_report(  # noqa: PLR0915 - bounded draft/review co
                            + '\n只能输出observations:[{code,claim_ids}]，不得输出text或数字。'
                            '类型不能证明时使用study_observation，不改引文、不删除原问题。'
                            + '\n上次待修正原子项：' + json.dumps(
-                               row.get('atoms', []), ensure_ascii=False,
+                               row.get('plan', row.get('atoms', [])), ensure_ascii=False,
                            ))
         else:
             raise last_error or StageError('report', 'atomic synthesis failed')

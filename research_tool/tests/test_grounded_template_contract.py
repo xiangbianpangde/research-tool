@@ -91,6 +91,14 @@ def test_affirmative_treatment_and_bleeding_types_remain_available():
             'code':code,'claim_ids':[cid]}]).observations[0],graph)['code'] == code
 
 
+def test_original_pdf_ligature_in_nonsignificance_is_recognized_without_changing_quote():
+    text='No signiﬁcant differences were identiﬁed in TEG parameters between patients with and without bleeding.'
+    graph=graph_for([text])
+    observation=ObservationPlan(observations=[{'code':'null_association','claim_ids':['c0']}]).observations[0]
+    assert render_observation(observation,graph)['code']=='null_association'
+    assert graph['facts'][0]['text']==text
+
+
 def test_source_conflict_template_never_guesses_a_subgroup():
     graph=graph_for(['Abstract: 20/35 were asymptomatic.', 'Figure: 10/35 were asymptomatic.'])
     plan=ObservationPlan(observations=[{'code':'source_conflict','claim_ids':['c0','c1']}])
