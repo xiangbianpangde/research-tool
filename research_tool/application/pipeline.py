@@ -183,6 +183,7 @@ class ResearchPipeline:
                     or 'issue-evaluation/v1' not in capabilities.get('contracts', [])):
                 raise StageError('collect', 'ResearchCTL issue-evaluation/v1 capability required')
             config['issue_reader'] = self._issue_reader_identity
+            config['reviewed_report_semantics_contract'] = 3
             cfg = self.config.disposition
             self._issue_snapshot = Registry(cfg.registry_root).snapshot(
                 expected_head=cfg.expected_head_sha256, require_fresh=True,
@@ -226,6 +227,13 @@ class ResearchPipeline:
             async for event in self._step(key, action):
                 yield event
         graph = self._payload("knowledge")["graph"]
+        if self.config.disposition.policy == 'reviewed':
+            from ..infrastructure.disposition.reporting import reviewed_dependencies
+            delta = reviewed_dependencies(self._issue_snapshot, graph)
+            if delta['facts']:
+                async for event in self._step('merge:99', lambda: self._merge(graph, delta)):
+                    yield event
+                graph = self._payload('merge:99')['graph']
         previous = None
         new_claim_ids: set[str] = set()
         for round_no in range(self.config.nine_loop.max_rounds + 1):
@@ -553,7 +561,7 @@ class ResearchPipeline:
         return evaluate_registry(cfg.registry_root, cfg.expected_head_sha256, inspection, graph,
                                  known_limitations=self.config.reporter.known_limitations)
 
-    async def _report(
+    async def _report(  # noqa: PLR0915 - atomic report/evidence publication boundary
         self, graph: dict[str, Any], inspection: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         bundle = None
@@ -563,6 +571,19 @@ class ResearchPipeline:
                 graph, bundle, snapshot = await self._ground_evidence(graph, inspection)
             finally:
                 self._active = "report"
+        issue_view = None
+        if self.config.disposition.policy == 'reviewed':
+            from ..infrastructure.disposition import Registry
+            from ..infrastructure.disposition.reporting import report_semantics
+            cfg = self.config.disposition
+            state = Registry(cfg.registry_root).snapshot(expected_head=cfg.expected_head_sha256)
+            semantics = report_semantics(state, graph)
+            if semantics is not None and bundle is None:
+                raise StageError('report',
+                                 'reviewed network requires source-grounded report contract')
+            if bundle is not None:
+                bundle['reviewed_semantics'] = semantics
+            issue_view = self._evaluate_issues(graph, inspection)
         report = await assemble_report(
             graph, self._get_llm(), self.topic, self.config.reporter.max_length,
             style=self.config.reporter.style, evidence_policy=self.config.reporter.evidence_policy,
@@ -575,7 +596,6 @@ class ResearchPipeline:
             ),
         )
         if self.config.disposition.policy == 'reviewed':
-            issue_view = self._evaluate_issues(graph, inspection)
             issue_text = ('\n## 问题处置（显式reviewed合同）\n\n'
                           '原始finding/局限保持不变，处置完成不等于科学问题解决。\n\n'
                           f"活动必需问题：{issue_view['required_unresolved_total']}；"

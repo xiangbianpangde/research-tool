@@ -339,6 +339,11 @@ async def synthesize_grounded_report(  # noqa: PLR0915 - bounded draft/review co
         choices = build_observation_choices(candidates, graph)
         choice_map = {c['choice_id']: c for c in choices}
         complete_source = [b for b in bundle['source_blocks'] if b['source_id'] == sid]
+        from ..infrastructure.disposition.reporting import source_semantics, prompt_semantics
+        semantic_scope = source_semantics(bundle.get('reviewed_semantics'), sid, facts)
+        projected_scope = prompt_semantics(semantic_scope, to_short, facts)
+        semantic_prompt = ('\nREVIEWED_SEMANTICS:' + json.dumps(projected_scope, ensure_ascii=False)
+                           if semantic_scope is not None else '')
         prompt = (
             '为本研究选择最多6个关键观察，只返回choice_ids，必须来自CHOICES。'
             '不得另配code/claim_ids，不生成text或新事实。'
@@ -354,6 +359,7 @@ async def synthesize_grounded_report(  # noqa: PLR0915 - bounded draft/review co
             '\n主题：' + topic + '\nLIMITATIONS:'
             + json.dumps(audit['known_limitations'], ensure_ascii=False)
             + '\nFACTS:' + json.dumps(compact, ensure_ascii=False)
+            + semantic_prompt
             + '\nCHOICES:' + json.dumps(
                 [{'choice_id': c['choice_id'], 'code': c['code'],
                   'claim_ids': [to_short[cid] for cid in c['claim_ids']]} for c in choices],
@@ -419,8 +425,17 @@ async def synthesize_grounded_report(  # noqa: PLR0915 - bounded draft/review co
                     '治疗条件/来源冲突。不能仅相信writer的引用；原文未支持或存在反证则'
                     'contradicted/insufficient。返回每项index、status、supporting_ids、'
                     'counterevidence_ids、reason。source_conflict只有如实并列原值才可接受。'
-                    '\nATOMS:' + json.dumps(
-                        [{**a.model_dump(), 'claim_ids': [to_short[cid] for cid in a.claim_ids]}
+                    '每个ATOMS独立按primary_evidence核验，不得把另一原子或子组scope套到它；'
+                    'REVIEWED_SEMANTICS仅按相同claim_id关联，不是全文统一分母或唯一允许范围。'
+                    '同文全组与子组可分别描述，不能仅因分母不同判矛盾；'
+                    'study_observation可描述治疗/方法等研究观察，不强制含出血结局或风险分母。'
+                    '模板只限制外推，未声称任何未写的具体人数/治疗/时点；实际数值来自primary_evidence。'
+                    + semantic_prompt
+                    + '\nATOMS:' + json.dumps(
+                        [{**a.model_dump(), 'claim_ids': [to_short[cid] for cid in a.claim_ids],
+                          'primary_evidence': [
+                              {'claim_id': to_short[cid], 'text': facts[cid]['text']}
+                              for cid in a.claim_ids]}
                          for a in draft.atoms], ensure_ascii=False,
                     )
                     + '\nCOMPLETE_SOURCE_DEPENDENCIES:' + json.dumps(compact, ensure_ascii=False)
@@ -525,6 +540,13 @@ async def synthesize_grounded_report(  # noqa: PLR0915 - bounded draft/review co
                                'citations': fact['citations']})
     for sid, source in sorted(sources.items()):
         lines.extend(['## 原始研究：' + source.get('title', sid), ''])
+        if bundle.get('reviewed_semantics') is not None:
+            from ..infrastructure.disposition.reporting import render_source_semantics
+            semantic_lines, semantic_claims = render_source_semantics(
+                bundle['reviewed_semantics'], sid, facts, indices,
+            )
+            lines.extend(semantic_lines)
+            claims.extend(semantic_claims)
         for atom in atoms:
             if facts[atom.claim_ids[0]]['citations'][0]['source_id'] != sid:
                 continue
