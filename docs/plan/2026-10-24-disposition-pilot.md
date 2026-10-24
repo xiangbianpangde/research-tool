@@ -52,4 +52,12 @@
 - 必要现有回归、文档链接/差异及Pi现有review通过；代码修复若需要则相关红绿/全量/双仓合同通过。
 - 分支`feat/disposition-pilot-20261024`，小批次Conventional Commits并推送，不绕hooks、不推main；医学私有运行材料不提交Git。
 
-本文件为执行前方案。执行结果另写授权医学目录及STATUS，不预写“已通过”或承诺关单数量。
+以上为执行前方案，下面按实际结果追加，不反写原观察或旧报告。
+
+## 6. 实际执行结果（2026-10-24）
+
+- 方案review approve0、提交2212b16/非main推送。医学独立Agent审核v1/v2 request_changes，修正方法角色、子组分母与Shapiro补充scope后v3 approve；具体拒绝证据留医学目录。
+- 唯一registry追加49事件，固定HEAD `6a1bba0691bef71841c3ee02461024fb185aa7e2104eb8a2363ae440f242f88a`：24精确claim、24映射、14用途组、9边。不是974无span关系的自动升级。
+- 原观察135/原finding107/原局限28保持；140原子Issue、134 required/high99未决，4 corrected＋2 decomposed仅行政，科学回答/新证据0；其余129逐字段原pending不变。gap005未因PRO反例全关，Shapiro冲突未解。
+- 新对照raw/reviewed gate均CONTINUE，不是新自动报告成功。独立Reader全链/真实公开evidence与CLI、固定HEAD0模型两次重建/幂等无新增事件、四个拒绝反例通过。原173文件/report/graph/audit/review hash不变，旧Agent采用和human fail_closed保持。
+- 本批未修改生产代码或reader；现有72项disposition回归通过。医学结果见`runs/disposition-pilot-20261024/首批裁决与对照结果.md`及verification.json；工具证据`research-output/disposition-pilot-20261024/`。独立执行复核approve/findings[]，固定HEAD验证脚本重复运行通过；交付文档Pi review approve0，版本回执从STATUS及本批acceptance进入。

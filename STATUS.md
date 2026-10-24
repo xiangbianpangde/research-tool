@@ -1,6 +1,18 @@
 # research-tool 当前状态
 
-## 当前实施：问题处置 I1–I4（2026-10-23）
+## 当前应用：首批真实网络修复与裁决（2026-10-24）
+
+用户授权“设计方案＋执行”，按[首批方案](docs/plan/2026-10-24-disposition-pilot.md)处理6条原观察：伦理/设计规则误配、病例构成风险标签、两条复合模型finding、Shapiro人数冲突。仍用冻结10全文、2070facts；不新补搜、不重生成整篇自动报告、不改旧final，也不把全部135提案批量批准。
+
+- 方案独立Pi review approve0，提交`2212b16`并已推送`feat/disposition-pilot-20261024`；真实pre-push1382 passed/3 skipped。没有修改生产代码/reader；本批复用机制72项相关回归通过。
+- 真实原文独立审核v1/v2均request_changes：先后发现Casini方法误标结果、PRO5女性10孕子组套全组分母、两个新增Shapiro范围沿用冲突scope。逐项修正后v3 approve/findings[]，24精确claim及上下文/span/hash程序核验通过，拒绝版本保留。
+- 唯一registry追加49真实事件，先审核网络再裁决。固定HEAD `6a1bba0691bef71841c3ee02461024fb185aa7e2104eb8a2363ae440f242f88a`；24claim/24映射/14用途组/9边。PRO同库/转引/包含/冲突显式，独立cohort数仍null，科学充分不自动推断。
+- 原135观察不变，拆分后140原子Issue；4 corrected＋2 decomposed仅行政处置，134 required/high99仍未决。原finding107/原局限28完整；reviewed仍未纠正的原finding104。gap002仅报告分列子句纠正，异质性/手术独立贡献仍partial/awaiting_data；gap005两child均未关闭；Shapiro10/15/20冲突awaiting_material。其余129issue逐字段不变、仍pending。科学已回答/新证据均0。
+- 新对照raw/reviewed gate均CONTINUE，不制造新九段STOP_SUCCESS。独立Reader全链重放、公开evidence/CLI只读回读、0模型固定HEAD两次重建hash一致及幂等retry无事件通过；错HEAD/计数清零/关闭依据从当前图移除/awaiting_data假resolved四反例均拒绝。旧run173文件及report SHA1952b474...不变，Agent采用保持、人类fail_closed。
+
+医学成果`/Users/xbpd/Projects/纤维蛋白预测/runs/disposition-pilot-20261024/README.md`；证据`research-output/disposition-pilot-20261024/`。独立执行复核approve/findings[]，固定HEAD验证脚本重复运行通过；方案与交付文档Pi review均approve0。**本批设计＋真实处置＋对照验收完成，不是临床科学验收**。本节为当前应用状态；下节及旧预演回执固定其历史HEAD，不能覆盖本批当前registry。
+
+## 已验收实现：问题处置 I1–I4（2026-10-23）
 
 用户已批准全部I1–I4实施与非main分批提交推送，当前分支tool `feat/finding-disposition-20261023`、reader `feat/disposition-reader-20261023`。生产代码包括精确135观察导入、分类/原子拆分/持续约束/HistoryLink提案审核、单HEAD/CAS/fsync/幂等与真实SIGKILL、经审核语义映射与用途评估、显式raw/reviewed九段/报告/Reader合同。实现字段及边界见[实施合同](docs/plan/2026-10-23-finding-disposition-implementation.md)。
 

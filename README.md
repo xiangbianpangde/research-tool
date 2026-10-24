@@ -159,7 +159,7 @@ disposition:
 # reviewed需显式指定registry_root、expected_head_sha256，且retrieval.module_root必须支持issue-evaluation/v1
 ```
 
-只有显式reviewed运行消费固定HEAD；来源/跨度/运行硬失败不可豁免。`final/issue-evaluation.json`同时显示raw findings、活动必需问题、约束、科学回答及新证据计数，嵌入可核验决策链和network/policy版本；summary/manifest声明required contract；仅reviewed manifest升为v2，raw仍v1，旧reader明确拒绝新合同；报告审校绑定sidecar。canonical run-record仍仅四个主final文件；全部实际final受summary/envelope哈希保护。分类、拆分、同义归并不增加独立研究；等待数据、不明分母、同库/转引不自动resolved。135条医学迁移仅预演：分类/网络提案均未审核，原107＋28仍未决、科学增益0。
+只有显式reviewed运行消费固定HEAD；来源/跨度/运行硬失败不可豁免。`final/issue-evaluation.json`同时显示raw findings、活动必需问题、约束、科学回答及新证据计数，嵌入可核验决策链和network/policy版本；summary/manifest声明required contract；仅reviewed manifest升为v2，raw仍v1，旧reader明确拒绝新合同；报告审校绑定sidecar。canonical run-record仍仅四个主final文件；全部实际final受summary/envelope哈希保护。分类、拆分、同义归并不增加独立研究；等待数据、不明分母、同库/转引不自动resolved。135条医学迁移的历史预演未审核；随后[首批真实应用](docs/plan/2026-10-24-disposition-pilot.md)只处理6条代表原观察，原107＋28仍逐项保留，4项表示/报告任务纠正、2父项拆分后140原子问题中134必需未决，科学回答/新增证据仍0。其余129条保持未审核提案，不批量关单。
 
 ## CLI
 
