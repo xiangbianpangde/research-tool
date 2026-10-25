@@ -183,7 +183,7 @@ class ResearchPipeline:
                     or 'issue-evaluation/v1' not in capabilities.get('contracts', [])):
                 raise StageError('collect', 'ResearchCTL issue-evaluation/v1 capability required')
             config['issue_reader'] = self._issue_reader_identity
-            config['reviewed_report_semantics_contract'] = 3
+            config['reviewed_report_semantics_contract'] = 4
             cfg = self.config.disposition
             self._issue_snapshot = Registry(cfg.registry_root).snapshot(
                 expected_head=cfg.expected_head_sha256, require_fresh=True,

@@ -153,12 +153,28 @@ def render_source_semantics(packet, source_id, facts, indices):
         "",
     ]
     claims = []
+    # Navigation may map a literal to several reviewed issues. Display each
+    # immutable literal once per source rather than making duplicate citations
+    # look like independent evidence; retain every scope in the pinned packet.
+    shown = set()
     for assignment in selected["assignments"]:
+        if assignment["claim_id"] in shown:
+            continue
+        shown.add(assignment["claim_id"])
         fact = facts[assignment["claim_id"]]
         refs = " ".join(f"[{indices[c['source_id']]}]" for c in fact["citations"])
+        aliases = [a for a in selected["assignments"] if a["claim_id"] == assignment["claim_id"]]
         lines.extend(
             ["**" + safe(assignment["concept_id"]) + "** · " + safe(assignment["role"]), ""]
         )
+        if len(aliases) > 1:
+            lines.extend(
+                [
+                    f"同一原句关联{len(aliases)}项审核用途，仅展示首项；其余scope在固定审计中，"
+                    "不能计作多份独立证据。",
+                    "",
+                ]
+            )
         labels = {
             "population": "人群",
             "challenge": "挑战/索引事件",
@@ -172,6 +188,20 @@ def render_source_semantics(packet, source_id, facts, indices):
         lines.extend(
             "- " + label + "：" + safe(assignment["scope"][key]) for key, label in labels.items()
         )
+        for alternate in aliases[1:]:
+            lines.extend(
+                [
+                    "- 另一已审用途："
+                    + safe(alternate["concept_id"])
+                    + " · "
+                    + safe(alternate["role"]),
+                    "  - 范围："
+                    + "；".join(
+                        label + "：" + safe(alternate["scope"][key])
+                        for key, label in labels.items()
+                    ),
+                ]
+            )
         group = next(
             g
             for g in packet["assessment"]["groups"]

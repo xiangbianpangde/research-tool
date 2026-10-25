@@ -170,6 +170,22 @@ def resolve_required_evidence(graph, specs):
     return resolved
 
 
+def overlapping_source_conflicts(claim_ids, facts, required):
+    """A full paragraph quote inherits a registered conflict in any exact subspan."""
+    result = []
+    citations = [c for cid in claim_ids for c in facts[cid]['citations']]
+    for item in required:
+        if item['kind'] != 'source_conflict':
+            continue
+        conflicts = [c for cid in item['claim_ids'] for c in facts[cid]['citations']]
+        if any(a['source_id'] == b['source_id']
+               and a['content_sha256'] == b['content_sha256']
+               and a['start_offset'] < b['end_offset'] and b['start_offset'] < a['end_offset']
+               for a in citations for b in conflicts):
+            result.append(item['claim_ids'])
+    return result
+
+
 class ObservationChoice(BaseModel):
     model_config = {'extra': 'forbid'}
     choice_ids: list[str] = Field(min_length=1, max_length=6)
@@ -430,12 +446,18 @@ async def synthesize_grounded_report(  # noqa: PLR0915 - bounded draft/review co
                     '同文全组与子组可分别描述，不能仅因分母不同判矛盾；'
                     'study_observation可描述治疗/方法等研究观察，不强制含出血结局或风险分母。'
                     '模板只限制外推，未声称任何未写的具体人数/治疗/时点；实际数值来自primary_evidence。'
+                    '已登记来源冲突的原句只能如实并列，不能当无争议数值；'
+                    'registered_conflict_ids显示与所引跨度重叠的全部冲突证据。'
                     + semantic_prompt
                     + '\nATOMS:' + json.dumps(
                         [{**a.model_dump(), 'claim_ids': [to_short[cid] for cid in a.claim_ids],
                           'primary_evidence': [
                               {'claim_id': to_short[cid], 'text': facts[cid]['text']}
-                              for cid in a.claim_ids]}
+                              for cid in a.claim_ids],
+                          'registered_conflict_ids': [
+                              [to_short.get(cid, cid) for cid in group]
+                              for group in overlapping_source_conflicts(
+                                  a.claim_ids, facts, bundle.get('required_evidence', []))]}
                          for a in draft.atoms], ensure_ascii=False,
                     )
                     + '\nCOMPLETE_SOURCE_DEPENDENCIES:' + json.dumps(compact, ensure_ascii=False)
@@ -550,6 +572,19 @@ async def synthesize_grounded_report(  # noqa: PLR0915 - bounded draft/review co
         for atom in atoms:
             if facts[atom.claim_ids[0]]['citations'][0]['source_id'] != sid:
                 continue
+            conflict_groups = overlapping_source_conflicts(
+                atom.claim_ids, facts, bundle.get('required_evidence', []),
+            )
+            if conflict_groups:
+                lines.extend(['**同一来源的已登记冲突：本观察不可作为无争议数值或风险。**', ''])
+                for group in conflict_groups:
+                    for cid in group:
+                        conflict_fact = facts[cid]
+                        conflict_refs = ' '.join(
+                            f'[{indices[c["source_id"]]}]' for c in conflict_fact['citations'])
+                        lines.extend([conflict_fact['text'] + ' ' + conflict_refs, ''])
+                        claims.append({'text': conflict_fact['text'], 'claim_ids': [cid],
+                                       'citations': conflict_fact['citations']})
             citations = [c for cid in atom.claim_ids for c in facts[cid]['citations']]
             refs = ' '.join(f'[{i}]' for i in sorted({indices[c['source_id']] for c in citations}))
             lines.extend([atom.text + ' ' + refs, ''])

@@ -83,7 +83,7 @@ def issue_for(registry_id, observation):
 
 def validate_disposition(state, issue, operation, payload):  # noqa: PLR0915 - transition boundary
     require(
-        operation in RESOLUTIONS | {"assess", "reopen", "classify", "link_history"},
+        operation in RESOLUTIONS | {"assess", "reopen", "classify", "link_history", "revalidate"},
         "unknown disposition operation",
     )
     require(isinstance(payload, dict), "invalid disposition payload")
@@ -104,6 +104,7 @@ def validate_disposition(state, issue, operation, payload):  # noqa: PLR0915 - t
         "reopen": set(),
         "classify": {"kind", "scope"},
         "link_history": {"relation", "target_ref"},
+        "revalidate": {"prior_decision_sha256"},
     }
     require(
         isinstance(payload, dict) and set(payload) <= common | extras[operation],
@@ -121,6 +122,18 @@ def validate_disposition(state, issue, operation, payload):  # noqa: PLR0915 - t
     require(
         not novel or answered, "new scientific evidence is not inferred from administrative closure"
     )
+    if operation == "revalidate":
+        prior = issue.get("last_decision")
+        require(
+            prior is not None and payload.get("prior_decision_sha256") == digest(prior),
+            "revalidation prior decision mismatch",
+        )
+        original = state["proposals"][prior["proposal_id"]]
+        require(
+            refs == original["payload"].get("evidence_refs", []),
+            "revalidation cannot replace original evidence",
+        )
+        require(not answered and not novel, "revalidation cannot add scientific answers")
     if operation == "link_history":
         require(
             payload.get("relation") in {"related_to", "superseded_for_use"},
@@ -299,6 +312,8 @@ def validate_disposition(state, issue, operation, payload):  # noqa: PLR0915 - t
         require(refs, "scope/constraint decision needs exact original evidence")
     if operation == "reopen":
         require(issue["lifecycle"] == "closed", "only closed issues can reopen")
+    elif operation == "revalidate":
+        require(issue["lifecycle"] != "pending_review", "pending issue cannot revalidate")
     else:
         require(issue["lifecycle"] != "closed", "closed issues must be explicitly reopened first")
     # Inbound requirements must retain a terminal canonical issue, but that issue
@@ -387,7 +402,9 @@ def apply_event(state, event):  # noqa: PLR0915 - single deterministic replay co
             )
             op, payload = proposal["operation"], proposal["payload"]
             validate_disposition(state, issue, op, payload)
-            if op == "classify":
+            if op == "revalidate":
+                issue["last_revalidation"] = data
+            elif op == "classify":
                 issue["kind"] = payload["kind"]
                 issue["scope"] = payload["scope"]
                 issue["lifecycle"] = "working"
@@ -463,9 +480,11 @@ def apply_event(state, event):  # noqa: PLR0915 - single deterministic replay co
                         "evidence_refs": payload["evidence_refs"],
                         "applicability": "active",
                     }
-            if op != "link_history":
+            if op not in {"link_history", "revalidate"}:
                 issue["last_decision"] = data
-                # Only disposition reviews renew validity; metadata never does.
+            if op != "link_history":
+                # Explicit same-decision revalidation may renew applicability,
+                # but never replaces the original disposition/evidence.
                 issue["decision_scope_sha256"] = digest(issue["scope"])
                 issue["decision_network_sha256"] = digest(state["network"])
                 issue["decision_policy_sha256"] = digest(state["policy"])
