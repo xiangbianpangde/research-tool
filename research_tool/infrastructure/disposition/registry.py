@@ -51,6 +51,7 @@ class Registry:
     def __init__(self, root):
         self.root = Path(os.path.abspath(root))
         self._fault = None  # deterministic transaction failpoint used by subprocess verification
+        self._verified_replay = None  # process-local acceleration; all chain bytes still rehashed
 
     @classmethod
     def create(cls, root, *, registry_id, roots):
@@ -101,6 +102,7 @@ class Registry:
         head = self.head()
         require(head is not None, "registry has not been initialized")
         chain, seen, pin = [], set(), head
+        cached = self._verified_replay
         while pin is not None:
             require(pin not in seen and re.fullmatch(r"[0-9a-f]{64}", pin), "broken revision chain")
             seen.add(pin)
@@ -113,11 +115,19 @@ class Registry:
                 and value.get("schema") == "issue-revision/v1",
                 "revision hash or schema mismatch",
             )
-            chain.append(value)
+            chain.append((pin, value))
             pin = value["previous"]
-        state, events = None, []
-        seen_event_ids, seen_keys = set(), set()
-        for value in reversed(chain):
+        if cached is not None and cached["head"] in seen:
+            prefix_end = next(i for i, (pin, _) in enumerate(chain) if pin == cached["head"])
+            state = cached["state"]
+            events = list(cached["events"])
+            pending = list(reversed(chain[:prefix_end]))
+        else:
+            state, events = None, []
+            pending = list(reversed(chain))
+        seen_event_ids = {e["event_id"] for e in events}
+        seen_keys = {e["idempotency_key"] for e in events}
+        for _, value in pending:
             event = value["event"]
             validate_event(event)
             require(
@@ -132,7 +142,10 @@ class Registry:
             require(digest(state) == value["state_sha256"], "replayed state digest mismatch")
             events.append(event)
         require(self.head() == head, "registry changed during read")
-        return head, state, events
+        self._verified_replay = {"head": head, "state": state, "events": tuple(events)}
+        # Internal callers sometimes inspect the returned state. Do not let them
+        # mutate the verified cache used by a later CAS/retry.
+        return head, copy.deepcopy(state), copy.deepcopy(events)
 
     def _validate_origins(self, state):
         cache, stale = {}, []

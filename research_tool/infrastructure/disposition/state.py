@@ -358,7 +358,21 @@ def apply_event(state, event):  # noqa: PLR0915 - single deterministic replay co
             "network": None,
             "policy": None,
         }
-    state = copy.deepcopy(state)
+    # Revision payloads and network maps are immutable. Copy only mutable state
+    # affected by this transition; replay must not recopy a multi-megabyte map.
+    state = {
+        **state,
+        "observations": dict(state["observations"]),
+        "issues": {
+            iid: {**issue, "children": list(issue["children"]), "links": list(issue["links"])}
+            for iid, issue in state["issues"].items()
+        },
+        "constraints": {cid: dict(value) for cid, value in state["constraints"].items()},
+        "proposals": dict(state["proposals"]),
+        "network_proposals": dict(state["network_proposals"]),
+        "history": list(state["history"]),
+        **({"history_links": dict(state["history_links"])} if "history_links" in state else {}),
+    }
     if kind == "import":
         for observation in data["observations"]:
             oid = observation["occurrence_id"]
